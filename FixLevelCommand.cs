@@ -1,18 +1,17 @@
 // FixLevelCommand.cs — ME-Tools | Fix Level
-// Setzt Bauteillistenebene aller sichtbaren Elemente auf die Ebene der aktiven Ansicht
 // Mayer E-Concept SRL
 using Autodesk.Revit.Attributes;
 using Autodesk.Revit.DB;
 using Autodesk.Revit.UI;
 using System.Collections.Generic;
 using System.Linq;
+using METools.Licensing;
 
 namespace METools
 {
     [Transaction(TransactionMode.Manual)]
     public class FixLevelCommand : IExternalCommand
     {
-        // Electrical categories to fix
         private static readonly BuiltInCategory[] _cats =
         {
             BuiltInCategory.OST_ElectricalEquipment,
@@ -30,22 +29,24 @@ namespace METools
 
         public Result Execute(ExternalCommandData commandData, ref string message, ElementSet elements)
         {
+            // ── License check ────────────────────────────────────────────────
+            if (!LicenseCheck.Verify(commandData.Application.MainWindowHandle))
+                return Result.Cancelled;
+
             var uidoc = commandData.Application.ActiveUIDocument;
             var doc   = uidoc.Document;
             var view  = uidoc.ActiveView;
 
-            // Get current view level
             Level viewLevel = null;
             try { if (view is ViewPlan vp) viewLevel = vp.GenLevel; } catch { }
 
             if (viewLevel == null)
             {
                 TaskDialog.Show("ME-Tools – Fix Level",
-                    "Aktive Ansicht hat keine zugeordnete Ebene.\nBitte eine Grundriss-Ansicht öffnen.");
+                    "Active view has no level assigned.\nPlease open a floor plan view.");
                 return Result.Cancelled;
             }
 
-            // Collect all electrical family instances visible in this view
             var allElements = new List<Element>();
             foreach (var cat in _cats)
             {
@@ -63,7 +64,7 @@ namespace METools
             if (!allElements.Any())
             {
                 TaskDialog.Show("ME-Tools – Fix Level",
-                    $"Keine elektrischen Elemente in Ansicht '{view.Name}' gefunden.");
+                    $"No electrical elements found in view '{view.Name}'.");
                 return Result.Cancelled;
             }
 
@@ -93,7 +94,7 @@ namespace METools
             }
 
             TaskDialog.Show("ME-Tools – Fix Level",
-                $"✓ Ebene '{viewLevel.Name}' zugewiesen\n{fixedCount} von {allElements.Count} Elementen aktualisiert.");
+                $"✓ Level '{viewLevel.Name}' assigned\n{fixedCount} of {allElements.Count} elements updated.");
 
             return Result.Succeeded;
         }

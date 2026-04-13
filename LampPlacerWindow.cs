@@ -304,7 +304,7 @@ namespace METools.LampPlacer
             UpdateToggle(_btn90,   r==RotationMode.Deg90);
         }
 
-        void UpdateToggle(Button b, bool active)
+        new void UpdateToggle(Button b, bool active)
         {
             if (b == null) return;
             b.Background  = active ? MeToolsTheme.BrActiveBg  : MeToolsTheme.BrSurface;

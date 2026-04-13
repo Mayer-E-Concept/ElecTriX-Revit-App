@@ -5,6 +5,7 @@ using Autodesk.Revit.DB;
 using Autodesk.Revit.UI;
 using System.Collections.Generic;
 using System.Linq;
+using METools.Licensing;
 
 namespace METools.LampPlacer
 {
@@ -15,23 +16,17 @@ namespace METools.LampPlacer
 
         public Result Execute(ExternalCommandData commandData, ref string message, ElementSet elements)
         {
+            // ── License check ────────────────────────────────────────────────
+            if (!LicenseCheck.Verify(commandData.Application.MainWindowHandle))
+                return Result.Cancelled;
+
             var uidoc = commandData.Application.ActiveUIDocument;
             var doc   = uidoc.Document;
 
             if (_window != null && _window.IsVisible)
             { _window.Activate(); _window.Focus(); return Result.Succeeded; }
 
-            // Load lighting families
             var families = LoadLightingFamilies(doc);
-
-            // Get active view level as default
-            ElementId defaultLevelId = ElementId.InvalidElementId;
-            try
-            {
-                if (uidoc.ActiveView is ViewPlan vp)
-                    defaultLevelId = vp.GenLevel?.Id ?? ElementId.InvalidElementId;
-            }
-            catch { }
 
             var handler  = new LampPlacerHandler();
             var extEvent = ExternalEvent.Create(handler);

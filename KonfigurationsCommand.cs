@@ -1,7 +1,10 @@
+// KonfigurationsCommand.cs — ME-Tools | Circuit Configuration
+// Mayer E-Concept SRL
 using System;
 using Autodesk.Revit.Attributes;
 using Autodesk.Revit.DB;
 using Autodesk.Revit.UI;
+using METools.Licensing;
 
 namespace METools.FamilyPlacer
 {
@@ -11,6 +14,10 @@ namespace METools.FamilyPlacer
     {
         public Result Execute(ExternalCommandData commandData, ref string message, ElementSet elements)
         {
+            // ── License check ────────────────────────────────────────────────
+            if (!LicenseCheck.Verify(commandData.Application.MainWindowHandle))
+                return Result.Cancelled;
+
             try
             {
                 var doc    = commandData.Application.ActiveUIDocument.Document;
@@ -19,7 +26,7 @@ namespace METools.FamilyPlacer
 
                 if (result == true && fenster.GespeichertErfolgreich)
                 {
-                    TaskDialog.Show("ME-Tools", "Konfiguration gespeichert.\n\nJetzt Modul 2 (Stromkreise erstellen) ausführen.");
+                    TaskDialog.Show("ME-Tools", "Configuration saved.\n\nNow run Module 2 (Create Circuits).");
                     return Result.Succeeded;
                 }
                 return Result.Cancelled;

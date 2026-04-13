@@ -2,18 +2,12 @@
 
   <!--
     ME-Tools für Autodesk Revit — Mayer E-Concept SRL
-    Supports Revit 2024 (.NET 4.8) and Revit 2025/2026 (.NET 8.0)
-
-    Build configurations:
-      Release2024  → net4.8  → deployed to Revit 2024 folder
-      Release2025  → net8.0  → deployed to Revit 2025 folder
-      Release2026  → net8.0  → deployed to Revit 2026 folder
-      Debug        → net8.0  → deployed to Revit 2025 folder (development)
+    Standard Debug/Release configurations — no custom configs needed.
+    Both deploy to Revit 2025. Change HintPath for 2026 when needed.
   -->
 
   <PropertyGroup>
-    <!-- Multi-target: net48 for Revit 2024, net8.0-windows for 2025/2026 -->
-    <TargetFrameworks>net48;net8.0-windows</TargetFrameworks>
+    <TargetFramework>net8.0-windows</TargetFramework>
     <UseWPF>true</UseWPF>
     <AssemblyName>METools</AssemblyName>
     <RootNamespace>METools</RootNamespace>
@@ -26,45 +20,10 @@
     <Product>ME-Tools for Autodesk Revit</Product>
     <Copyright>© 2025 Mayer E-Concept SRL</Copyright>
     <Version>1.0.0</Version>
-    <Configurations>Debug;Release2024;Release2025;Release2026</Configurations>
   </PropertyGroup>
 
-  <!-- net4.8 (Revit 2024): needs explicit WPF references -->
-  <PropertyGroup Condition="'$(TargetFramework)' == 'net48'">
-    <DefineConstants>REVIT2024</DefineConstants>
-  </PropertyGroup>
-
-  <!-- net8.0-windows (Revit 2025 / 2026) -->
-  <PropertyGroup Condition="'$(TargetFramework)' == 'net8.0-windows'">
-    <DefineConstants>REVIT2025</DefineConstants>
-  </PropertyGroup>
-
-  <!-- Revit 2026: override constant when building Release2026 config -->
-  <PropertyGroup Condition="'$(Configuration)' == 'Release2026'">
-    <DefineConstants>REVIT2026</DefineConstants>
-  </PropertyGroup>
-
-  <!-- ── Revit API References ───────────────────────────────────────────── -->
-
-  <!-- Revit 2024 API (.NET 4.8) -->
-  <ItemGroup Condition="'$(TargetFramework)' == 'net48'">
-    <Reference Include="RevitAPI">
-      <HintPath>C:\Program Files\Autodesk\Revit 2024\RevitAPI.dll</HintPath>
-      <Private>False</Private>
-    </Reference>
-    <Reference Include="RevitAPIUI">
-      <HintPath>C:\Program Files\Autodesk\Revit 2024\RevitAPIUI.dll</HintPath>
-      <Private>False</Private>
-    </Reference>
-    <!-- WPF for .NET 4.8 (comes with Windows SDK) -->
-    <Reference Include="PresentationCore" />
-    <Reference Include="PresentationFramework" />
-    <Reference Include="WindowsBase" />
-    <Reference Include="System.Xaml" />
-  </ItemGroup>
-
-  <!-- Revit 2025 API (.NET 8.0) — default for Debug + Release2025 -->
-  <ItemGroup Condition="'$(TargetFramework)' == 'net8.0-windows' AND '$(Configuration)' != 'Release2026'">
+  <!-- Revit 2025 API -->
+  <ItemGroup>
     <Reference Include="RevitAPI">
       <HintPath>C:\Program Files\Autodesk\Revit 2025\RevitAPI.dll</HintPath>
       <Private>False</Private>
@@ -75,35 +34,9 @@
     </Reference>
   </ItemGroup>
 
-  <!-- Revit 2026 API (.NET 8.0) -->
-  <ItemGroup Condition="'$(TargetFramework)' == 'net8.0-windows' AND '$(Configuration)' == 'Release2026'">
-    <Reference Include="RevitAPI">
-      <HintPath>C:\Program Files\Autodesk\Revit 2026\RevitAPI.dll</HintPath>
-      <Private>False</Private>
-    </Reference>
-    <Reference Include="RevitAPIUI">
-      <HintPath>C:\Program Files\Autodesk\Revit 2026\RevitAPIUI.dll</HintPath>
-      <Private>False</Private>
-    </Reference>
-  </ItemGroup>
-
-  <!-- ── System.Management for LicenseManager (Hardware ID) ────────────── -->
-  <ItemGroup Condition="'$(TargetFramework)' == 'net8.0-windows'">
-    <PackageReference Include="System.Management" Version="8.0.0" />
-  </ItemGroup>
-  <ItemGroup Condition="'$(TargetFramework)' == 'net48'">
-    <Reference Include="System.Management" />
-  </ItemGroup>
-
-  <!-- ── Project files ─────────────────────────────────────────────────── -->
+  <!-- Project files -->
   <ItemGroup>
-    <None Update="METools_2024.addin">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-    </None>
-    <None Update="METools_2025.addin">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-    </None>
-    <None Update="METools_2026.addin">
+    <None Update="METools.addin">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </None>
     <EmbeddedResource Include="Icons\*.png" />
@@ -122,54 +55,21 @@
     <Folder Include="Icons\" />
   </ItemGroup>
 
-  <!-- ── Post-Build: Auto-deploy to correct Revit version folder ────────── -->
-
-  <!-- Debug → Revit 2025 (development) -->
-  <Target Name="DeployDebug" AfterTargets="Build"
-          Condition="'$(Configuration)' == 'Debug' AND '$(TargetFramework)' == 'net8.0-windows'">
+  <!-- Post-Build: Auto-deploy to Revit 2025 -->
+  <Target Name="DeployToRevit" AfterTargets="Build">
     <PropertyGroup>
-      <RevitDir>C:\ProgramData\Autodesk\Revit\Addins\2025</RevitDir>
+      <RevitAddinsDir>C:\ProgramData\Autodesk\Revit\Addins\2025</RevitAddinsDir>
     </PropertyGroup>
-    <MakeDir Directories="$(RevitDir)" Condition="!Exists('$(RevitDir)')" />
-    <Copy SourceFiles="$(OutputPath)METools.dll"    DestinationFolder="$(RevitDir)" ContinueOnError="true" />
-    <Copy SourceFiles="$(ProjectDir)METools_2025.addin" DestinationFiles="$(RevitDir)\METools.addin" ContinueOnError="true" />
-    <Message Text="✓ ME-Tools deployed to Revit 2025 (Debug)" Importance="high" />
-  </Target>
-
-  <!-- Release2024 → Revit 2024 -->
-  <Target Name="DeployRelease2024" AfterTargets="Build"
-          Condition="'$(Configuration)' == 'Release2024' AND '$(TargetFramework)' == 'net48'">
-    <PropertyGroup>
-      <RevitDir>C:\ProgramData\Autodesk\Revit\Addins\2024</RevitDir>
-    </PropertyGroup>
-    <MakeDir Directories="$(RevitDir)" Condition="!Exists('$(RevitDir)')" />
-    <Copy SourceFiles="$(OutputPath)METools.dll"    DestinationFolder="$(RevitDir)" ContinueOnError="true" />
-    <Copy SourceFiles="$(ProjectDir)METools_2024.addin" DestinationFiles="$(RevitDir)\METools.addin" ContinueOnError="true" />
-    <Message Text="✓ ME-Tools deployed to Revit 2024" Importance="high" />
-  </Target>
-
-  <!-- Release2025 → Revit 2025 -->
-  <Target Name="DeployRelease2025" AfterTargets="Build"
-          Condition="'$(Configuration)' == 'Release2025' AND '$(TargetFramework)' == 'net8.0-windows'">
-    <PropertyGroup>
-      <RevitDir>C:\ProgramData\Autodesk\Revit\Addins\2025</RevitDir>
-    </PropertyGroup>
-    <MakeDir Directories="$(RevitDir)" Condition="!Exists('$(RevitDir)')" />
-    <Copy SourceFiles="$(OutputPath)METools.dll"    DestinationFolder="$(RevitDir)" ContinueOnError="true" />
-    <Copy SourceFiles="$(ProjectDir)METools_2025.addin" DestinationFiles="$(RevitDir)\METools.addin" ContinueOnError="true" />
-    <Message Text="✓ ME-Tools deployed to Revit 2025" Importance="high" />
-  </Target>
-
-  <!-- Release2026 → Revit 2026 -->
-  <Target Name="DeployRelease2026" AfterTargets="Build"
-          Condition="'$(Configuration)' == 'Release2026' AND '$(TargetFramework)' == 'net8.0-windows'">
-    <PropertyGroup>
-      <RevitDir>C:\ProgramData\Autodesk\Revit\Addins\2026</RevitDir>
-    </PropertyGroup>
-    <MakeDir Directories="$(RevitDir)" Condition="!Exists('$(RevitDir)')" />
-    <Copy SourceFiles="$(OutputPath)METools.dll"    DestinationFolder="$(RevitDir)" ContinueOnError="true" />
-    <Copy SourceFiles="$(ProjectDir)METools_2026.addin" DestinationFiles="$(RevitDir)\METools.addin" ContinueOnError="true" />
-    <Message Text="✓ ME-Tools deployed to Revit 2026" Importance="high" />
+    <MakeDir Directories="$(RevitAddinsDir)" Condition="!Exists('$(RevitAddinsDir)')" />
+    <Copy SourceFiles="$(OutputPath)METools.dll"
+          DestinationFolder="$(RevitAddinsDir)"
+          SkipUnchangedFiles="false"
+          ContinueOnError="true" />
+    <Copy SourceFiles="$(ProjectDir)METools.addin"
+          DestinationFolder="$(RevitAddinsDir)"
+          SkipUnchangedFiles="false"
+          ContinueOnError="true" />
+    <Message Text="✓ ME-Tools deployed to $(RevitAddinsDir)" Importance="high" />
   </Target>
 
 </Project>
