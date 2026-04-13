@@ -1,0 +1,23 @@
+{
+  "runtimeTarget": {
+    "name": ".NETCoreApp,Version=v8.0",
+    "signature": ""
+  },
+  "compilationOptions": {},
+  "targets": {
+    ".NETCoreApp,Version=v8.0": {
+      "SymmetricDistributor/1.0.0": {
+        "runtime": {
+          "SymmetricDistributor.dll": {}
+        }
+      }
+    }
+  },
+  "libraries": {
+    "SymmetricDistributor/1.0.0": {
+      "type": "project",
+      "serviceable": false,
+      "sha512": ""
+    }
+  }
+}

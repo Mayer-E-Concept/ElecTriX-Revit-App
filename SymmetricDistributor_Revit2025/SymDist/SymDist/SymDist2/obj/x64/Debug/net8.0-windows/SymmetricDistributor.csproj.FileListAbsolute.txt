@@ -1,0 +1,13 @@
+X:\02_sabloane\01_Revit\11_Revit_AddOn\SymmetricDistributor_Revit2025\SymDist\SymDist\SymDist2\bin\x64\Debug\net8.0-windows\SymmetricDistributor.addin
+X:\02_sabloane\01_Revit\11_Revit_AddOn\SymmetricDistributor_Revit2025\SymDist\SymDist\SymDist2\bin\x64\Debug\net8.0-windows\SymmetricDistributor.deps.json
+X:\02_sabloane\01_Revit\11_Revit_AddOn\SymmetricDistributor_Revit2025\SymDist\SymDist\SymDist2\bin\x64\Debug\net8.0-windows\SymmetricDistributor.dll
+X:\02_sabloane\01_Revit\11_Revit_AddOn\SymmetricDistributor_Revit2025\SymDist\SymDist\SymDist2\bin\x64\Debug\net8.0-windows\SymmetricDistributor.pdb
+X:\02_sabloane\01_Revit\11_Revit_AddOn\SymmetricDistributor_Revit2025\SymDist\SymDist\SymDist2\obj\x64\Debug\net8.0-windows\SymmetricDistributor.csproj.AssemblyReference.cache
+X:\02_sabloane\01_Revit\11_Revit_AddOn\SymmetricDistributor_Revit2025\SymDist\SymDist\SymDist2\obj\x64\Debug\net8.0-windows\SymmetricDistributor.GeneratedMSBuildEditorConfig.editorconfig
+X:\02_sabloane\01_Revit\11_Revit_AddOn\SymmetricDistributor_Revit2025\SymDist\SymDist\SymDist2\obj\x64\Debug\net8.0-windows\SymmetricDistributor.AssemblyInfoInputs.cache
+X:\02_sabloane\01_Revit\11_Revit_AddOn\SymmetricDistributor_Revit2025\SymDist\SymDist\SymDist2\obj\x64\Debug\net8.0-windows\SymmetricDistributor.AssemblyInfo.cs
+X:\02_sabloane\01_Revit\11_Revit_AddOn\SymmetricDistributor_Revit2025\SymDist\SymDist\SymDist2\obj\x64\Debug\net8.0-windows\SymmetricDistributor.csproj.CoreCompileInputs.cache
+X:\02_sabloane\01_Revit\11_Revit_AddOn\SymmetricDistributor_Revit2025\SymDist\SymDist\SymDist2\obj\x64\Debug\net8.0-windows\SymmetricDistributor.dll
+X:\02_sabloane\01_Revit\11_Revit_AddOn\SymmetricDistributor_Revit2025\SymDist\SymDist\SymDist2\obj\x64\Debug\net8.0-windows\refint\SymmetricDistributor.dll
+X:\02_sabloane\01_Revit\11_Revit_AddOn\SymmetricDistributor_Revit2025\SymDist\SymDist\SymDist2\obj\x64\Debug\net8.0-windows\SymmetricDistributor.pdb
+X:\02_sabloane\01_Revit\11_Revit_AddOn\SymmetricDistributor_Revit2025\SymDist\SymDist\SymDist2\obj\x64\Debug\net8.0-windows\ref\SymmetricDistributor.dll

@@ -1,0 +1,71 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <AssemblyName>METools</AssemblyName>
+    <RootNamespace>METools</RootNamespace>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Platforms>x64</Platforms>
+    <PlatformTarget>x64</PlatformTarget>
+    <LangVersion>9</LangVersion>
+    <Company>Mayer E-Concept SRL</Company>
+    <Product>ME-Tools for Autodesk Revit 2025</Product>
+    <Copyright>© 2025 Mayer E-Concept SRL</Copyright>
+    <Version>1.0.0</Version>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="RevitAPI">
+      <HintPath>C:\Program Files\Autodesk\Revit 2025\RevitAPI.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="RevitAPIUI">
+      <HintPath>C:\Program Files\Autodesk\Revit 2025\RevitAPIUI.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="METools.addin">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </None>
+    <EmbeddedResource Include="Icons\*.png" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Remove="SymmetricDistributor_Revit2025\**" />
+    <EmbeddedResource Remove="SymmetricDistributor_Revit2025\**" />
+    <None Remove="SymmetricDistributor_Revit2025\**" />
+    <Page Remove="SymmetricDistributor_Revit2025\**" />
+    <Compile Remove="KonfigFenster.xaml.cs" />
+    <Page Remove="KonfigFenster.xaml" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Folder Include="Icons\" />
+  </ItemGroup>
+
+  <!-- Nach jedem Build: DLL + addin automatisch nach ProgramData kopieren -->
+  <Target Name="DeployToRevit" AfterTargets="Build">
+    <PropertyGroup>
+      <RevitAddinsDir>C:\ProgramData\Autodesk\Revit\Addins\2025</RevitAddinsDir>
+    </PropertyGroup>
+    <MakeDir Directories="$(RevitAddinsDir)\Icons" Condition="!Exists('$(RevitAddinsDir)\Icons')" />
+    <Copy SourceFiles="$(OutputPath)METools.dll"
+          DestinationFolder="$(RevitAddinsDir)"
+          SkipUnchangedFiles="false"
+          ContinueOnError="true" />
+    <Copy SourceFiles="$(ProjectDir)METools.addin"
+          DestinationFolder="$(RevitAddinsDir)"
+          SkipUnchangedFiles="false"
+          ContinueOnError="true" />
+    <Copy SourceFiles="@(EmbeddedResource)"
+          DestinationFolder="$(RevitAddinsDir)\Icons"
+          SkipUnchangedFiles="false"
+          ContinueOnError="true" />
+    <Message Text="✓ ME-Tools deployed to $(RevitAddinsDir)" Importance="high" />
+  </Target>
+
+</Project>
