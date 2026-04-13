@@ -1,0 +1,44 @@
+# .gitignore — ME-Tools Revit Add-in
+# Schützt deine privaten Daten vor versehentlichem Upload
+
+# Build outputs (werden automatisch neu erstellt)
+bin/
+obj/
+*.user
+*.suo
+.vs/
+
+# Installer output
+installer_output/
+
+# Nuget packages
+packages/
+*.nupkg
+
+# Visual Studio cache
+.vs/
+*.aps
+*.ncb
+*.opendb
+*.opensdf
+*.sdf
+*.cachefile
+*.VC.db
+*.VC.opendb
+
+# Logs
+*.log
+*.tlog
+
+# Windows
+Thumbs.db
+desktop.ini
+
+# WICHTIG: KeyGenerator.exe niemals hochladen (enthält deinen HMAC-Secret)
+KeyGenerator.exe
+KeyGenerator/bin/
+KeyGenerator/obj/
+
+# Revit backup files
+*.[0-9][0-9][0-9][0-9].rvt
+*.[0-9][0-9][0-9][0-9].rfa
