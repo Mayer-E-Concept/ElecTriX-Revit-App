@@ -5,7 +5,7 @@
   },
   "projects": {
     "X:\\02_sabloane\\01_Revit\\11_Revit_AddOn\\METools.csproj": {
-      "version": "1.0.0",
+      "version": "1.0.2",
       "restore": {
         "projectUniqueName": "X:\\02_sabloane\\01_Revit\\11_Revit_AddOn\\METools.csproj",
         "projectName": "METools",

@@ -32,8 +32,8 @@ namespace METools
                                   "• Language: set display language\n" +
                                   "• License: enter and activate your license key\n\n" +
                                   $"License status: {LicenseManager.StatusText}",
-                Image           = LoadIcon("icon_cfg_16.png"),
-                LargeImage      = LoadIcon("icon_cfg_32.png"),
+                Image           = LoadIcon("icon_settings_16.png"),
+                LargeImage      = LoadIcon("icon_settings_32.png"),
             };
             var settingsButton = panel.AddItem(settingsBtn) as PushButton;
             if (settingsButton != null)
