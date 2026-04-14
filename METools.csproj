@@ -2,8 +2,8 @@
 
   <!--
     ME-Tools für Autodesk Revit — Mayer E-Concept SRL
-    Standard Debug/Release configurations — no custom configs needed.
-    Both deploy to Revit 2025. Change HintPath for 2026 when needed.
+    Debug   → entwickeln + testen (auto-deploy nach Revit 2025)
+    Release → für Installer (kein auto-deploy)
   -->
 
   <PropertyGroup>
@@ -55,21 +55,17 @@
     <Folder Include="Icons\" />
   </ItemGroup>
 
-  <!-- Post-Build: Auto-deploy to Revit 2025 -->
-  <Target Name="DeployToRevit" AfterTargets="Build">
+  <!-- Post-Build: auto-deploy bei Debug -->
+  <Target Name="DeployDebug" AfterTargets="Build" Condition="'$(Configuration)' == 'Debug'">
     <PropertyGroup>
-      <RevitAddinsDir>C:\ProgramData\Autodesk\Revit\Addins\2025</RevitAddinsDir>
+      <RevitDir>C:\ProgramData\Autodesk\Revit\Addins\2025</RevitDir>
     </PropertyGroup>
-    <MakeDir Directories="$(RevitAddinsDir)" Condition="!Exists('$(RevitAddinsDir)')" />
+    <MakeDir Directories="$(RevitDir)" Condition="!Exists('$(RevitDir)')" />
     <Copy SourceFiles="$(OutputPath)METools.dll"
-          DestinationFolder="$(RevitAddinsDir)"
-          SkipUnchangedFiles="false"
-          ContinueOnError="true" />
+          DestinationFolder="$(RevitDir)" SkipUnchangedFiles="false" ContinueOnError="true" />
     <Copy SourceFiles="$(ProjectDir)METools.addin"
-          DestinationFolder="$(RevitAddinsDir)"
-          SkipUnchangedFiles="false"
-          ContinueOnError="true" />
-    <Message Text="✓ ME-Tools deployed to $(RevitAddinsDir)" Importance="high" />
+          DestinationFolder="$(RevitDir)" SkipUnchangedFiles="false" ContinueOnError="true" />
+    <Message Text="✓ ME-Tools deployed to $(RevitDir)" Importance="high" />
   </Target>
 
 </Project>

@@ -14,7 +14,6 @@ namespace METools.FamilyPlacer
     {
         public Result Execute(ExternalCommandData commandData, ref string message, ElementSet elements)
         {
-            // ── License check ────────────────────────────────────────────────
             if (!LicenseCheck.Verify(commandData.Application.MainWindowHandle))
                 return Result.Cancelled;
 

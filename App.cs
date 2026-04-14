@@ -13,6 +13,8 @@ namespace METools
         private const string PANEL  = "ME-Tools";
         private const string VENDOR = "Mayer E-Concept SRL";
 
+        private static bool _splashShown = false;
+
         public Result OnStartup(UIControlledApplication app)
         {
             try { app.CreateRibbonTab(TAB); } catch { }
@@ -20,7 +22,11 @@ namespace METools
             var panel  = app.CreateRibbonPanel(TAB, PANEL);
             string dll = Assembly.GetExecutingAssembly().Location;
 
-            // ── Theme Toggle (far left, highlighted) ────────────────────────
+            // ── Show splash screen once after Revit is fully loaded ──────────
+            // Using Idling event so Revit UI is ready when splash appears
+            app.Idling += OnFirstIdle;
+
+            // ── Theme Toggle ─────────────────────────────────────────────────
             var themeBtn = new PushButtonData(
                 "ThemeToggle", "Dark\nMode", dll,
                 "METools.ThemeToggleCommand")
@@ -32,14 +38,11 @@ namespace METools
             };
             var themeButton = panel.AddItem(themeBtn) as PushButton;
             if (themeButton != null)
-            {
                 ThemeToggleCommand.RibbonButton = themeButton;
-                // Highlight: farbiger Hintergrund über ContextualHelp als Trick
-                // → Button bleibt sichtbar hervorgehoben
-            }
+
             panel.AddSeparator();
 
-            // ── Family Placer ───────────────────────────────────────────────
+            // ── Family Placer ─────────────────────────────────────────────────
             var fpBtn = new PushButtonData(
                 "FamilyPlacer", "Family\nPlacer", dll,
                 "METools.FamilyPlacer.FamilyPlacerCommand")
@@ -52,7 +55,7 @@ namespace METools
             panel.AddItem(fpBtn);
             panel.AddSeparator();
 
-            // ── Lamp Placer ─────────────────────────────────────────────────
+            // ── Lamp Placer ───────────────────────────────────────────────────
             var lpBtn = new PushButtonData(
                 "LampPlacer", "Lamp\nPlacer", dll,
                 "METools.LampPlacer.LampPlacerCommand")
@@ -65,7 +68,7 @@ namespace METools
             panel.AddItem(lpBtn);
             panel.AddSeparator();
 
-            // ── Fix Level ───────────────────────────────────────────────────
+            // ── Fix Level ─────────────────────────────────────────────────────
             var flBtn = new PushButtonData(
                 "FixLevel", "Fix\nLevel", dll,
                 "METools.FixLevelCommand")
@@ -78,7 +81,7 @@ namespace METools
             panel.AddItem(flBtn);
             panel.AddSeparator();
 
-            // ── Circuit Config ───────────────────────────────────────────────
+            // ── Circuit Config ────────────────────────────────────────────────
             var cfgBtn = new PushButtonData(
                 "CircuitConfig", "Circuit\nConfig", dll,
                 "METools.FamilyPlacer.KonfigurationsCommand")
@@ -91,6 +94,26 @@ namespace METools
             panel.AddItem(cfgBtn);
 
             return Result.Succeeded;
+        }
+
+        // ── Splash screen — fired once after Revit is ready ───────────────────
+        private void OnFirstIdle(object sender, Autodesk.Revit.UI.Events.IdlingEventArgs e)
+        {
+            if (_splashShown) return;
+            _splashShown = true;
+
+            // Unsubscribe immediately — only show once
+            if (sender is UIControlledApplication uiCtrlApp)
+                uiCtrlApp.Idling -= OnFirstIdle;
+            else if (sender is UIApplication uiApp)
+                uiApp.Idling -= OnFirstIdle;
+
+            try
+            {
+                var splash = new SplashWindow();
+                splash.Show();
+            }
+            catch { }
         }
 
         public Result OnShutdown(UIControlledApplication app) => Result.Succeeded;

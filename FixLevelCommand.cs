@@ -29,7 +29,6 @@ namespace METools
 
         public Result Execute(ExternalCommandData commandData, ref string message, ElementSet elements)
         {
-            // ── License check ────────────────────────────────────────────────
             if (!LicenseCheck.Verify(commandData.Application.MainWindowHandle))
                 return Result.Cancelled;
 
@@ -52,11 +51,8 @@ namespace METools
             {
                 try
                 {
-                    var elems = new FilteredElementCollector(doc, view.Id)
-                        .OfCategory(cat)
-                        .OfClass(typeof(FamilyInstance))
-                        .ToElements();
-                    allElements.AddRange(elems);
+                    allElements.AddRange(new FilteredElementCollector(doc, view.Id)
+                        .OfCategory(cat).OfClass(typeof(FamilyInstance)).ToElements());
                 }
                 catch { }
             }
@@ -69,7 +65,6 @@ namespace METools
             }
 
             int fixedCount = 0;
-
             using (var tx = new Transaction(doc, "ME-Tools: Fix Level"))
             {
                 tx.Start();
@@ -78,15 +73,13 @@ namespace METools
                     try
                     {
                         var p = elem.get_Parameter(BuiltInParameter.INSTANCE_SCHEDULE_ONLY_LEVEL_PARAM);
-                        if (p != null && !p.IsReadOnly)
-                        { p.Set(viewLevel.Id); fixedCount++; continue; }
+                        if (p != null && !p.IsReadOnly) { p.Set(viewLevel.Id); fixedCount++; continue; }
                     }
                     catch { }
                     try
                     {
                         var p = elem.get_Parameter(BuiltInParameter.INSTANCE_REFERENCE_LEVEL_PARAM);
-                        if (p != null && !p.IsReadOnly)
-                        { p.Set(viewLevel.Id); fixedCount++; }
+                        if (p != null && !p.IsReadOnly) { p.Set(viewLevel.Id); fixedCount++; }
                     }
                     catch { }
                 }

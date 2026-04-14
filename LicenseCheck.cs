@@ -1,19 +1,7 @@
-// LicenseCheck.cs — ME-Tools | License Check Integration
+// LicenseCheck.cs — ME-Tools | License Gate
 // Mayer E-Concept SRL
-//
-// Call LicenseCheck.Verify() at the beginning of every IExternalCommand.Execute()
-// or in the ribbon button callback before opening any window.
-//
-// Example usage in App.cs or any Command:
-//
-//   public Result Execute(ExternalCommandData data, ref string msg, ElementSet els)
-//   {
-//       if (!LicenseCheck.Verify(data.Application.MainWindowHandle))
-//           return Result.Cancelled;
-//       // ... rest of command
-//   }
-
 using System;
+using System.Windows;
 using System.Windows.Interop;
 using METools.Licensing;
 
@@ -21,28 +9,48 @@ namespace METools
 {
     public static class LicenseCheck
     {
+        private static bool _reminderShown = false;
+
         /// <summary>
-        /// Checks license status. Shows activation window if expired.
-        /// Returns true if the add-in is allowed to run.
+        /// Call at the start of every command Execute().
+        /// Returns true = allowed to run. False = blocked (trial expired / license expired).
         /// </summary>
-        public static bool Verify(IntPtr revitWindowHandle = default)
+        public static bool Verify(IntPtr ownerHandle = default)
         {
             var status = LicenseManager.GetStatus();
 
             switch (status)
             {
                 case LicenseStatus.Licensed:
+                    // Show reminder if time-limited license expires soon (≤ 7 days)
+                    int licDays = LicenseManager.LicenseDaysRemaining();
+                    if (licDays < 9999 && licDays <= 7 && !_reminderShown)
+                    {
+                        _reminderShown = true;
+                        string msg = licDays <= 1
+                            ? "Your ME-Tools license expires tomorrow. Contact Mayer E-Concept SRL to renew."
+                            : $"Your ME-Tools license expires in {licDays} days. Contact Mayer E-Concept SRL to renew.";
+                        MessageBox.Show(msg, "ME-Tools — License Expiring Soon",
+                            MessageBoxButton.OK, MessageBoxImage.Information);
+                    }
                     return true;
 
                 case LicenseStatus.TrialActive:
-                    int days = LicenseManager.TrialDaysRemaining();
-                    // Show a one-time reminder when 7 or fewer days remain
-                    if (days <= 7)
-                        ShowTrialReminder(days, revitWindowHandle);
+                    int trialDays = LicenseManager.TrialDaysRemaining();
+                    if (trialDays <= 7 && !_reminderShown)
+                    {
+                        _reminderShown = true;
+                        string msg = trialDays <= 1
+                            ? "ME-Tools beta expires tomorrow. Contact Mayer E-Concept SRL for a license."
+                            : $"ME-Tools beta expires in {trialDays} days. Contact Mayer E-Concept SRL for a license.";
+                        MessageBox.Show(msg, "ME-Tools — Beta Expiring Soon",
+                            MessageBoxButton.OK, MessageBoxImage.Information);
+                    }
                     return true;
 
                 case LicenseStatus.TrialExpired:
-                    return ShowActivationWindow(revitWindowHandle);
+                case LicenseStatus.LicenseExpired:
+                    return ShowActivationWindow(ownerHandle);
 
                 default:
                     return false;
@@ -52,34 +60,10 @@ namespace METools
         private static bool ShowActivationWindow(IntPtr ownerHandle)
         {
             var win = new LicenseWindow();
-
-            // Attach to Revit window if possible
             if (ownerHandle != IntPtr.Zero)
-            {
-                var helper = new WindowInteropHelper(win) { Owner = ownerHandle };
-            }
-
+                new WindowInteropHelper(win) { Owner = ownerHandle };
             win.ShowDialog();
             return win.Activated;
         }
-
-        private static void ShowTrialReminder(int daysLeft, IntPtr ownerHandle)
-        {
-            // Only show once per Revit session using a static flag
-            if (_reminderShown) return;
-            _reminderShown = true;
-
-            string msg = daysLeft == 1
-                ? "ME-Tools beta expires tomorrow. Contact Mayer E-Concept to get an activation code."
-                : $"ME-Tools beta expires in {daysLeft} days. Contact Mayer E-Concept to get an activation code.";
-
-            System.Windows.MessageBox.Show(
-                msg,
-                "ME-Tools — Beta Reminder",
-                System.Windows.MessageBoxButton.OK,
-                System.Windows.MessageBoxImage.Information);
-        }
-
-        private static bool _reminderShown = false;
     }
 }

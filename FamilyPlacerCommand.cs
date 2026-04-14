@@ -15,7 +15,6 @@ namespace METools.FamilyPlacer
 
         public Result Execute(ExternalCommandData commandData, ref string message, ElementSet elements)
         {
-            // ── License check ────────────────────────────────────────────────
             if (!LicenseCheck.Verify(commandData.Application.MainWindowHandle))
                 return Result.Cancelled;
 
@@ -24,11 +23,7 @@ namespace METools.FamilyPlacer
             var doc   = uidoc.Document;
 
             if (_window != null && _window.IsVisible)
-            {
-                _window.Activate();
-                _window.Focus();
-                return Result.Succeeded;
-            }
+            { _window.Activate(); _window.Focus(); return Result.Succeeded; }
 
             var families = FamilyLoader.LoadFromDocument(doc);
             var levels   = FamilyLoader.LoadLevels(doc);
@@ -46,11 +41,7 @@ namespace METools.FamilyPlacer
             }
 
             ElementId defaultLevelId = ElementId.InvalidElementId;
-            try
-            {
-                if (uidoc.ActiveView is ViewPlan vp)
-                    defaultLevelId = vp.GenLevel?.Id ?? ElementId.InvalidElementId;
-            }
+            try { if (uidoc.ActiveView is ViewPlan vp) defaultLevelId = vp.GenLevel?.Id ?? ElementId.InvalidElementId; }
             catch { }
 
             var handler  = new FamilyPlacerHandler { AllFamilies = families };
