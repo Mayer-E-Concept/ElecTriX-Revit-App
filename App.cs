@@ -2,9 +2,8 @@
 // Mayer E-Concept SRL
 using Autodesk.Revit.DB;
 using Autodesk.Revit.UI;
-using METools.Licensing;
-using System.Collections.Generic;
 using System.Reflection;
+using METools.Licensing;
 using System.Windows.Media.Imaging;
 
 namespace METools
@@ -15,9 +14,6 @@ namespace METools
         private const string PANEL  = "ME-Tools";
         private const string VENDOR = "Mayer E-Concept SRL";
 
-        // All tool buttons (not ThemeToggle) — collected here for trial enforcement
-        private readonly List<PushButton> _toolButtons = new List<PushButton>();
-
         public Result OnStartup(UIControlledApplication app)
         {
             try { app.CreateRibbonTab(TAB); } catch { }
@@ -25,19 +21,23 @@ namespace METools
             var panel  = app.CreateRibbonPanel(TAB, PANEL);
             string dll = Assembly.GetExecutingAssembly().Location;
 
-            // ── Theme Toggle (always active — not trial-gated) ────────────
-            var themeBtn = new PushButtonData(
-                "ThemeToggle", "Dark\nMode", dll,
-                "METools.ThemeToggleCommand")
+            // ── Settings (first button — license, theme, language) ───────────
+            var settingsBtn = new PushButtonData(
+                "Settings", "Settings", dll,
+                "METools.SettingsCommand")
             {
-                ToolTip         = "Switch between Dark Mode and Light Mode for all ME-Tools windows.",
-                LongDescription = $"Theme Toggle — {VENDOR}\n\nSwitches the UI theme of all open ME-Tools windows simultaneously.",
-                Image           = LoadIcon("icon_theme_dark_16.png"),
-                LargeImage      = LoadIcon("icon_theme_dark_32.png"),
+                ToolTip         = "Open ME-Tools Settings: theme, language and license management.",
+                LongDescription = $"Settings — {VENDOR}\n\n" +
+                                  "• Appearance: switch between Dark and Light mode\n" +
+                                  "• Language: set display language\n" +
+                                  "• License: enter and activate your license key\n\n" +
+                                  $"License status: {LicenseManager.StatusText}",
+                Image           = LoadIcon("icon_cfg_16.png"),
+                LargeImage      = LoadIcon("icon_cfg_32.png"),
             };
-            var themeButton = panel.AddItem(themeBtn) as PushButton;
-            if (themeButton != null)
-                ThemeToggleCommand.RibbonButton = themeButton;
+            var settingsButton = panel.AddItem(settingsBtn) as PushButton;
+            if (settingsButton != null)
+                SettingsCommand.RibbonButton = settingsButton;
 
             panel.AddSeparator();
 
@@ -51,8 +51,7 @@ namespace METools
                 Image           = LoadIcon("icon_fp_16.png"),
                 LargeImage      = LoadIcon("icon_fp_32.png"),
             };
-            var fpButton = panel.AddItem(fpBtn) as PushButton;
-            if (fpButton != null) _toolButtons.Add(fpButton);
+            panel.AddItem(fpBtn);
             panel.AddSeparator();
 
             // ── Lamp Placer ─────────────────────────────────────────────────
@@ -65,8 +64,7 @@ namespace METools
                 Image           = LoadIcon("icon_lamp_16.png"),
                 LargeImage      = LoadIcon("icon_lamp_32.png"),
             };
-            var lpButton = panel.AddItem(lpBtn) as PushButton;
-            if (lpButton != null) _toolButtons.Add(lpButton);
+            panel.AddItem(lpBtn);
             panel.AddSeparator();
 
             // ── Fix Level ───────────────────────────────────────────────────
@@ -79,8 +77,25 @@ namespace METools
                 Image           = LoadIcon("icon_fl_fix_16.png") ?? LoadIcon("icon_fp_16.png"),
                 LargeImage      = LoadIcon("icon_fl_fix_32.png") ?? LoadIcon("icon_fp_32.png"),
             };
-            var flButton = panel.AddItem(flBtn) as PushButton;
-            if (flButton != null) _toolButtons.Add(flButton);
+            panel.AddItem(flBtn);
+            panel.AddSeparator();
+
+            // ── Auto Room Separation ─────────────────────────────────────────
+            var arsBtn = new PushButtonData(
+                "AutoRoomSeparation", "Room\nSeparation", dll,
+                "METools.AutoRoomSeparation.AutoRoomSeparationCommand")
+            {
+                ToolTip         = "Automatically generate Room Separation Lines from DWG / IFC geometry.",
+                LongDescription = $"Auto Room Separation — {VENDOR}\n\n" +
+                                  "Reads wall geometry from linked DWG files, DirectShape/IFC elements, or native Revit Walls, " +
+                                  "finds closed room polygons and places Room Separation Lines in the active floor plan.\n\n" +
+                                  "• Configurable area filter (min / max m²)\n" +
+                                  "• DWG layer exclusion filter\n" +
+                                  "• Duplicate line detection",
+                Image           = LoadIcon("icon_ars_16.png") ?? LoadIcon("icon_fl_fix_16.png"),
+                LargeImage      = LoadIcon("icon_ars_32.png") ?? LoadIcon("icon_fl_fix_32.png"),
+            };
+            panel.AddItem(arsBtn);
             panel.AddSeparator();
 
             // ── Circuit Config ───────────────────────────────────────────────
@@ -93,54 +108,31 @@ namespace METools
                 Image           = LoadIcon("icon_cfg_new_16.png"),
                 LargeImage      = LoadIcon("icon_cfg_new_32.png"),
             };
-            var cfgButton = panel.AddItem(cfgBtn) as PushButton;
-            if (cfgButton != null) _toolButtons.Add(cfgButton);
+            panel.AddItem(cfgBtn);
 
-            // ── Trial enforcement ────────────────────────────────────────────
-            ApplyLicenseState();
+            // ── Startup splash (shown after Revit finishes loading) ──────────
+            app.ControlledApplication.ApplicationInitialized += OnApplicationInitialized;
 
             return Result.Succeeded;
         }
 
-        public Result OnShutdown(UIControlledApplication app) => Result.Succeeded;
-
-        // ── License / Trial ───────────────────────────────────────────────
-
-        private void ApplyLicenseState()
+        private void OnApplicationInitialized(
+            object sender,
+            Autodesk.Revit.DB.Events.ApplicationInitializedEventArgs e)
         {
-            if (LicenseManager.IsLicensed())
-                return; // Full license — nothing to restrict
-
-            if (LicenseManager.IsTrialExpired)
+            try
             {
-                foreach (var btn in _toolButtons)
-                {
-                    btn.Enabled = false;
-                    btn.ToolTip = "Trial expired — please contact Mayer E-Concept SRL to activate a full license.";
-                }
-
-                TaskDialog dlg = new TaskDialog("ME-Tools — Trial Expired")
-                {
-                    MainIcon        = TaskDialogIcon.TaskDialogIconWarning,
-                    MainInstruction = "Your 30-day trial has expired.",
-                    MainContent     =
-                        "The ME-Tools add-in is running in trial mode and the evaluation period has ended.\n\n" +
-                        "All tools are disabled. Please contact Mayer E-Concept SRL to obtain a full license.\n\n" +
-                        "E-Mail: office@mayer-e-concept.com",
-                    FooterText      = "ME-Tools Beta — Mayer E-Concept SRL",
-                };
-                dlg.AddCommandLink(TaskDialogCommandLinkId.CommandLink1, "OK — Close");
-                dlg.Show();
+                System.Windows.Application.Current?.Dispatcher?.BeginInvoke(
+                    System.Windows.Threading.DispatcherPriority.ApplicationIdle,
+                    new System.Action(() =>
+                    {
+                        try { new SplashWindow().ShowDialog(); } catch { }
+                    }));
             }
-            else
-            {
-                string status = LicenseManager.StatusText;
-                foreach (var btn in _toolButtons)
-                    btn.ToolTip = $"{btn.ToolTip}\n\n⏱ {status}";
-            }
+            catch { }
         }
 
-        // ── Icon loader ───────────────────────────────────────────────────
+        public Result OnShutdown(UIControlledApplication app) => Result.Succeeded;
 
         private System.Windows.Media.ImageSource LoadIcon(string fileName)
         {

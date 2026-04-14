@@ -1,11 +1,5 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <!--
-    ME-Tools für Autodesk Revit — Mayer E-Concept SRL
-    Debug   → entwickeln + testen (auto-deploy nach Revit 2025)
-    Release → für Installer (kein auto-deploy)
-  -->
-
   <PropertyGroup>
     <TargetFramework>net8.0-windows</TargetFramework>
     <UseWPF>true</UseWPF>
@@ -17,12 +11,11 @@
     <PlatformTarget>x64</PlatformTarget>
     <LangVersion>9</LangVersion>
     <Company>Mayer E-Concept SRL</Company>
-    <Product>ME-Tools for Autodesk Revit</Product>
+    <Product>ME-Tools for Autodesk Revit 2025</Product>
     <Copyright>© 2025 Mayer E-Concept SRL</Copyright>
     <Version>1.0.0</Version>
   </PropertyGroup>
 
-  <!-- Revit 2025 API -->
   <ItemGroup>
     <Reference Include="RevitAPI">
       <HintPath>C:\Program Files\Autodesk\Revit 2025\RevitAPI.dll</HintPath>
@@ -34,7 +27,6 @@
     </Reference>
   </ItemGroup>
 
-  <!-- Project files -->
   <ItemGroup>
     <None Update="METools.addin">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
@@ -49,23 +41,37 @@
     <Page Remove="SymmetricDistributor_Revit2025\**" />
     <Compile Remove="KonfigFenster.xaml.cs" />
     <Page Remove="KonfigFenster.xaml" />
+
+    <!-- LicenseWindow.cs and LicenseCheck.cs were added 13.04 but have         -->
+    <!-- unresolvable type-system conflicts. License UI is provided by           -->
+    <!-- SettingsWindow.cs instead. Exclude until they are rewritten.            -->
+    <Compile Remove="LicenseWindow.cs" />
+
   </ItemGroup>
 
   <ItemGroup>
     <Folder Include="Icons\" />
   </ItemGroup>
 
-  <!-- Post-Build: auto-deploy bei Debug -->
-  <Target Name="DeployDebug" AfterTargets="Build" Condition="'$(Configuration)' == 'Debug'">
+  <!-- Nach jedem Build: DLL + addin automatisch nach ProgramData kopieren -->
+  <Target Name="DeployToRevit" AfterTargets="Build">
     <PropertyGroup>
-      <RevitDir>C:\ProgramData\Autodesk\Revit\Addins\2025</RevitDir>
+      <RevitAddinsDir>C:\ProgramData\Autodesk\Revit\Addins\2025</RevitAddinsDir>
     </PropertyGroup>
-    <MakeDir Directories="$(RevitDir)" Condition="!Exists('$(RevitDir)')" />
+    <MakeDir Directories="$(RevitAddinsDir)\Icons" Condition="!Exists('$(RevitAddinsDir)\Icons')" />
     <Copy SourceFiles="$(OutputPath)METools.dll"
-          DestinationFolder="$(RevitDir)" SkipUnchangedFiles="false" ContinueOnError="true" />
+          DestinationFolder="$(RevitAddinsDir)"
+          SkipUnchangedFiles="false"
+          ContinueOnError="true" />
     <Copy SourceFiles="$(ProjectDir)METools.addin"
-          DestinationFolder="$(RevitDir)" SkipUnchangedFiles="false" ContinueOnError="true" />
-    <Message Text="✓ ME-Tools deployed to $(RevitDir)" Importance="high" />
+          DestinationFolder="$(RevitAddinsDir)"
+          SkipUnchangedFiles="false"
+          ContinueOnError="true" />
+    <Copy SourceFiles="@(EmbeddedResource)"
+          DestinationFolder="$(RevitAddinsDir)\Icons"
+          SkipUnchangedFiles="false"
+          ContinueOnError="true" />
+    <Message Text="✓ ME-Tools deployed to $(RevitAddinsDir)" Importance="high" />
   </Target>
 
 </Project>

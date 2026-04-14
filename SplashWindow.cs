@@ -1,270 +1,177 @@
-// SplashWindow.cs — ME-Tools | Startup Splash Screen
+// SplashWindow.cs — ME-Tools Startup Splash
 // Mayer E-Concept SRL
-// Shown once per Revit session at startup.
-// Displays logo, product name, beta status, company info.
-// Auto-closes after 4 seconds or on click.
-
 using System;
+using METools.Licensing;
 using System.Reflection;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Input;
 using System.Windows.Media;
-using System.Windows.Media.Animation;
-using System.Windows.Media.Imaging;
-using System.Windows.Threading;
-using METools.Licensing;
+using System.Windows.Shapes;
+using Color = System.Windows.Media.Color;
 
 namespace METools
 {
-    public class SplashWindow : Window
+    /// <summary>
+    /// Startup splash shown once per Revit session.
+    /// Requires OK to close. Version is read live from the assembly.
+    /// </summary>
+    public class SplashWindow : MeToolsWindowBase
     {
-        private DispatcherTimer _timer;
-
         public SplashWindow()
         {
-            // Window properties — no chrome, centered
-            WindowStyle        = WindowStyle.None;
-            AllowsTransparency = true;
-            Background         = Brushes.Transparent;
-            ResizeMode         = ResizeMode.NoResize;
-            Topmost            = true;
-            SizeToContent      = SizeToContent.WidthAndHeight;
-            WindowStartupLocation = WindowStartupLocation.CenterScreen;
-            ShowInTaskbar      = false;
-
-            MouseDown += (s, e) => Close();
-
+            InitWindow("ME-Tools", width: 360, isDialog: true);
+            ResizeMode = ResizeMode.NoResize;
             BuildContent();
-            StartTimer();
+        }
+
+        private static string AssemblyVersion
+        {
+            get
+            {
+                try
+                {
+                    var v = Assembly.GetExecutingAssembly().GetName().Version;
+                    return $"v{v.Major}.{v.Minor}.{v.Build}";
+                }
+                catch { return "v1.0"; }
+            }
         }
 
         private void BuildContent()
         {
-            // Outer container with rounded corners and shadow
-            var border = new Border
+            var panel = new StackPanel
             {
-                Width           = 420,
-                Height          = 320,
-                Background      = new SolidColorBrush(Color.FromRgb(14, 25, 50)),
-                CornerRadius    = new CornerRadius(16),
-                Effect          = new System.Windows.Media.Effects.DropShadowEffect
-                {
-                    Color     = Colors.Black,
-                    BlurRadius = 30,
-                    ShadowDepth = 6,
-                    Opacity   = 0.7
-                }
-            };
-
-            var grid = new Grid();
-            grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-            grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-
-            // ── Main content ─────────────────────────────────────────────────
-            var stack = new StackPanel
-            {
-                VerticalAlignment   = VerticalAlignment.Center,
+                Margin = new Thickness(30, 20, 30, 24),
                 HorizontalAlignment = HorizontalAlignment.Center,
-                Margin              = new Thickness(40, 36, 40, 20)
             };
+            DockPanel.SetDock(panel, Dock.Top);
+            RootDock.Children.Insert(RootDock.Children.Count, panel);
 
-            // Logo image
-            var logoImg = LoadLogoImage();
-            if (logoImg != null)
+            // Logo
+            panel.Children.Add(new System.Windows.Controls.Image
             {
-                var img = new System.Windows.Controls.Image
-                {
-                    Source  = logoImg,
-                    Width   = 80,
-                    Height  = 80,
-                    Margin  = new Thickness(0, 0, 0, 16),
-                    HorizontalAlignment = HorizontalAlignment.Center
-                };
-                stack.Children.Add(img);
-            }
-
-            // Product name
-            stack.Children.Add(new TextBlock
-            {
-                Text                = "ME-Tools",
-                FontSize            = 32,
-                FontWeight          = FontWeights.Bold,
-                Foreground          = new SolidColorBrush(Color.FromRgb(255, 255, 255)),
+                Source = MeToolsTheme.LoadLogo(),
+                Width  = 64, Height = 64,
+                Margin = new Thickness(0, 8, 0, 12),
                 HorizontalAlignment = HorizontalAlignment.Center,
-                Margin              = new Thickness(0, 0, 0, 4)
             });
 
-            // Subtitle
-            stack.Children.Add(new TextBlock
+            // Title
+            panel.Children.Add(new TextBlock
             {
-                Text                = "for Autodesk Revit",
-                FontSize            = 13,
-                Foreground          = new SolidColorBrush(Color.FromRgb(120, 160, 220)),
+                Text       = "ME-Tools",
+                FontSize   = 24, FontWeight = FontWeights.Bold, FontStyle = FontStyles.Italic,
+                Foreground = MeToolsTheme.BrPetrol,
                 HorizontalAlignment = HorizontalAlignment.Center,
-                Margin              = new Thickness(0, 0, 0, 20)
+                Margin     = new Thickness(0, 0, 0, 2),
+            });
+            panel.Children.Add(new TextBlock
+            {
+                Text       = "for Autodesk Revit 2025",
+                FontSize   = 12, Foreground = MeToolsTheme.BrMuted,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                Margin     = new Thickness(0, 0, 0, 20),
             });
 
             // Divider
-            stack.Children.Add(new Border
+            panel.Children.Add(new Border
             {
-                Height     = 1,
-                Background = new SolidColorBrush(Color.FromRgb(40, 60, 100)),
-                Margin     = new Thickness(0, 0, 0, 20)
+                Height = 1, Background = MeToolsTheme.BrSecLine,
+                Margin = new Thickness(0, 0, 0, 16),
             });
 
-            // Beta / license status badge
-            var status   = LicenseManager.GetStatus();
-            var licType  = LicenseManager.CurrentLicenseType();
-            string badgeText;
-            Color  badgeColor;
+            // License badge
+            panel.Children.Add(BuildLicenseBadge());
 
-            if (status == LicenseStatus.Licensed && licType == LicenseType.Permanent)
+            // Version — read live from assembly, never hardcoded
+            panel.Children.Add(new TextBlock
             {
-                badgeText  = "✓  Licensed — Full Version";
-                badgeColor = Color.FromRgb(60, 180, 100);
+                Text = $"{AssemblyVersion}  ·  Mayer E-Concept SRL",
+                FontSize = 10, Foreground = MeToolsTheme.BrMuted,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                Margin = new Thickness(0, 12, 0, 0),
+            });
+
+            // Divider
+            panel.Children.Add(new Border
+            {
+                Height = 1, Background = MeToolsTheme.BrSecLine,
+                Margin = new Thickness(0, 16, 0, 16),
+            });
+
+            // OK button
+            var okBtn = FooterBtn("OK  —  Continue", primary: true, onClick: () =>
+            {
+                try { DialogResult = true; } catch { }
+                Close();
+            });
+            okBtn.Height = 38;
+            panel.Children.Add(okBtn);
+
+            // Settings hint for trial users
+            if (!LicenseManager.IsLicensed())
+            {
+                panel.Children.Add(new TextBlock
+                {
+                    Text = "To enter a license key → Settings button in the ribbon",
+                    FontSize = 10, Foreground = MeToolsTheme.BrMuted,
+                    TextWrapping = TextWrapping.Wrap,
+                    TextAlignment = TextAlignment.Center,
+                    Margin = new Thickness(0, 8, 0, 0),
+                });
             }
-            else if (status == LicenseStatus.Licensed && licType == LicenseType.Year1)
+        }
+
+        private UIElement BuildLicenseBadge()
+        {
+            bool licensed = LicenseManager.IsLicensed();
+            bool expired  = LicenseManager.IsTrialExpired;
+            int  days     = LicenseManager.DaysRemaining;
+
+            Color bg, dot; string label;
+
+            if (licensed)
             {
-                int days   = LicenseManager.LicenseDaysRemaining();
-                badgeText  = $"✓  1-Year License — {days} days remaining";
-                badgeColor = Color.FromRgb(60, 180, 100);
+                bg    = Color.FromRgb(0x1D, 0x6A, 0x40);
+                dot   = Color.FromRgb(0x5D, 0xCA, 0xA5);
+                label = "✓  Licensed";
             }
-            else if (status == LicenseStatus.Licensed && licType == LicenseType.Extend30)
+            else if (expired)
             {
-                int days   = LicenseManager.LicenseDaysRemaining();
-                badgeText  = $"✓  Extended — {days} days remaining";
-                badgeColor = Color.FromRgb(80, 160, 220);
-            }
-            else if (status == LicenseStatus.TrialActive)
-            {
-                int days   = LicenseManager.TrialDaysRemaining();
-                badgeText  = $"Beta-Zugang  ·  {days} Tage verbleibend";
-                badgeColor = Color.FromRgb(240, 160, 40);
+                bg    = Color.FromRgb(0x80, 0x20, 0x20);
+                dot   = Color.FromRgb(0xFF, 0x70, 0x70);
+                label = "Trial expired — please activate";
             }
             else
             {
-                badgeText  = "Beta abgelaufen — Lizenz erforderlich";
-                badgeColor = Color.FromRgb(220, 80, 60);
+                bg    = Color.FromRgb(0x7A, 0x50, 0x10);
+                dot   = Color.FromRgb(0xFF, 0xC0, 0x50);
+                label = $"Beta access — {days} day{(days == 1 ? "" : "s")} remaining";
             }
 
-            var badgeBorder = new Border
+            var badge = new Border
             {
-                Background          = new SolidColorBrush(Color.FromArgb(40,
-                    badgeColor.R, badgeColor.G, badgeColor.B)),
-                BorderBrush         = new SolidColorBrush(badgeColor),
-                BorderThickness     = new Thickness(1),
-                CornerRadius        = new CornerRadius(6),
-                Padding             = new Thickness(14, 7, 14, 7),
+                Background  = new SolidColorBrush(bg),
+                CornerRadius = new CornerRadius(20),
+                Padding      = new Thickness(18, 8, 18, 8),
                 HorizontalAlignment = HorizontalAlignment.Center,
-                Margin              = new Thickness(0, 0, 0, 0)
             };
-            badgeBorder.Child = new TextBlock
+            var row = new StackPanel { Orientation = Orientation.Horizontal };
+            row.Children.Add(new Ellipse
             {
-                Text       = badgeText,
-                FontSize   = 12,
-                FontWeight = FontWeights.SemiBold,
-                Foreground = new SolidColorBrush(badgeColor)
-            };
-            stack.Children.Add(badgeBorder);
-
-            Grid.SetRow(stack, 0);
-            grid.Children.Add(stack);
-
-            // ── Footer ───────────────────────────────────────────────────────
-            var footer = new Border
-            {
-                Background      = new SolidColorBrush(Color.FromRgb(10, 18, 38)),
-                CornerRadius    = new CornerRadius(0, 0, 16, 16),
-                Padding         = new Thickness(24, 10, 24, 10)
-            };
-
-            var footerRow = new Grid();
-            footerRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            footerRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-
-            footerRow.Children.Add(new TextBlock
-            {
-                Text       = "Mayer E-Concept SRL",
-                FontSize   = 11,
-                Foreground = new SolidColorBrush(Color.FromRgb(80, 110, 160)),
-                VerticalAlignment = VerticalAlignment.Center
+                Width = 8, Height = 8,
+                Fill  = new SolidColorBrush(dot),
+                Margin = new Thickness(0, 0, 8, 0),
+                VerticalAlignment = VerticalAlignment.Center,
             });
-
-            var versionTb = new TextBlock
+            row.Children.Add(new TextBlock
             {
-                Text       = "v1.0.0 beta",
-                FontSize   = 11,
-                Foreground = new SolidColorBrush(Color.FromRgb(60, 80, 120)),
-                VerticalAlignment = VerticalAlignment.Center
-            };
-            Grid.SetColumn(versionTb, 1);
-            footerRow.Children.Add(versionTb);
-
-            footer.Child = footerRow;
-            Grid.SetRow(footer, 1);
-            grid.Children.Add(footer);
-
-            border.Child = grid;
-            Content = border;
-
-            // Fade-in animation
-            Opacity = 0;
-            Loaded += (s, e) =>
-            {
-                var fadeIn = new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(300));
-                BeginAnimation(OpacityProperty, fadeIn);
-            };
-        }
-
-        private void StartTimer()
-        {
-            // Auto-close after 4 seconds with fade-out
-            _timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(4) };
-            _timer.Tick += (s, e) =>
-            {
-                _timer.Stop();
-                FadeOutAndClose();
-            };
-            _timer.Start();
-        }
-
-        private void FadeOutAndClose()
-        {
-            var fadeOut = new DoubleAnimation(1, 0, TimeSpan.FromMilliseconds(400));
-            fadeOut.Completed += (s, e) => Close();
-            BeginAnimation(OpacityProperty, fadeOut);
-        }
-
-        private ImageSource LoadLogoImage()
-        {
-            try
-            {
-                // Try base icon first, then lamp icon
-                foreach (var name in new[] { "base_icon_transparent_background.png", "icon_lamp_32.png" })
-                {
-                    var stream = Assembly.GetExecutingAssembly()
-                        .GetManifestResourceStream($"METools.Icons.{name}");
-                    if (stream == null) continue;
-                    var bmp = new BitmapImage();
-                    bmp.BeginInit();
-                    bmp.StreamSource  = stream;
-                    bmp.CacheOption   = BitmapCacheOption.OnLoad;
-                    bmp.DecodePixelWidth = 80;
-                    bmp.EndInit();
-                    bmp.Freeze();
-                    return bmp;
-                }
-            }
-            catch { }
-            return null;
-        }
-
-        // Click anywhere to close immediately
-        protected override void OnMouseDown(MouseButtonEventArgs e)
-        {
-            _timer?.Stop();
-            FadeOutAndClose();
+                Text       = label, FontSize = 12, FontWeight = FontWeights.SemiBold,
+                Foreground = Brushes.White,
+                VerticalAlignment = VerticalAlignment.Center,
+            });
+            badge.Child = row;
+            return badge;
         }
     }
 }

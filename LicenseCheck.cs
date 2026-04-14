@@ -1,69 +1,53 @@
-// LicenseCheck.cs — ME-Tools | License Gate
+// LicenseCheck.cs — ME-Tools License Gate for Commands
 // Mayer E-Concept SRL
-using System;
-using System.Windows;
-using System.Windows.Interop;
-using METools.Licensing;
+using Autodesk.Revit.UI;
 
-namespace METools
+namespace METools.Licensing
 {
+    /// <summary>
+    /// License gate used by IExternalCommand.Execute() implementations.
+    /// Overloads accept nint because Revit 2025 changed ElementId.IntegerValue to nint.
+    /// </summary>
     public static class LicenseCheck
     {
-        private static bool _reminderShown = false;
+        // ── Core checks ───────────────────────────────────────────────────────
 
-        /// <summary>
-        /// Call at the start of every command Execute().
-        /// Returns true = allowed to run. False = blocked (trial expired / license expired).
-        /// </summary>
-        public static bool Verify(IntPtr ownerHandle = default)
+        public static bool IsAllowed()  => LicenseManager.IsLicensed() || !LicenseManager.IsTrialExpired;
+        public static bool IsExpired()  => LicenseManager.IsTrialExpired;
+        public static bool IsValid()    => IsAllowed();
+        public static bool CanRun()     => IsAllowed();
+
+        public static bool Verify(string featureName = "ME-Tools")
         {
-            var status = LicenseManager.GetStatus();
-
-            switch (status)
-            {
-                case LicenseStatus.Licensed:
-                    // Show reminder if time-limited license expires soon (≤ 7 days)
-                    int licDays = LicenseManager.LicenseDaysRemaining();
-                    if (licDays < 9999 && licDays <= 7 && !_reminderShown)
-                    {
-                        _reminderShown = true;
-                        string msg = licDays <= 1
-                            ? "Your ME-Tools license expires tomorrow. Contact Mayer E-Concept SRL to renew."
-                            : $"Your ME-Tools license expires in {licDays} days. Contact Mayer E-Concept SRL to renew.";
-                        MessageBox.Show(msg, "ME-Tools — License Expiring Soon",
-                            MessageBoxButton.OK, MessageBoxImage.Information);
-                    }
-                    return true;
-
-                case LicenseStatus.TrialActive:
-                    int trialDays = LicenseManager.TrialDaysRemaining();
-                    if (trialDays <= 7 && !_reminderShown)
-                    {
-                        _reminderShown = true;
-                        string msg = trialDays <= 1
-                            ? "ME-Tools beta expires tomorrow. Contact Mayer E-Concept SRL for a license."
-                            : $"ME-Tools beta expires in {trialDays} days. Contact Mayer E-Concept SRL for a license.";
-                        MessageBox.Show(msg, "ME-Tools — Beta Expiring Soon",
-                            MessageBoxButton.OK, MessageBoxImage.Information);
-                    }
-                    return true;
-
-                case LicenseStatus.TrialExpired:
-                case LicenseStatus.LicenseExpired:
-                    return ShowActivationWindow(ownerHandle);
-
-                default:
-                    return false;
-            }
+            if (IsAllowed()) return true;
+            TaskDialog.Show(featureName,
+                "The trial period has expired.\n\n" +
+                "Please activate ME-Tools via the Settings button in the ribbon\n" +
+                "or contact office@mayer-econcept.ro for a license key.");
+            return false;
         }
 
-        private static bool ShowActivationWindow(IntPtr ownerHandle)
-        {
-            var win = new LicenseWindow();
-            if (ownerHandle != IntPtr.Zero)
-                new WindowInteropHelper(win) { Owner = ownerHandle };
-            win.ShowDialog();
-            return win.Activated;
-        }
+        // ── nint overloads (Revit 2025: ElementId.IntegerValue returns nint) ──
+
+        public static bool IsAllowed(nint _)                     => IsAllowed();
+        public static bool IsExpired(nint _)                     => IsExpired();
+        public static bool IsValid(nint _)                       => IsValid();
+        public static bool CanRun(nint _)                        => CanRun();
+        public static bool Verify(nint _)                        => Verify();
+        public static bool Verify(nint _, string featureName)    => Verify(featureName);
+
+        // ── int overloads (fallback compatibility) ────────────────────────────
+
+        public static bool IsAllowed(int _)                      => IsAllowed();
+        public static bool IsExpired(int _)                      => IsExpired();
+        public static bool IsValid(int _)                        => IsValid();
+        public static bool CanRun(int _)                         => CanRun();
+        public static bool Verify(int _)                         => Verify();
+        public static bool Verify(int _, string featureName)     => Verify(featureName);
+
+        // ── Status helpers ────────────────────────────────────────────────────
+
+        public static int    DaysRemaining => LicenseManager.DaysRemaining;
+        public static LicenseStatus Status => LicenseManager.GetStatus();
     }
 }
