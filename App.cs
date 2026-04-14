@@ -2,6 +2,8 @@
 // Mayer E-Concept SRL
 using Autodesk.Revit.DB;
 using Autodesk.Revit.UI;
+using METools.Licensing;
+using System.Collections.Generic;
 using System.Reflection;
 using System.Windows.Media.Imaging;
 
@@ -13,7 +15,8 @@ namespace METools
         private const string PANEL  = "ME-Tools";
         private const string VENDOR = "Mayer E-Concept SRL";
 
-        private static bool _splashShown = false;
+        // All tool buttons (not ThemeToggle) — collected here for trial enforcement
+        private readonly List<PushButton> _toolButtons = new List<PushButton>();
 
         public Result OnStartup(UIControlledApplication app)
         {
@@ -22,11 +25,7 @@ namespace METools
             var panel  = app.CreateRibbonPanel(TAB, PANEL);
             string dll = Assembly.GetExecutingAssembly().Location;
 
-            // ── Show splash screen once after Revit is fully loaded ──────────
-            // Using Idling event so Revit UI is ready when splash appears
-            app.Idling += OnFirstIdle;
-
-            // ── Theme Toggle ─────────────────────────────────────────────────
+            // ── Theme Toggle (always active — not trial-gated) ────────────
             var themeBtn = new PushButtonData(
                 "ThemeToggle", "Dark\nMode", dll,
                 "METools.ThemeToggleCommand")
@@ -42,7 +41,7 @@ namespace METools
 
             panel.AddSeparator();
 
-            // ── Family Placer ─────────────────────────────────────────────────
+            // ── Family Placer ───────────────────────────────────────────────
             var fpBtn = new PushButtonData(
                 "FamilyPlacer", "Family\nPlacer", dll,
                 "METools.FamilyPlacer.FamilyPlacerCommand")
@@ -52,10 +51,11 @@ namespace METools
                 Image           = LoadIcon("icon_fp_16.png"),
                 LargeImage      = LoadIcon("icon_fp_32.png"),
             };
-            panel.AddItem(fpBtn);
+            var fpButton = panel.AddItem(fpBtn) as PushButton;
+            if (fpButton != null) _toolButtons.Add(fpButton);
             panel.AddSeparator();
 
-            // ── Lamp Placer ───────────────────────────────────────────────────
+            // ── Lamp Placer ─────────────────────────────────────────────────
             var lpBtn = new PushButtonData(
                 "LampPlacer", "Lamp\nPlacer", dll,
                 "METools.LampPlacer.LampPlacerCommand")
@@ -65,10 +65,11 @@ namespace METools
                 Image           = LoadIcon("icon_lamp_16.png"),
                 LargeImage      = LoadIcon("icon_lamp_32.png"),
             };
-            panel.AddItem(lpBtn);
+            var lpButton = panel.AddItem(lpBtn) as PushButton;
+            if (lpButton != null) _toolButtons.Add(lpButton);
             panel.AddSeparator();
 
-            // ── Fix Level ─────────────────────────────────────────────────────
+            // ── Fix Level ───────────────────────────────────────────────────
             var flBtn = new PushButtonData(
                 "FixLevel", "Fix\nLevel", dll,
                 "METools.FixLevelCommand")
@@ -78,10 +79,11 @@ namespace METools
                 Image           = LoadIcon("icon_fl_fix_16.png") ?? LoadIcon("icon_fp_16.png"),
                 LargeImage      = LoadIcon("icon_fl_fix_32.png") ?? LoadIcon("icon_fp_32.png"),
             };
-            panel.AddItem(flBtn);
+            var flButton = panel.AddItem(flBtn) as PushButton;
+            if (flButton != null) _toolButtons.Add(flButton);
             panel.AddSeparator();
 
-            // ── Circuit Config ────────────────────────────────────────────────
+            // ── Circuit Config ───────────────────────────────────────────────
             var cfgBtn = new PushButtonData(
                 "CircuitConfig", "Circuit\nConfig", dll,
                 "METools.FamilyPlacer.KonfigurationsCommand")
@@ -91,32 +93,54 @@ namespace METools
                 Image           = LoadIcon("icon_cfg_new_16.png"),
                 LargeImage      = LoadIcon("icon_cfg_new_32.png"),
             };
-            panel.AddItem(cfgBtn);
+            var cfgButton = panel.AddItem(cfgBtn) as PushButton;
+            if (cfgButton != null) _toolButtons.Add(cfgButton);
+
+            // ── Trial enforcement ────────────────────────────────────────────
+            ApplyLicenseState();
 
             return Result.Succeeded;
         }
 
-        // ── Splash screen — fired once after Revit is ready ───────────────────
-        private void OnFirstIdle(object sender, Autodesk.Revit.UI.Events.IdlingEventArgs e)
+        public Result OnShutdown(UIControlledApplication app) => Result.Succeeded;
+
+        // ── License / Trial ───────────────────────────────────────────────
+
+        private void ApplyLicenseState()
         {
-            if (_splashShown) return;
-            _splashShown = true;
+            if (LicenseManager.IsLicensed())
+                return; // Full license — nothing to restrict
 
-            // Unsubscribe immediately — only show once
-            if (sender is UIControlledApplication uiCtrlApp)
-                uiCtrlApp.Idling -= OnFirstIdle;
-            else if (sender is UIApplication uiApp)
-                uiApp.Idling -= OnFirstIdle;
-
-            try
+            if (LicenseManager.IsTrialExpired)
             {
-                var splash = new SplashWindow();
-                splash.Show();
+                foreach (var btn in _toolButtons)
+                {
+                    btn.Enabled = false;
+                    btn.ToolTip = "Trial expired — please contact Mayer E-Concept SRL to activate a full license.";
+                }
+
+                TaskDialog dlg = new TaskDialog("ME-Tools — Trial Expired")
+                {
+                    MainIcon        = TaskDialogIcon.TaskDialogIconWarning,
+                    MainInstruction = "Your 30-day trial has expired.",
+                    MainContent     =
+                        "The ME-Tools add-in is running in trial mode and the evaluation period has ended.\n\n" +
+                        "All tools are disabled. Please contact Mayer E-Concept SRL to obtain a full license.\n\n" +
+                        "E-Mail: office@mayer-e-concept.com",
+                    FooterText      = "ME-Tools Beta — Mayer E-Concept SRL",
+                };
+                dlg.AddCommandLink(TaskDialogCommandLinkId.CommandLink1, "OK — Close");
+                dlg.Show();
             }
-            catch { }
+            else
+            {
+                string status = LicenseManager.StatusText;
+                foreach (var btn in _toolButtons)
+                    btn.ToolTip = $"{btn.ToolTip}\n\n⏱ {status}";
+            }
         }
 
-        public Result OnShutdown(UIControlledApplication app) => Result.Succeeded;
+        // ── Icon loader ───────────────────────────────────────────────────
 
         private System.Windows.Media.ImageSource LoadIcon(string fileName)
         {

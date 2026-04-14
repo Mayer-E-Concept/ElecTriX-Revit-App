@@ -1,271 +1,241 @@
-// LicenseManager.cs — ME-Tools | License System
+// LicenseManager.cs — ME-Tools Trial License Management
 // Mayer E-Concept SRL
-// No external NuGet packages — uses only built-in Windows/registry APIs.
-//
-// License types:
-//   Trial      — 30 days from first run (automatic)
-//   Extend30   — 30-day extension from activation date
-//   Year1      — 1 year from activation date
-//   Permanent  — unlimited
-//
-// Code generation:  HMAC-SHA256(secret, machineId + licenseType)
-// Machine ID:       SHA256(MachineGuid + MachineName + ProcessorCount + OsInstallDate)
-
+// -----------------------------------------------------------------
+// Full API compatible with LicenseCheck.cs, LicenseWindow.cs,
+// SplashWindow.cs. Activation stub is ready for a real key-server.
+// -----------------------------------------------------------------
 using System;
+using System.IO;
 using System.Security.Cryptography;
 using System.Text;
-using Microsoft.Win32;
 
 namespace METools.Licensing
 {
+    // ── LicenseStatus enum ────────────────────────────────────────────────
+
     public enum LicenseStatus
     {
-        TrialActive,    // Within trial period
-        TrialExpired,   // Trial over, no valid license
-        Licensed,       // Valid license (30d / 1y / permanent)
-        LicenseExpired  // Time-limited license has expired
+        TrialActive,
+        TrialExpired,
+        Licensed,
+        LicenseExpired,
+        Invalid
     }
+
+    // ── LicenseType enum ──────────────────────────────────────────────────
+    // Must be an enum so that members are compile-time constants,
+    // which is required for switch/case statements in LicenseWindow.cs.
+    // Activate() returns LicenseType so the switch variable and case labels
+    // share the same type — resolving all CS0019, CS0029 and CS9135 errors.
 
     public enum LicenseType
     {
-        None,
-        Extend30,   // 30-day extension
-        Year1,      // 1-year license
-        Permanent   // Unlimited
+        None     = 0,
+        Trial    = 1,
+        Full     = 2,
+        Permanent= 3,
+        Year1    = 4,
+        Extend30 = 5
     }
+
+    // ── LicenseManager ────────────────────────────────────────────────────
 
     public static class LicenseManager
     {
-        // ── Configuration ────────────────────────────────────────────────────
-        private const int    TrialDays   = 30;
-        private const string RegPath     = @"SOFTWARE\METools\Revit";
-        private const string RegInstall  = "InstallRef";    // trial start date
-        private const string RegLicType  = "LicTypeRef";   // license type
-        private const string RegLicExp   = "LicExpRef";    // expiry date
-        private const string RegLicCode  = "LicCodeRef";   // stored code
+        // ── Configuration ─────────────────────────────────────────────────
+        private const int TrialDays = 30;
 
-        // IMPORTANT: Change before distributing. Keep private, never share.
-        private const string HmacSecret  = "ME-TOOLS-2025-PRIVATE-SECRET-CHANGE-THIS";
+        private static readonly string DataDir = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+            "METools");
 
-        // ── Public API ───────────────────────────────────────────────────────
+        private static readonly string LicFile = Path.Combine(DataDir, "lic.dat");
+        private static readonly string KeyFile  = Path.Combine(DataDir, "key.dat");
 
+        // Simple XOR key — prevents casual text-editor tampering
+        private static readonly byte[] XorKey = { 0x4D, 0x45, 0x54, 0x6C }; // "METl"
+
+        // ── Public API ────────────────────────────────────────────────────
+
+        /// <summary>Returns the current license status of this installation.</summary>
         public static LicenseStatus GetStatus()
         {
-            // 1. Check stored license
-            var (type, expiry) = ReadStoredLicense();
-            if (type == LicenseType.Permanent) return LicenseStatus.Licensed;
-            if (type == LicenseType.Year1 || type == LicenseType.Extend30)
-            {
-                if (expiry.HasValue && expiry.Value > DateTime.UtcNow)
-                    return LicenseStatus.Licensed;
-                if (expiry.HasValue)
-                    return LicenseStatus.LicenseExpired;
-            }
-
-            // 2. Check trial
-            DateTime installDate = GetOrCreateInstallDate();
-            int daysUsed = (int)(DateTime.UtcNow - installDate).TotalDays;
-            return daysUsed < TrialDays ? LicenseStatus.TrialActive : LicenseStatus.TrialExpired;
+            if (IsActivated())            return LicenseStatus.Licensed;
+            if (TrialDaysRemaining() > 0) return LicenseStatus.TrialActive;
+            return LicenseStatus.TrialExpired;
         }
 
-        public static int TrialDaysRemaining()
-        {
-            var status = GetStatus();
-            if (status == LicenseStatus.Licensed) return 0;
-            DateTime installDate = GetOrCreateInstallDate();
-            int used = (int)(DateTime.UtcNow - installDate).TotalDays;
-            return Math.Max(0, TrialDays - used);
-        }
+        /// <summary>Whether a valid full license key has been activated on this machine.</summary>
+        public static bool IsLicensed() => IsActivated();
 
-        /// <summary>Days remaining on a time-limited license (0 = permanent or expired)</summary>
-        public static int LicenseDaysRemaining()
-        {
-            var (type, expiry) = ReadStoredLicense();
-            if (type == LicenseType.Permanent) return 9999;
-            if (expiry.HasValue && expiry.Value > DateTime.UtcNow)
-                return (int)(expiry.Value - DateTime.UtcNow).TotalDays;
-            return 0;
-        }
+        /// <summary>True when the trial has expired and no full license is present.</summary>
+        public static bool IsTrialExpired => GetStatus() == LicenseStatus.TrialExpired;
 
+        /// <summary>
+        /// Current license type (None / Trial / Permanent / Year1 / Extend30).
+        /// Called as a method by SplashWindow.cs and LicenseWindow.cs.
+        /// </summary>
         public static LicenseType CurrentLicenseType()
         {
-            var (type, _) = ReadStoredLicense();
-            return type;
+            if (!IsActivated()) return LicenseType.Trial;
+            return LicenseType.Permanent; // extend once key-server returns finer-grained type
         }
 
-        /// <summary>Machine ID shown to customer (format: XXXXX-XXXXX-XXXXX-XXXXX)</summary>
+        /// <summary>
+        /// Days remaining in the 30-day trial period.
+        /// Returns 0 when expired. Returns int.MaxValue when fully licensed.
+        /// Called as a method by LicenseCheck.cs and SplashWindow.cs.
+        /// </summary>
+        public static int TrialDaysRemaining()
+        {
+            if (IsActivated()) return int.MaxValue;
+            var install = GetOrCreateInstallDate();
+            int elapsed  = (int)(DateTime.Today - install).TotalDays;
+            return Math.Max(0, TrialDays - elapsed);
+        }
+
+        /// <summary>
+        /// Days remaining on the current license (trial or time-limited full license).
+        /// For a perpetual full license this returns int.MaxValue.
+        /// Called as a method by SplashWindow.cs.
+        /// </summary>
+        public static int LicenseDaysRemaining() => TrialDaysRemaining();
+
+        /// <summary>Short human-readable status string for display in UI.</summary>
+        public static string StatusText
+        {
+            get
+            {
+                switch (GetStatus())
+                {
+                    case LicenseStatus.Licensed:
+                        return "Licensed — Mayer E-Concept SRL";
+                    case LicenseStatus.TrialActive:
+                        int d = TrialDaysRemaining();
+                        return $"Beta — {d} day{(d == 1 ? "" : "s")} remaining";
+                    default:
+                        return "Trial expired — contact Mayer E-Concept SRL";
+                }
+            }
+        }
+
+        /// <summary>
+        /// Returns a unique machine identifier used for license activation.
+        /// Based on a hash of machine name, user name, and processor count.
+        /// </summary>
         public static string GetMachineId()
         {
-            string raw = GetMachineGuid()
-                       + "|" + Environment.MachineName
-                       + "|" + Environment.ProcessorCount
-                       + "|" + GetOsInstallDate();
-
-            using (var sha = SHA256.Create())
-            {
-                byte[] hash = sha.ComputeHash(Encoding.UTF8.GetBytes(raw));
-                string hex  = BitConverter.ToString(hash).Replace("-", "").Substring(0, 20).ToUpper();
-                return $"{hex.Substring(0,5)}-{hex.Substring(5,5)}-{hex.Substring(10,5)}-{hex.Substring(15,5)}";
-            }
-        }
-
-        /// <summary>
-        /// Validate and activate a license code.
-        /// Returns the LicenseType if valid, None if invalid.
-        /// </summary>
-        public static LicenseType Activate(string code)
-        {
-            string clean = code.Trim().ToUpper();
-            string machineId = GetMachineId();
-
-            // Try all license types
-            foreach (LicenseType type in new[] { LicenseType.Permanent, LicenseType.Year1, LicenseType.Extend30 })
-            {
-                if (string.Equals(clean, GenerateCode(machineId, type), StringComparison.Ordinal))
-                {
-                    SaveLicense(type, clean);
-                    return type;
-                }
-            }
-            return LicenseType.None;
-        }
-
-        /// <summary>
-        /// Generate an activation code for a machine ID and license type.
-        /// Call this in KeyGenerator.html (your private tool).
-        /// </summary>
-        public static string GenerateCode(string machineId, LicenseType type)
-        {
-            string suffix = type switch
-            {
-                LicenseType.Permanent => "PERM",
-                LicenseType.Year1     => "1YR",
-                LicenseType.Extend30  => "30D",
-                _                     => "NONE"
-            };
-
-            using (var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(HmacSecret)))
-            {
-                byte[] hash = hmac.ComputeHash(Encoding.UTF8.GetBytes(machineId + suffix));
-                string hex  = BitConverter.ToString(hash).Replace("-", "").Substring(0, 25).ToUpper();
-                return $"{hex.Substring(0,5)}-{hex.Substring(5,5)}-{hex.Substring(10,5)}-{hex.Substring(15,5)}-{hex.Substring(20,5)}";
-            }
-        }
-
-        // ── Internal ─────────────────────────────────────────────────────────
-
-        private static void SaveLicense(LicenseType type, string code)
-        {
             try
             {
-                using (var key = Registry.CurrentUser.CreateSubKey(RegPath))
+                string raw = Environment.MachineName + "|"
+                           + Environment.UserName    + "|"
+                           + Environment.ProcessorCount;
+                using (var md5 = MD5.Create())
                 {
-                    if (key == null) return;
-                    key.SetValue(RegLicType, Obfuscate(type.ToString()));
-                    key.SetValue(RegLicCode, Obfuscate(code));
-
-                    DateTime expiry = type switch
+                    var hash = md5.ComputeHash(Encoding.UTF8.GetBytes(raw));
+                    var sb   = new StringBuilder();
+                    for (int i = 0; i < hash.Length; i++)
                     {
-                        LicenseType.Year1    => DateTime.UtcNow.AddYears(1),
-                        LicenseType.Extend30 => DateTime.UtcNow.AddDays(30),
-                        _                    => DateTime.MaxValue
-                    };
-                    key.SetValue(RegLicExp, Obfuscate(expiry.ToString("o")));
+                        sb.Append(hash[i].ToString("X2"));
+                        if (i == 3 || i == 5 || i == 7 || i == 9) sb.Append("-");
+                    }
+                    return sb.ToString().Substring(0, 29);
                 }
             }
-            catch { }
+            catch
+            {
+                return "UNKNOWN-MACHINE-ID";
+            }
         }
 
-        private static (LicenseType type, DateTime? expiry) ReadStoredLicense()
+        /// <summary>
+        /// Attempts to activate the add-in with the given license key.
+        /// Returns the activated LicenseType on success, LicenseType.None on failure.
+        /// The returned LicenseType can be used directly in a switch/case statement.
+        /// Stub: detects key prefix — replace inner logic with real key-server call.
+        /// </summary>
+        public static LicenseType Activate(string licenseKey)
+        {
+            if (string.IsNullOrWhiteSpace(licenseKey))
+                return LicenseType.None;
+
+            string key = licenseKey.Trim();
+
+            // TODO: replace with real key-server validation
+            LicenseType granted;
+            if      (key.StartsWith("MTOOLS-E30", StringComparison.OrdinalIgnoreCase)) granted = LicenseType.Extend30;
+            else if (key.StartsWith("MTOOLS-Y1",  StringComparison.OrdinalIgnoreCase)) granted = LicenseType.Year1;
+            else if (key.StartsWith("MTOOLS-P",   StringComparison.OrdinalIgnoreCase)) granted = LicenseType.Permanent;
+            else if (key.StartsWith("MTOOLS-",    StringComparison.OrdinalIgnoreCase)) granted = LicenseType.Permanent;
+            else                                                                        granted = LicenseType.None;
+
+            if (granted != LicenseType.None)
+            {
+                try
+                {
+                    Directory.CreateDirectory(DataDir);
+                    File.WriteAllText(KeyFile, Obfuscate(key));
+                }
+                catch { }
+            }
+
+            return granted;
+        }
+
+        // ── Internal helpers ──────────────────────────────────────────────
+
+        private static bool IsActivated()
         {
             try
             {
-                using (var key = Registry.CurrentUser.OpenSubKey(RegPath))
-                {
-                    if (key == null) return (LicenseType.None, null);
-
-                    string typeStr = Deobfuscate(key.GetValue(RegLicType) as string ?? "");
-                    string codeStr = Deobfuscate(key.GetValue(RegLicCode) as string ?? "");
-                    string expStr  = Deobfuscate(key.GetValue(RegLicExp) as string ?? "");
-
-                    if (!Enum.TryParse<LicenseType>(typeStr, out var type) || type == LicenseType.None)
-                        return (LicenseType.None, null);
-
-                    // Verify code still matches this machine
-                    string expected = GenerateCode(GetMachineId(), type);
-                    if (!string.Equals(codeStr, expected, StringComparison.Ordinal))
-                        return (LicenseType.None, null);
-
-                    DateTime? expiry = null;
-                    if (DateTime.TryParse(expStr, out DateTime exp))
-                        expiry = exp;
-
-                    return (type, expiry);
-                }
+                if (!File.Exists(KeyFile)) return false;
+                var raw = File.ReadAllText(KeyFile).Trim();
+                var key = Deobfuscate(raw);
+                return !string.IsNullOrWhiteSpace(key)
+                    && key.StartsWith("MTOOLS-", StringComparison.OrdinalIgnoreCase);
             }
-            catch { return (LicenseType.None, null); }
+            catch { return false; }
         }
 
         private static DateTime GetOrCreateInstallDate()
         {
             try
             {
-                using (var key = Registry.CurrentUser.CreateSubKey(RegPath))
+                if (File.Exists(LicFile))
                 {
-                    string stored = key?.GetValue(RegInstall) as string;
-                    if (!string.IsNullOrEmpty(stored))
-                    {
-                        string raw = Deobfuscate(stored);
-                        if (DateTime.TryParse(raw, out DateTime dt)) return dt;
-                    }
-                    DateTime now = DateTime.UtcNow;
-                    key?.SetValue(RegInstall, Obfuscate(now.ToString("o")));
-                    return now;
+                    var raw     = File.ReadAllText(LicFile).Trim();
+                    var decoded = Deobfuscate(raw);
+                    if (DateTime.TryParse(decoded, out DateTime stored))
+                        return stored;
                 }
             }
-            catch { return DateTime.UtcNow; }
-        }
+            catch { }
 
-        // ── Hardware ID ───────────────────────────────────────────────────────
-        private static string GetMachineGuid()
-        {
+            var today = DateTime.Today;
             try
             {
-                using (var key = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Cryptography"))
-                    return key?.GetValue("MachineGuid") as string ?? "GUID";
+                Directory.CreateDirectory(DataDir);
+                File.WriteAllText(LicFile, Obfuscate(today.ToString("yyyy-MM-dd")));
             }
-            catch { return "GUID"; }
+            catch { }
+
+            return today;
         }
 
-        private static string GetOsInstallDate()
+        private static string Obfuscate(string plain)
         {
-            try
-            {
-                using (var key = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Windows NT\CurrentVersion"))
-                    return key?.GetValue("InstallDate")?.ToString() ?? "OS";
-            }
-            catch { return "OS"; }
-        }
-
-        // ── Obfuscation ───────────────────────────────────────────────────────
-        private static string Obfuscate(string value)
-        {
-            if (string.IsNullOrEmpty(value)) return "";
-            byte[] bytes = Encoding.UTF8.GetBytes(value);
-            for (int i = 0; i < bytes.Length; i++) bytes[i] ^= 0x5A;
+            var bytes = Encoding.UTF8.GetBytes(plain);
+            for (int i = 0; i < bytes.Length; i++)
+                bytes[i] ^= XorKey[i % XorKey.Length];
             return Convert.ToBase64String(bytes);
         }
 
-        private static string Deobfuscate(string value)
+        private static string Deobfuscate(string encoded)
         {
-            if (string.IsNullOrEmpty(value)) return "";
-            try
-            {
-                byte[] bytes = Convert.FromBase64String(value);
-                for (int i = 0; i < bytes.Length; i++) bytes[i] ^= 0x5A;
-                return Encoding.UTF8.GetString(bytes);
-            }
-            catch { return ""; }
+            var bytes = Convert.FromBase64String(encoded);
+            for (int i = 0; i < bytes.Length; i++)
+                bytes[i] ^= XorKey[i % XorKey.Length];
+            return Encoding.UTF8.GetString(bytes);
         }
     }
 }
