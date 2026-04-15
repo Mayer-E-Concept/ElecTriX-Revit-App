@@ -13,26 +13,21 @@ namespace METools.LampPlacer
 
     public enum DistributionMode { AreaBased, ManualGrid }
     public enum RotationMode     { Auto, Deg0, Deg90 }
-
-    public enum LineOrientation
-    {
-        AlongLine,    // Lamp length parallel to line direction
-        Perpendicular // Lamp length perpendicular to line direction
-    }
+    public enum LineMode        { BySpacing, ByCount }
+    public enum LineOrientation { AlongLine, Perpendicular }
 
     public enum LampAction
     {
         PlaceSingle,
         PlaceMulti,
+        Redistribute,
         RefreshRoom,
         RefreshMulti,
-        RotateRoom,
-        PlaceLine
+        PlaceOnLine
     }
 
     public class LampConfig
     {
-        // Room placement
         public string           FamilyName   { get; set; } = "";
         public string           TypeName     { get; set; } = "";
         public DistributionMode Distribution { get; set; } = DistributionMode.AreaBased;
@@ -42,13 +37,10 @@ namespace METools.LampPlacer
         public double           WallMargin   { get; set; } = 1500.0;
         public RotationMode     Rotation     { get; set; } = RotationMode.Auto;
         public double           UKDOffset    { get; set; } = 0.0;
-
-        // Line placement — count is the only user input.
-        // Lamp length read automatically from family symbol.
-        // Axis spacing = lineLength / count (each lamp in its own segment).
-        // Margin at start/end = axis/2 (lamp centered in first/last segment).
-        public LineOrientation LineOrientation { get; set; } = LineOrientation.AlongLine;
-        public int             LineCount       { get; set; } = 4;
+        public double           LineSpacing     { get; set; } = 2000.0;
+        public int              LineCount       { get; set; } = 4;
+        public LineMode         LineMode        { get; set; } = LineMode.BySpacing;
+        public LineOrientation  LineOrientation { get; set; } = LineOrientation.AlongLine;
     }
 
     public class LampRequest

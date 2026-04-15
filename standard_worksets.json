@@ -1,0 +1,15 @@
+{
+  "worksets": [
+    "300_Gebäude DWG Unterlagen",
+    "300_Gebäude Revit Unterlagen",
+    "443_Niederspannungsschaltanlagen",
+    "444_Elektrotechnik (Installation)",
+    "445_Beleuchtungsanlagen",
+    "446_Erdungs&Blitzschutzanlagen",
+    "449_Sonstiges zu KG440",
+    "454_Elektroakustische Anlage",
+    "456_Brandmeldeanlage",
+    "457_Datenübertragungsnetze",
+    "480_Gebäudeautomation"
+  ]
+}

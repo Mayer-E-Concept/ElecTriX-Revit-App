@@ -1,9 +1,10 @@
 // App.cs — ME-Tools Ribbon Setup
 // Mayer E-Concept SRL
 using Autodesk.Revit.DB;
+using Autodesk.Revit.DB.Events;
 using Autodesk.Revit.UI;
+using System;
 using System.Reflection;
-using METools.Licensing;
 using System.Windows.Media.Imaging;
 
 namespace METools
@@ -16,32 +17,30 @@ namespace METools
 
         public Result OnStartup(UIControlledApplication app)
         {
+            // Show license/beta splash on every document open (until licensed)
+            app.ControlledApplication.DocumentOpened += OnDocumentOpened;
+
             try { app.CreateRibbonTab(TAB); } catch { }
 
             var panel  = app.CreateRibbonPanel(TAB, PANEL);
             string dll = Assembly.GetExecutingAssembly().Location;
 
-            // ── Settings (first button — license, theme, language) ───────────
+            // ── Settings — FIRST button (theme + language + license + worksets)
             var settingsBtn = new PushButtonData(
                 "Settings", "Settings", dll,
                 "METools.SettingsCommand")
             {
-                ToolTip         = "Open ME-Tools Settings: theme, language and license management.",
-                LongDescription = $"Settings — {VENDOR}\n\n" +
-                                  "• Appearance: switch between Dark and Light mode\n" +
-                                  "• Language: set display language\n" +
-                                  "• License: enter and activate your license key\n\n" +
-                                  $"License status: {LicenseManager.StatusText}",
-                Image           = LoadIcon("icon_settings_16.png"),
-                LargeImage      = LoadIcon("icon_settings_32.png"),
+                ToolTip         = "Open ME-Tools Settings: theme, language, license and worksets.",
+                LongDescription = $"Settings — {VENDOR}\n\nAppearance · Language · License · Worksets\n\nLicense status: {LicenseManager.StatusText}",
+                Image           = LoadIcon("icon_settings_16.png") ?? LoadIcon("icon_cfg_16.png"),
+                LargeImage      = LoadIcon("icon_settings_32.png") ?? LoadIcon("icon_cfg_32.png"),
             };
             var settingsButton = panel.AddItem(settingsBtn) as PushButton;
             if (settingsButton != null)
                 SettingsCommand.RibbonButton = settingsButton;
-
             panel.AddSeparator();
 
-            // ── Family Placer ───────────────────────────────────────────────
+            // ── Family Placer ─────────────────────────────────────────────
             var fpBtn = new PushButtonData(
                 "FamilyPlacer", "Family\nPlacer", dll,
                 "METools.FamilyPlacer.FamilyPlacerCommand")
@@ -54,20 +53,20 @@ namespace METools
             panel.AddItem(fpBtn);
             panel.AddSeparator();
 
-            // ── Lamp Placer ─────────────────────────────────────────────────
+            // ── Lamp Placer ───────────────────────────────────────────────
             var lpBtn = new PushButtonData(
                 "LampPlacer", "Lamp\nPlacer", dll,
                 "METools.LampPlacer.LampPlacerCommand")
             {
-                ToolTip         = "Place lighting fixtures evenly distributed across selected rooms.",
-                LongDescription = $"Lamp Placer — {VENDOR}\n\nSelect a room and lamps are placed automatically.\n\n• Configurable wall margin and lamp spacing\n• Height = UKD (underside of ceiling)\n• Multiple rooms simultaneously\n• Manual grid (rows × columns) or area-based auto mode",
+                ToolTip         = "Place lighting fixtures evenly distributed across selected rooms or MEP spaces.",
+                LongDescription = $"Lamp Placer — {VENDOR}\n\nSelect a room or MEP space and lamps are placed automatically.\n\n• Configurable wall margin and lamp spacing\n• Height = UKD (underside of ceiling)\n• Multiple rooms simultaneously\n• Manual grid (rows x columns) or area-based auto mode\n• Place on line with fixed spacing",
                 Image           = LoadIcon("icon_lamp_16.png"),
                 LargeImage      = LoadIcon("icon_lamp_32.png"),
             };
             panel.AddItem(lpBtn);
             panel.AddSeparator();
 
-            // ── Fix Level ───────────────────────────────────────────────────
+            // ── Fix Level ─────────────────────────────────────────────────
             var flBtn = new PushButtonData(
                 "FixLevel", "Fix\nLevel", dll,
                 "METools.FixLevelCommand")
@@ -80,46 +79,46 @@ namespace METools
             panel.AddItem(flBtn);
             panel.AddSeparator();
 
-            // ── Auto Room Separation ─────────────────────────────────────────
-            var arsBtn = new PushButtonData(
-                "AutoRoomSeparation", "Room\nSeparation", dll,
-                "METools.AutoRoomSeparation.AutoRoomSeparationCommand")
-            {
-                ToolTip         = "Automatically generate Room Separation Lines from DWG / IFC geometry.",
-                LongDescription = $"Auto Room Separation — {VENDOR}\n\n" +
-                                  "Reads wall geometry from linked DWG files, DirectShape/IFC elements, or native Revit Walls, " +
-                                  "finds closed room polygons and places Room Separation Lines in the active floor plan.\n\n" +
-                                  "• Configurable area filter (min / max m²)\n" +
-                                  "• DWG layer exclusion filter\n" +
-                                  "• Duplicate line detection",
-                Image           = LoadIcon("icon_ars_16.png") ?? LoadIcon("icon_fl_fix_16.png"),
-                LargeImage      = LoadIcon("icon_ars_32.png") ?? LoadIcon("icon_fl_fix_32.png"),
-            };
-            panel.AddItem(arsBtn);
-            panel.AddSeparator();
-
-            // ── Circuit Config ───────────────────────────────────────────────
+            // ── Circuit Config ────────────────────────────────────────────
             var cfgBtn = new PushButtonData(
                 "CircuitConfig", "Circuit\nConfig", dll,
                 "METools.FamilyPlacer.KonfigurationsCommand")
             {
                 ToolTip         = "Configure automatic circuit assignment: map room types and special outlets to circuit names.",
-                LongDescription = $"Circuit Configuration — {VENDOR}\n\nMap room types (e.g. Bedroom → 2F1) and special outlets (WM, KS, BO...) to circuit names.\n\n• Synonyms recognized automatically\n• Panel assignment via room schema detection\n• Settings saved as a project parameter",
+                LongDescription = $"Circuit Configuration — {VENDOR}\n\nMap room types (e.g. Bedroom -> 2F1) and special outlets (WM, KS, BO...) to circuit names.\n\n• Synonyms recognized automatically\n• Panel assignment via room schema detection\n• Settings saved as a project parameter",
                 Image           = LoadIcon("icon_cfg_new_16.png"),
                 LargeImage      = LoadIcon("icon_cfg_new_32.png"),
             };
             panel.AddItem(cfgBtn);
 
-            // ── Startup splash (shown after Revit finishes loading) ──────────
-            app.ControlledApplication.ApplicationInitialized += OnApplicationInitialized;
+            panel.AddSeparator();
+
+            // ── Clash Detector ────────────────────────────────────────────
+            var clashBtn = new PushButtonData(
+                "ClashDetector", "Clash\nDetector", dll,
+                "METools.ClashDetector.ClashDetectorCommand")
+            {
+                ToolTip         = "Detect collisions between MEP elements (trays, conduits, ducts, pipes) and architecture / structure. Place opening families automatically.",
+                LongDescription = $"Clash Detector — {VENDOR}\n\nChecks cable trays, conduits, ducts and pipes against walls, floors and structural elements — in the current model and all linked files.\n\n• Mark collision zones as red filled areas in the floor plan\n• Place Auxalia CAx opening family with exact tray dimensions\n  (Trassenhöhe, Trassenbreite, X/Z-Überstand, OKB_zu_Achse, Vorzug/Nachzug)\n• MEP element ID stored in family — Sync repositions after tray is moved\n• 3D Inspector view with section-box cropped to each collision\n• Single-click row = floor plan  |  Double-click row = 3D Inspector\n• Flex pipes and flex ducts excluded (cast in concrete)",
+                Image           = LoadIcon("icon_clash_16.png"),
+                LargeImage      = LoadIcon("icon_clash_32.png"),
+            };
+            panel.AddItem(clashBtn);
 
             return Result.Succeeded;
         }
 
-        private void OnApplicationInitialized(
-            object sender,
-            Autodesk.Revit.DB.Events.ApplicationInitializedEventArgs e)
+        // ── License / beta splash on every document open ──────────────────
+        private static DateTime _lastSplashTime = DateTime.MinValue;
+
+        private static void OnDocumentOpened(object sender, DocumentOpenedEventArgs e)
         {
+            if (LicenseManager.IsLicensed()) return;
+
+            // Prevent multiple splashes within 10 seconds (linked docs fire DocumentOpened too)
+            if ((DateTime.Now - _lastSplashTime).TotalSeconds < 10) return;
+            _lastSplashTime = DateTime.Now;
+
             try
             {
                 System.Windows.Application.Current?.Dispatcher?.BeginInvoke(
@@ -132,7 +131,11 @@ namespace METools
             catch { }
         }
 
-        public Result OnShutdown(UIControlledApplication app) => Result.Succeeded;
+        public Result OnShutdown(UIControlledApplication app)
+        {
+            app.ControlledApplication.DocumentOpened -= OnDocumentOpened;
+            return Result.Succeeded;
+        }
 
         private System.Windows.Media.ImageSource LoadIcon(string fileName)
         {

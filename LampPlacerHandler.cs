@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Linq;
 using Autodesk.Revit.DB;
 using Autodesk.Revit.DB.Architecture;
+using Autodesk.Revit.DB.Mechanical;
 using Autodesk.Revit.DB.Structure;
 using Autodesk.Revit.UI;
 using Autodesk.Revit.UI.Selection;
@@ -12,9 +13,16 @@ using OperationCanceledException = Autodesk.Revit.Exceptions.OperationCanceledEx
 
 namespace METools.LampPlacer
 {
-    public class RoomFilter : ISelectionFilter
+    // ── Selection filters ────────────────────────────────────────────────────
+    public class RoomOrSpaceFilter : ISelectionFilter
     {
-        public bool AllowElement(Element e) => e is Room;
+        public bool AllowElement(Element e) => e is Room || e is Space;
+        public bool AllowReference(Reference r, XYZ p) => false;
+    }
+
+    public class LineFilter : ISelectionFilter
+    {
+        public bool AllowElement(Element e) => e is CurveElement;
         public bool AllowReference(Reference r, XYZ p) => false;
     }
 
@@ -24,564 +32,270 @@ namespace METools.LampPlacer
         public Action<string> OnStatus { get; set; }
         public Action<int>    OnPlaced { get; set; }
 
+        // ── Execute ───────────────────────────────────────────────────────
         public void Execute(UIApplication app)
         {
             var uidoc = app.ActiveUIDocument;
             var doc   = uidoc.Document;
 
-            switch (Request.Action)
-            {
-                case LampAction.RefreshRoom:  RefreshRooms(uidoc, doc, false); return;
-                case LampAction.RefreshMulti: RefreshRooms(uidoc, doc, true);  return;
-                case LampAction.RotateRoom:   RotateRoom(uidoc, doc);          return;
-                case LampAction.PlaceLine:    PlaceLine(uidoc, doc);           return;
-            }
+            if (Request.Action == LampAction.Redistribute)
+            { Redistribute(uidoc, doc); return; }
 
+            if (Request.Action == LampAction.RefreshRoom)
+            { RefreshRoom(uidoc, doc); return; }
+
+            if (Request.Action == LampAction.RefreshMulti)
+            { RefreshMulti(uidoc, doc); return; }
+
+            if (Request.Action == LampAction.PlaceOnLine)
+            { PlaceOnLine(uidoc, doc); return; }
+
+            // ── Room / Space placement ────────────────────────────────────
             var sym = doc.GetElement(Request.SymbolId) as FamilySymbol;
             if (sym == null) { OnStatus?.Invoke("Family not found."); return; }
             if (!sym.IsActive)
-            { using (var t = new Transaction(doc, "Activate")) { t.Start(); sym.Activate(); t.Commit(); } }
+            { using (var t = new Transaction(doc,"Activate")){t.Start();sym.Activate();t.Commit();} }
 
-            var rooms = new List<Room>();
+            var spaces = new List<SpatialElement>();
             try
             {
                 if (Request.Action == LampAction.PlaceMulti)
                 {
                     var refs = uidoc.Selection.PickObjects(ObjectType.Element,
-                        new RoomFilter(), "Click rooms — press ESC when done");
-                    rooms = refs.Select(r => doc.GetElement(r) as Room).Where(r => r != null).ToList();
+                        new RoomOrSpaceFilter(), "Click rooms or MEP spaces — ESC when done");
+                    spaces = refs.Select(r => doc.GetElement(r) as SpatialElement)
+                                 .Where(s => s != null).ToList();
                 }
                 else
                 {
                     var r = uidoc.Selection.PickObject(ObjectType.Element,
-                        new RoomFilter(), "Click a room to place lamps");
-                    if (doc.GetElement(r) is Room rm) rooms.Add(rm);
+                        new RoomOrSpaceFilter(), "Click a room to place lamps");
+                    if (doc.GetElement(r) is SpatialElement sp) spaces.Add(sp);
                 }
             }
             catch (OperationCanceledException) { OnStatus?.Invoke("Cancelled."); return; }
             catch (Exception ex)               { OnStatus?.Invoke($"Error: {ex.Message}"); return; }
 
-            if (!rooms.Any()) { OnStatus?.Invoke("No rooms selected."); return; }
+            if (!spaces.Any()) { OnStatus?.Invoke("No rooms selected."); return; }
 
-            var    cfg     = Request.Config;
+            var cfg = Request.Config;
             double wallFt   = ToFeet(cfg.WallMargin);
             double offsetFt = ToFeet(cfg.UKDOffset);
-            int    total    = 0;
 
+            bool isFaceBased = sym.Family.FamilyPlacementType == FamilyPlacementType.WorkPlaneBased
+                            || sym.Family.FamilyPlacementType == FamilyPlacementType.OneLevelBasedHosted;
+
+            int total = 0;
             using (var tx = new Transaction(doc, "ME-Tools: Place Lamps"))
             {
                 tx.Start();
-                foreach (var room in rooms)
+                foreach (var space in spaces)
                 {
-                    var bb = room.get_BoundingBox(null);
+                    var bb = space.get_BoundingBox(null);
                     if (bb == null) continue;
-                    double ceilingZ = bb.Max.Z - offsetFt;
-                    double floorZ   = room.Level?.Elevation ?? 0;
-                    var    level    = room.Level ?? GetNearestLevel(doc, floorZ);
-                    double roomW    = bb.Max.X - bb.Min.X;
-                    double roomD    = bb.Max.Y - bb.Min.Y;
-                    double area     = UnitUtils.ConvertFromInternalUnits(room.Area, UnitTypeId.SquareMeters);
+
+                    // UKD: bb.Max.Z works when room upper limit = UKD level.
+                    // Fallback: find highest level between room floor and bb.Max.Z.
+                    double ukdZ   = ResolveUKDZ(doc, bb, space) - offsetFt;
+                    double floorZ = space.Level?.Elevation ?? bb.Min.Z;
+                    var    level  = GetNearestLevel(doc, ukdZ);
+
+                    double roomW = bb.Max.X - bb.Min.X;
+                    double roomD = bb.Max.Y - bb.Min.Y;
+                    double area  = UnitUtils.ConvertFromInternalUnits(space.Area, UnitTypeId.SquareMeters);
 
                     int rows, cols;
                     CalcGrid(cfg, area, roomW, roomD, out rows, out cols);
                     double angle = CalcAngle(cfg.Rotation, roomW, roomD);
-                    var pts = CalcGridPoints(bb, wallFt, rows, cols, ceilingZ);
+                    var pts = CalcPoints(bb, wallFt, rows, cols, ukdZ, space, floorZ);
 
                     foreach (var pt in pts)
                     {
-                        if (!IsInRoom(room, new XYZ(pt.X, pt.Y, floorZ + 0.5))) continue;
+                        if (!IsPointInside(space, new XYZ(pt.X, pt.Y, floorZ + 0.5))) continue;
                         FamilyInstance inst = null;
-                        try { inst = PlaceLampInstance(doc, sym, pt, level, ceilingZ); }
+                        try { inst = PlaceLampInstance(doc, sym, pt, level, ukdZ, angle); }
                         catch { continue; }
                         if (inst == null) continue;
                         doc.Regenerate();
-                        if (Math.Abs(angle) > 0.001)
+                        if (!isFaceBased && Math.Abs(angle) > 0.001)
                             try { ElementTransformUtils.RotateElement(doc, inst.Id,
                                 Line.CreateBound(pt, pt + XYZ.BasisZ), angle); } catch { }
-                        SetScheduleLevel(inst, level);
+                        if (level != null)
+                            try { var p = inst.get_Parameter(BuiltInParameter.INSTANCE_SCHEDULE_ONLY_LEVEL_PARAM);
+                                if (p != null && !p.IsReadOnly) p.Set(level.Id); } catch { }
                         total++;
                     }
                 }
                 tx.Commit();
             }
-            OnStatus?.Invoke($"Done: {rooms.Count} room(s), {total} lamps placed.");
+            OnStatus?.Invoke($"Done: {spaces.Count} room(s), {total} lamps placed.");
             OnPlaced?.Invoke(total);
         }
 
-        // ─────────────────────────────────────────────────────────────────────
-        // LINE PLACEMENT
-        //
-        // Formula (DIALux-style, count is the only user input):
-        //
-        //   axis   = lineLength / count
-        //   center_i = axis * (i + 0.5)   for i = 0 .. count-1
-        //
-        // Visual:  |--axis/2--|<lamp>|--gap--|<lamp>|--gap--|<lamp>|--axis/2--|
-        //          axis/2 = distance from line endpoint to lamp CENTER
-        //          gap    = axis - lampLen  (between lamp edges)
-        //          margin = axis/2 - lampLen/2  (from line endpoint to lamp EDGE)
-        //
-        // Constraint: axis >= lampLen  (lamp must fit in its segment)
-        //   → count <= lineLength / lampLen
-        //   → count is auto-reduced if needed
-        //
-        // Lamp length read automatically from selected family.
-        // Ortho-snap: snaps to 0°/45°/90° if within ±5°.
-        // H+V crosshair guide lines at start point, deleted with placement.
-        // ─────────────────────────────────────────────────────────────────────
-        private void PlaceLine(UIDocument uidoc, Document doc)
+        // ── UKD resolution ────────────────────────────────────────────────
+        // Strategy:
+        // 1. Always check for a UKD/Decke/Ceiling-named level between floor and ceiling.
+        //    → Handles UG rooms where upper limit = EG but "UKD UG" level exists at -910mm.
+        // 2. If none found: use bb.Max.Z directly (old working behavior).
+        //    → Handles standard rooms where upper limit IS the UKD.
+        // NOTE: Never pick OG1/OG2 etc. as intermediate — only explicit UKD-named levels.
+        private double ResolveUKDZ(Document doc, BoundingBoxXYZ bb, SpatialElement space)
         {
-            var sym = doc.GetElement(Request.SymbolId) as FamilySymbol;
-            if (sym == null) { OnStatus?.Invoke("Family not found."); return; }
-            if (!sym.IsActive)
-            { using (var t = new Transaction(doc, "Activate")) { t.Start(); sym.Activate(); t.Commit(); } }
+            double roomMaxZ = bb.Max.Z;
+            double roomMinZ = Math.Min(space.Level?.Elevation ?? bb.Min.Z, bb.Min.Z);
 
-            var cfg = Request.Config;
-
-            // ── Read lamp length from family ──────────────────────────────────
-            double lampLenFt = ReadLampLength(sym);
-            double lampLenMm = UnitUtils.ConvertFromInternalUnits(lampLenFt, UnitTypeId.Millimeters);
-
-            OnStatus?.Invoke($"Lamp length: {lampLenMm:0} mm  (from family)  ·  Click start point...");
-
-            // ── Pick start point ──────────────────────────────────────────────
-            XYZ ptStart;
             try
             {
-                ptStart = uidoc.Selection.PickPoint(
-                    ObjectSnapTypes.Endpoints | ObjectSnapTypes.Midpoints |
-                    ObjectSnapTypes.Nearest   | ObjectSnapTypes.Perpendicular |
-                    ObjectSnapTypes.WorkPlaneGrid,
-                    "Click start point of lamp line");
-            }
-            catch (OperationCanceledException) { OnStatus?.Invoke("Cancelled."); return; }
-            catch (Exception ex)               { OnStatus?.Invoke($"Error: {ex.Message}"); return; }
+                // Search ONLY for explicitly named ceiling levels (UKD, Decke, Ceiling)
+                // to avoid accidentally picking regular floor levels (EG, OG1, OG2...)
+                var ukdLevel = new FilteredElementCollector(doc)
+                    .OfClass(typeof(Level))
+                    .Cast<Level>()
+                    .Where(l =>
+                        l.Elevation > roomMinZ + 0.01 &&
+                        l.Elevation < roomMaxZ - 0.01 &&
+                        (l.Name.IndexOf("UKD",     StringComparison.OrdinalIgnoreCase) >= 0 ||
+                         l.Name.IndexOf("Decke",   StringComparison.OrdinalIgnoreCase) >= 0 ||
+                         l.Name.IndexOf("Ceiling", StringComparison.OrdinalIgnoreCase) >= 0))
+                    .OrderByDescending(l => l.Elevation)
+                    .FirstOrDefault();
 
-            // ── H+V crosshair guide at start (visible while picking end) ──────
-            var tempIds    = new List<ElementId>();
-            var activeView = doc.ActiveView;
-            bool canDetail = activeView?.ViewType != ViewType.ThreeD
-                          && activeView?.SketchPlane != null;
-            if (canDetail)
-            {
-                try
-                {
-                    using (var tp = new Transaction(doc, "ME-Tools: Guide"))
-                    {
-                        tp.Start();
-                        double ext = ToFeet(50000);
-                        var cb = activeView.CropBox;
-                        if (cb != null)
-                            ext = Math.Max(Math.Abs(cb.Max.X - cb.Min.X),
-                                          Math.Abs(cb.Max.Y - cb.Min.Y)) * 0.6;
-                        var hLine = Line.CreateBound(
-                            new XYZ(ptStart.X - ext, ptStart.Y, ptStart.Z),
-                            new XYZ(ptStart.X + ext, ptStart.Y, ptStart.Z));
-                        var vLine = Line.CreateBound(
-                            new XYZ(ptStart.X, ptStart.Y - ext, ptStart.Z),
-                            new XYZ(ptStart.X, ptStart.Y + ext, ptStart.Z));
-                        foreach (var l in new[] { hLine, vLine })
-                        {
-                            var dc = doc.Create.NewDetailCurve(activeView, l);
-                            if (dc != null) tempIds.Add(dc.Id);
-                        }
-                        tp.Commit();
-                    }
-                }
-                catch { tempIds.Clear(); }
-            }
-
-            // ── Pick end point ────────────────────────────────────────────────
-            XYZ ptEnd;
-            try
-            {
-                OnStatus?.Invoke("Click end point  ·  snaps to 0°/45°/90° within ±5°  ·  diagonal OK");
-                ptEnd = uidoc.Selection.PickPoint(
-                    ObjectSnapTypes.Endpoints | ObjectSnapTypes.Midpoints |
-                    ObjectSnapTypes.Nearest   | ObjectSnapTypes.Perpendicular |
-                    ObjectSnapTypes.WorkPlaneGrid,
-                    "Click end point of lamp line");
-            }
-            catch (OperationCanceledException) { CleanupTempIds(doc, tempIds); OnStatus?.Invoke("Cancelled."); return; }
-            catch (Exception ex)               { CleanupTempIds(doc, tempIds); OnStatus?.Invoke($"Error: {ex.Message}"); return; }
-
-            // ── Validate & ortho-snap ─────────────────────────────────────────
-            XYZ rawVec = ptEnd - ptStart;
-            if (rawVec.GetLength() < ToFeet(100))
-            { CleanupTempIds(doc, tempIds); OnStatus?.Invoke("Line too short."); return; }
-
-            XYZ    dir     = SnapTo45(rawVec.Normalize());
-            double lineLen = rawVec.GetLength();
-
-            // ── Compute positions ─────────────────────────────────────────────
-            // axis = lineLen / count  →  center_i = axis * (i + 0.5)
-            // Constraint: axis >= lampLen  →  count <= lineLen / lampLen
-            int count = Math.Max(1, cfg.LineCount);
-
-            // Reduce count if lamps don't fit (axis must be >= lampLen)
-            while (count > 1 && lineLen / count < lampLenFt)
-                count--;
-
-            double axisFt    = lineLen / count;
-            double axisHalf  = axisFt / 2.0;
-
-            // Center positions: axis/2, 3*axis/2, 5*axis/2, ...
-            // = axis * (i + 0.5)
-            var offsets = new List<double>();
-            for (int i = 0; i < count; i++)
-                offsets.Add(axisFt * (i + 0.5));
-
-            // ── Rotation ──────────────────────────────────────────────────────
-            // Lamp body perpendicular to refDir(1,0,0).
-            // AlongLine: +90° aligns lamp length with line direction.
-            double lineAngle = Math.Atan2(dir.Y, dir.X);
-            if (cfg.LineOrientation == LineOrientation.AlongLine)
-                lineAngle += Math.PI / 2.0;
-
-            double ceilingZ = ptStart.Z;
-            var    level    = GetNearestLevel(doc, ceilingZ - ToFeet(2500));
-            double angleDeg = Math.Atan2(dir.Y, dir.X) * 180.0 / Math.PI;
-
-            // ── Place lamps — delete guide lines in same transaction ───────────
-            int placed = 0;
-            using (var tx = new Transaction(doc, "ME-Tools: Place Lamps on Line"))
-            {
-                tx.Start();
-                foreach (var id in tempIds) try { doc.Delete(id); } catch { }
-
-                foreach (double offset in offsets)
-                {
-                    var pt = new XYZ(
-                        ptStart.X + dir.X * offset,
-                        ptStart.Y + dir.Y * offset,
-                        ceilingZ);
-
-                    FamilyInstance inst = null;
-                    try { inst = PlaceLampInstance(doc, sym, pt, level, ceilingZ); }
-                    catch { continue; }
-                    if (inst == null) continue;
-                    doc.Regenerate();
-
-                    if (Math.Abs(lineAngle) > 0.001)
-                        try
-                        {
-                            var axis = Line.CreateBound(pt, pt + XYZ.BasisZ);
-                            ElementTransformUtils.RotateElement(doc, inst.Id, axis, lineAngle);
-                        }
-                        catch { }
-
-                    SetScheduleLevel(inst, level);
-                    placed++;
-                }
-                tx.Commit();
-            }
-
-            double gapMm    = UnitUtils.ConvertFromInternalUnits(axisFt - lampLenFt, UnitTypeId.Millimeters);
-            double marginMm = UnitUtils.ConvertFromInternalUnits(axisHalf - lampLenFt / 2.0, UnitTypeId.Millimeters);
-            double axisMm   = UnitUtils.ConvertFromInternalUnits(axisFt, UnitTypeId.Millimeters);
-            OnStatus?.Invoke(
-                $"Line: {placed} lamps  ·  {angleDeg:0}°  ·  " +
-                $"axis {axisMm:0} mm  ·  gap {gapMm:0} mm  ·  margin {marginMm:0} mm");
-            OnPlaced?.Invoke(placed);
-        }
-
-        // ── Read lamp length from family ──────────────────────────────────────
-        // 1. "Length" parameter  2. BoundingBox  3. fallback 1500mm
-        private double ReadLampLength(FamilySymbol sym)
-        {
-            try
-            {
-                var p = sym.LookupParameter("Length");
-                if (p != null && p.StorageType == StorageType.Double && p.AsDouble() > 0.001)
-                    return p.AsDouble();
+                if (ukdLevel != null)
+                    return ukdLevel.Elevation;
             }
             catch { }
-            try
-            {
-                var bb = sym.get_BoundingBox(null);
-                if (bb != null)
-                {
-                    double longest = Math.Max(Math.Abs(bb.Max.X - bb.Min.X),
-                                             Math.Abs(bb.Max.Y - bb.Min.Y));
-                    if (longest > 0.01) return longest;
-                }
-            }
-            catch { }
-            return ToFeet(1500);
+
+            return roomMaxZ; // bb.Max.Z is the UKD (standard case)
         }
 
-        // ── Ortho-snap ────────────────────────────────────────────────────────
-        private static XYZ SnapTo45(XYZ dir, double snapDeg = 5.0)
-        {
-            double angle   = Math.Atan2(dir.Y, dir.X) * 180.0 / Math.PI;
-            double nearest = Math.Round(angle / 45.0) * 45.0;
-            double diff    = Math.Abs(angle - nearest) % 360.0;
-            if (diff > 180.0) diff = 360.0 - diff;
-            if (diff <= snapDeg)
-            {
-                double rad = nearest * Math.PI / 180.0;
-                return new XYZ(Math.Round(Math.Cos(rad), 6), Math.Round(Math.Sin(rad), 6), 0);
-            }
-            return dir;
-        }
-
-        private static void CleanupTempIds(Document doc, List<ElementId> ids)
-        {
-            if (ids == null || !ids.Any()) return;
-            try
-            {
-                using (var t = new Transaction(doc, "ME-Tools: Cleanup"))
-                { t.Start(); foreach (var id in ids) try { doc.Delete(id); } catch { } t.Commit(); }
-            }
-            catch { }
-        }
-
-        // ─────────────────────────────────────────────────────────────────────
-        // LAMP PLACEMENT — face-based via floor/ceiling underside
-        // ─────────────────────────────────────────────────────────────────────
+        // ── Lamp placement ────────────────────────────────────────────────
+        // WorkPlaneBased: SketchPlane with -Z normal (ceiling) + FlipWorkPlane if still inverted
+        // OneLevelBasedHosted: face reference from ceiling/slab
+        // OneLevelBased: level-based + MoveElement to ukdZ
         private FamilyInstance PlaceLampInstance(Document doc, FamilySymbol sym,
-            XYZ pt, Level level, double ceilingZ)
+            XYZ pt, Level level, double ukdZ, double angle)
         {
-            var  type      = sym.Family.FamilyPlacementType;
-            bool faceBased = type == FamilyPlacementType.OneLevelBasedHosted
-                          || type == FamilyPlacementType.WorkPlaneBased
-                          || type == FamilyPlacementType.TwoLevelsBased
-                          || type == FamilyPlacementType.Invalid;
+            FamilyInstance inst = null;
+            var placementType = sym.Family.FamilyPlacementType;
 
-            if (faceBased)
+            // lampDir = lamp long axis in plan
+            // planeY chosen so Normal = lampDir × planeY = (0,0,-1) [ceiling, pointing DOWN]
+            // Proof: (cos a, sin a, 0) × (sin a, -cos a, 0) = (0, 0, -1) ✓
+            var lampDir   = new XYZ(Math.Cos(angle), Math.Sin(angle), 0);
+            var planeY    = new XYZ(Math.Sin(angle), -Math.Cos(angle), 0);
+            var ceilingPt = new XYZ(pt.X, pt.Y, ukdZ);
+
+            try
             {
-                var faceRef = FindFloorBottomFaceAt(doc, pt, ceilingZ);
-                if (faceRef != null)
+                if (placementType == FamilyPlacementType.WorkPlaneBased)
                 {
-                    try
+                    // Ceiling plane: normal = -Z so lamp hangs from ceiling (not floor-mounted)
+                    var plane = Plane.CreateByOriginAndBasis(ceilingPt, lampDir, planeY);
+                    var sp    = SketchPlane.Create(doc, plane);
+                    inst = doc.Create.NewFamilyInstance(ceilingPt, sym, sp, StructuralType.NonStructural);
+                }
+                else if (placementType == FamilyPlacementType.OneLevelBasedHosted)
+                {
+                    var faceRef = FindCeilingFaceRef(doc, pt, ukdZ);
+                    if (faceRef != null)
+                        inst = doc.Create.NewFamilyInstance(faceRef, ceilingPt, lampDir, sym);
+                    else
                     {
-                        var inst = doc.Create.NewFamilyInstance(faceRef, pt, new XYZ(1, 0, 0), sym);
-                        if (inst != null) return inst;
+                        var plane = Plane.CreateByOriginAndBasis(ceilingPt, lampDir, planeY);
+                        var sp    = SketchPlane.Create(doc, plane);
+                        inst = doc.Create.NewFamilyInstance(ceilingPt, sym, sp, StructuralType.NonStructural);
                     }
-                    catch { }
-                }
-            }
-
-            try
-            {
-                FamilyInstance inst = level != null
-                    ? doc.Create.NewFamilyInstance(pt, sym, level, StructuralType.NonStructural)
-                    : doc.Create.NewFamilyInstance(pt, sym, StructuralType.NonStructural);
-                if (inst == null) return null;
-                doc.Regenerate();
-                if (level != null)
-                {
-                    double off = ceilingZ - level.Elevation;
-                    var pOff = inst.get_Parameter(BuiltInParameter.INSTANCE_FREE_HOST_OFFSET_PARAM)
-                            ?? inst.get_Parameter(BuiltInParameter.INSTANCE_ELEVATION_PARAM);
-                    if (pOff != null && !pOff.IsReadOnly && pOff.StorageType == StorageType.Double)
-                        pOff.Set(off);
-                }
-                return inst;
-            }
-            catch { return null; }
-        }
-
-        private Reference FindFloorBottomFaceAt(Document doc, XYZ pt, double ceilingZ)
-        {
-            const double tolFt = 1.0;
-            var opts = new Options { ComputeReferences = true, DetailLevel = ViewDetailLevel.Fine };
-            var elements = new FilteredElementCollector(doc)
-                .OfCategory(BuiltInCategory.OST_Floors).WhereElementIsNotElementType().Cast<Element>()
-                .Concat(new FilteredElementCollector(doc)
-                    .OfCategory(BuiltInCategory.OST_Ceilings).WhereElementIsNotElementType().Cast<Element>());
-
-            foreach (var el in elements)
-            {
-                var bb = el.get_BoundingBox(null);
-                if (bb == null || pt.X < bb.Min.X || pt.X > bb.Max.X ||
-                    pt.Y < bb.Min.Y || pt.Y > bb.Max.Y) continue;
-                if (Math.Abs(bb.Min.Z - ceilingZ) > tolFt) continue;
-                var r = GetBottomFace(el, opts);
-                if (r != null) return r;
-            }
-            return null;
-        }
-
-        private Reference GetBottomFace(Element elem, Options opts)
-        {
-            try
-            {
-                foreach (var obj in elem.get_Geometry(opts) ?? Enumerable.Empty<GeometryObject>())
-                {
-                    if (!(obj is Solid solid) || solid.Volume <= 0) continue;
-                    foreach (Face face in solid.Faces)
-                    {
-                        if (face.Reference == null) continue;
-                        if (face.ComputeNormal(new UV(0.5, 0.5)).Z < -0.9) return face.Reference;
-                    }
-                }
-            }
-            catch { }
-            return null;
-        }
-
-        // ─────────────────────────────────────────────────────────────────────
-        // ROTATE ROOM
-        // ─────────────────────────────────────────────────────────────────────
-        private void RotateRoom(UIDocument uidoc, Document doc)
-        {
-            Room room = null;
-            try
-            {
-                var r = uidoc.Selection.PickObject(ObjectType.Element,
-                    new RoomFilter(), "Click a room — all lamps will be rotated 90°");
-                room = doc.GetElement(r) as Room;
-            }
-            catch (OperationCanceledException) { OnStatus?.Invoke("Cancelled."); return; }
-            catch (Exception ex)               { OnStatus?.Invoke($"Error: {ex.Message}"); return; }
-            if (room == null) return;
-
-            double floorZ = room.Level?.Elevation ?? 0;
-            var lamps = GetLampsInRoom(doc, room, floorZ);
-            if (!lamps.Any()) { OnStatus?.Invoke("No lamps found in room."); return; }
-
-            using (var tx = new Transaction(doc, "ME-Tools: Rotate 90°"))
-            {
-                tx.Start();
-                int n = 0;
-                foreach (var fi in lamps)
-                {
-                    try
-                    {
-                        if (!(fi.Location is LocationPoint lp)) continue;
-                        ElementTransformUtils.RotateElement(doc, fi.Id,
-                            Line.CreateBound(lp.Point, lp.Point + XYZ.BasisZ), Math.PI / 2.0);
-                        n++;
-                    }
-                    catch { }
-                }
-                tx.Commit();
-                OnStatus?.Invoke($"Rotated {n} lamps 90°.");
-            }
-        }
-
-        // ─────────────────────────────────────────────────────────────────────
-        // REFRESH ROOMS
-        // ─────────────────────────────────────────────────────────────────────
-        private void RefreshRooms(UIDocument uidoc, Document doc, bool multi)
-        {
-            var rooms = new List<Room>();
-            try
-            {
-                if (multi)
-                {
-                    var refs = uidoc.Selection.PickObjects(ObjectType.Element,
-                        new RoomFilter(), "Click rooms — ESC when done");
-                    rooms = refs.Select(r => doc.GetElement(r) as Room).Where(r => r != null).ToList();
                 }
                 else
                 {
-                    var r = uidoc.Selection.PickObject(ObjectType.Element,
-                        new RoomFilter(), "Click a room to refresh lamps");
-                    if (doc.GetElement(r) is Room rm) rooms.Add(rm);
+                    // OneLevelBased: standard placement, Z corrected below via MoveElement
+                    inst = level != null
+                        ? doc.Create.NewFamilyInstance(pt, sym, level, StructuralType.NonStructural)
+                        : doc.Create.NewFamilyInstance(pt, sym, StructuralType.NonStructural);
                 }
             }
-            catch (OperationCanceledException) { OnStatus?.Invoke("Cancelled."); return; }
-            catch (Exception ex)               { OnStatus?.Invoke($"Error: {ex.Message}"); return; }
+            catch { return null; }
 
-            if (!rooms.Any()) { OnStatus?.Invoke("No rooms selected."); return; }
+            if (inst == null) return null;
+            doc.Regenerate();
 
-            var cfg = Request.Config;
-            var sym = doc.GetElement(Request.SymbolId) as FamilySymbol;
-            if (sym == null) { OnStatus?.Invoke("Family not found."); return; }
-            if (!sym.IsActive)
-            { using (var t = new Transaction(doc, "Activate")) { t.Start(); sym.Activate(); t.Commit(); } }
-
-            double offsetFt = ToFeet(cfg.UKDOffset);
-            double wallFt   = ToFeet(cfg.WallMargin);
-            int    totDel = 0, totPlace = 0;
-
-            foreach (var room in rooms)
+            // OneLevelBased: move element to exact ukdZ
+            if (placementType != FamilyPlacementType.WorkPlaneBased &&
+                placementType != FamilyPlacementType.OneLevelBasedHosted)
             {
-                double floorZ   = room.Level?.Elevation ?? 0;
-                var    toDelete = GetLampsInRoom(doc, room, floorZ).Select(fi => fi.Id).ToList();
-                var    bb       = room.get_BoundingBox(null);
-                if (bb == null) continue;
-
-                double ceilingZ = bb.Max.Z - offsetFt;
-                var    level    = room.Level ?? GetNearestLevel(doc, floorZ);
-                double roomW    = bb.Max.X - bb.Min.X;
-                double roomD    = bb.Max.Y - bb.Min.Y;
-                double area     = UnitUtils.ConvertFromInternalUnits(room.Area, UnitTypeId.SquareMeters);
-
-                int rows, cols;
-                CalcGrid(cfg, area, roomW, roomD, out rows, out cols);
-                double angle = CalcAngle(cfg.Rotation, roomW, roomD);
-                var pts = CalcGridPoints(bb, wallFt, rows, cols, ceilingZ);
-
-                using (var tx = new Transaction(doc, "ME-Tools: Refresh Room"))
+                try
                 {
-                    tx.Start();
-                    foreach (var id in toDelete) try { doc.Delete(id); } catch { }
-                    totDel += toDelete.Count;
-
-                    foreach (var pt in pts)
+                    var locPt = (inst.Location as LocationPoint)?.Point;
+                    if (locPt != null)
                     {
-                        if (!IsInRoom(room, new XYZ(pt.X, pt.Y, floorZ + 0.5))) continue;
-                        FamilyInstance inst = null;
-                        try { inst = PlaceLampInstance(doc, sym, pt, level, ceilingZ); }
-                        catch { continue; }
-                        if (inst == null) continue;
-                        doc.Regenerate();
-                        if (Math.Abs(angle) > 0.001)
-                            try { ElementTransformUtils.RotateElement(doc, inst.Id,
-                                Line.CreateBound(pt, pt + XYZ.BasisZ), angle); } catch { }
-                        SetScheduleLevel(inst, level);
-                        totPlace++;
+                        double dz = ukdZ - locPt.Z;
+                        if (Math.Abs(dz) > 0.0001)
+                            ElementTransformUtils.MoveElement(doc, inst.Id, new XYZ(0, 0, dz));
                     }
-                    tx.Commit();
                 }
+                catch { }
             }
-            OnStatus?.Invoke($"Refreshed {rooms.Count} room(s): {totDel} deleted, {totPlace} placed.");
-            OnPlaced?.Invoke(totPlace);
+
+            return inst;
         }
 
-        // ─────────────────────────────────────────────────────────────────────
-        // HELPERS
-        // ─────────────────────────────────────────────────────────────────────
-        private List<FamilyInstance> GetLampsInRoom(Document doc, Room room, double floorZ)
+        // ── FindCeilingFaceRef: search Floors (bottom) AND Ceilings near ukdZ ──
+        // Searches for a downward-facing face (normal.Z < -0.9) at the UKD height.
+        // Floors are searched first (more common as ceiling host in MEP),
+        // then Revit ceiling elements as fallback.
+        private Reference FindCeilingFaceRef(Document doc, XYZ pt, double ukdZ)
         {
-            var result = new List<FamilyInstance>();
-            var cats   = new[] { BuiltInCategory.OST_LightingFixtures, BuiltInCategory.OST_LightingDevices };
-            foreach (var cat in cats)
-            {
-                foreach (var fi in new FilteredElementCollector(doc)
-                    .OfClass(typeof(FamilyInstance)).OfCategory(cat).Cast<FamilyInstance>())
-                {
-                    XYZ tp = null;
-                    if (fi.Location is LocationPoint lp)
-                        tp = new XYZ(lp.Point.X, lp.Point.Y, floorZ + 0.5);
-                    else
-                    {
-                        var bb2 = fi.get_BoundingBox(null);
-                        if (bb2 != null)
-                            tp = new XYZ((bb2.Min.X + bb2.Max.X) / 2,
-                                        (bb2.Min.Y + bb2.Max.Y) / 2, floorZ + 0.5);
-                    }
-                    if (tp == null) continue;
-                    try { if (room.IsPointInRoom(tp)) result.Add(fi); } catch { }
-                }
-            }
-            return result;
-        }
-
-        private void SetScheduleLevel(FamilyInstance inst, Level level)
-        {
-            if (inst == null || level == null) return;
             try
             {
-                var p = inst.get_Parameter(BuiltInParameter.INSTANCE_SCHEDULE_ONLY_LEVEL_PARAM);
-                if (p != null && !p.IsReadOnly) p.Set(level.Id);
+                double tolFt = ToFeet(600); // ±600mm tolerance
+
+                var opts = new Options { ComputeReferences = true, IncludeNonVisibleObjects = false };
+
+                // Search Floors first (UG ceiling = bottom of EG floor slab)
+                // and Ceilings as fallback
+                var cats = new[]
+                {
+                    BuiltInCategory.OST_Floors,
+                    BuiltInCategory.OST_Ceilings,
+                };
+
+                foreach (var cat in cats)
+                {
+                    var elems = new FilteredElementCollector(doc)
+                        .OfCategory(cat)
+                        .WhereElementIsNotElementType()
+                        .Where(e => {
+                            var b = e.get_BoundingBox(null);
+                            return b != null
+                                && pt.X >= b.Min.X - 1 && pt.X <= b.Max.X + 1
+                                && pt.Y >= b.Min.Y - 1 && pt.Y <= b.Max.Y + 1
+                                && Math.Abs(b.Min.Z - ukdZ) < tolFt; // bottom face near ukdZ
+                        });
+
+                    foreach (var elem in elems)
+                    {
+                        var geom = elem.get_Geometry(opts);
+                        if (geom == null) continue;
+                        foreach (GeometryObject go in geom)
+                        {
+                            var solid = go as Solid;
+                            if (solid == null || solid.Faces.Size == 0) continue;
+                            foreach (Face face in solid.Faces)
+                            {
+                                // Bottom face: normal pointing DOWN (Z < -0.9)
+                                if (face.ComputeNormal(new UV(0.5, 0.5)).Z < -0.9
+                                    && face.Reference != null)
+                                    return face.Reference;
+                            }
+                        }
+                    }
+                }
             }
             catch { }
+            return null;
         }
 
+        // ── Grid helpers ─────────────────────────────────────────────────
         private void CalcGrid(LampConfig cfg, double areaSqm, double roomW, double roomD,
                               out int rows, out int cols)
         {
@@ -593,34 +307,20 @@ namespace METools.LampPlacer
             double margD  = Math.Min(wallFt, roomD * 0.25);
             double availW = Math.Max(roomW * 0.5, roomW - 2.0 * margW);
             double availD = Math.Max(roomD * 0.5, roomD - 2.0 * margD);
-            double m2     = UnitUtils.ConvertFromInternalUnits(availW * availD, UnitTypeId.SquareMeters);
-            if (areaSqm <= 0) areaSqm = m2;
-            int nTotal = Math.Max(1, (int)Math.Ceiling(m2 / cfg.SqmPerLamp));
-            double ratio = Math.Max(roomW, roomD) / Math.Min(roomW, roomD);
+            double avail_m2 = UnitUtils.ConvertFromInternalUnits(availW * availD, UnitTypeId.SquareMeters);
+            if (areaSqm <= 0) areaSqm = avail_m2;
+            int nTotal = Math.Max(1, (int)Math.Ceiling(avail_m2 / cfg.SqmPerLamp));
+
+            double ratio = Math.Max(roomW, roomD) / Math.Max(0.01, Math.Min(roomW, roomD));
             if (ratio > 2.5)
             {
                 if (roomW >= roomD) { rows = 1; cols = nTotal; }
                 else                { cols = 1; rows = nTotal; }
                 return;
             }
-            double aspect = availW / availD;
+            double aspect = availW / Math.Max(0.01, availD);
             cols = Math.Max(1, (int)Math.Round(Math.Sqrt(nTotal * aspect)));
             rows = Math.Max(1, (int)Math.Round((double)nTotal / cols));
-        }
-
-        private List<XYZ> CalcGridPoints(BoundingBoxXYZ bb, double wallFt, int rows, int cols, double z)
-        {
-            var pts  = new List<XYZ>();
-            double cx = (bb.Min.X + bb.Max.X) / 2.0, cy = (bb.Min.Y + bb.Max.Y) / 2.0;
-            double rW = bb.Max.X - bb.Min.X, rD = bb.Max.Y - bb.Min.Y;
-            double mW = Math.Min(wallFt, rW * 0.25), mD = Math.Min(wallFt, rD * 0.25);
-            double aW = Math.Max(rW * 0.5, rW - 2.0 * mW), aD = Math.Max(rD * 0.5, rD - 2.0 * mD);
-            double sX = cols > 1 ? aW / (cols - 1) : 0, sY = rows > 1 ? aD / (rows - 1) : 0;
-            double x0 = cols == 1 ? cx : cx - aW / 2.0, y0 = rows == 1 ? cy : cy - aD / 2.0;
-            for (int r = 0; r < rows; r++)
-                for (int c = 0; c < cols; c++)
-                    pts.Add(new XYZ(x0 + c * sX, y0 + r * sY, z));
-            return pts;
         }
 
         private double CalcAngle(RotationMode mode, double roomW, double roomD)
@@ -633,8 +333,377 @@ namespace METools.LampPlacer
             }
         }
 
-        private bool IsInRoom(Room room, XYZ pt)
-        { try { return room.IsPointInRoom(pt); } catch { return true; } }
+        // Smart points: standard grid + fallback for complex rooms
+        private List<XYZ> CalcPoints(BoundingBoxXYZ bb, double wallFt,
+            int rows, int cols, double z, SpatialElement space = null, double floorZ = 0)
+        {
+            double cx    = (bb.Min.X + bb.Max.X) / 2.0;
+            double cy    = (bb.Min.Y + bb.Max.Y) / 2.0;
+            double roomW = bb.Max.X - bb.Min.X;
+            double roomD = bb.Max.Y - bb.Min.Y;
+            double margW  = Math.Min(wallFt, roomW * 0.20);
+            double margD  = Math.Min(wallFt, roomD * 0.20);
+            double availW = Math.Max(roomW * 0.5, roomW - 2.0 * margW);
+            double availD = Math.Max(roomD * 0.5, roomD - 2.0 * margD);
+            double stepX  = cols > 1 ? availW / (cols - 1) : 0;
+            double stepY  = rows > 1 ? availD / (rows - 1) : 0;
+            double startX = cols == 1 ? cx : cx - availW / 2.0;
+            double startY = rows == 1 ? cy : cy - availD / 2.0;
+            int target = Math.Max(1, rows * cols);
+
+            var standardPts = new List<XYZ>();
+            for (int r = 0; r < rows; r++)
+                for (int c = 0; c < cols; c++)
+                    standardPts.Add(new XYZ(startX + c * stepX, startY + r * stepY, z));
+
+            if (space == null) return standardPts;
+            int inside = standardPts.Count(pt => IsPointInside(space, new XYZ(pt.X, pt.Y, floorZ + 0.5)));
+            if (standardPts.Count == 0 || (double)inside / standardPts.Count >= 0.70)
+                return standardPts;
+
+            // Complex room: dense sampling + spread selection
+            int sampleN = Math.Max(12, (int)Math.Sqrt(target) * 6);
+            double sStepX = availW / Math.Max(1, sampleN - 1);
+            double sStepY = availD / Math.Max(1, sampleN - 1);
+            var candidates = new List<XYZ>();
+            for (int r = 0; r < sampleN; r++)
+                for (int c = 0; c < sampleN; c++)
+                {
+                    var pt = new XYZ(cx - availW/2 + c*sStepX, cy - availD/2 + r*sStepY, z);
+                    if (IsPointInside(space, new XYZ(pt.X, pt.Y, floorZ + 0.5)))
+                        candidates.Add(pt);
+                }
+            if (!candidates.Any()) return standardPts;
+            if (candidates.Count <= target) return candidates;
+            return SelectMaxSpread(candidates, target);
+        }
+
+        private static List<XYZ> SelectMaxSpread(List<XYZ> pts, int n)
+        {
+            if (pts.Count <= n) return pts;
+            var sel = new List<XYZ>();
+            var rem = pts.ToList();
+            double cx = pts.Average(p => p.X), cy = pts.Average(p => p.Y);
+            var first = rem.OrderBy(p => Math.Pow(p.X-cx,2)+Math.Pow(p.Y-cy,2)).First();
+            sel.Add(first); rem.Remove(first);
+            while (sel.Count < n && rem.Count > 0)
+            {
+                XYZ best = null; double bestD = -1;
+                foreach (var p in rem)
+                {
+                    double d = sel.Min(s => Math.Pow(p.X-s.X,2)+Math.Pow(p.Y-s.Y,2));
+                    if (d > bestD) { bestD = d; best = p; }
+                }
+                if (best == null) break;
+                sel.Add(best); rem.Remove(best);
+            }
+            return sel;
+        }
+
+        // ── RefreshRoom ───────────────────────────────────────────────────
+        private void RefreshRoom(UIDocument uidoc, Document doc)
+        {
+            SpatialElement space = null;
+            try
+            {
+                var r = uidoc.Selection.PickObject(ObjectType.Element,
+                    new RoomOrSpaceFilter(), "Click a room to refresh lamps");
+                space = doc.GetElement(r) as SpatialElement;
+            }
+            catch (OperationCanceledException) { OnStatus?.Invoke("Cancelled."); return; }
+            catch (Exception ex)               { OnStatus?.Invoke($"Error: {ex.Message}"); return; }
+            if (space == null) { OnStatus?.Invoke("No room selected."); return; }
+
+            RefreshSingleSpace(doc, space, Request.Config,
+                doc.GetElement(Request.SymbolId) as FamilySymbol);
+        }
+
+        // ── RefreshMulti ──────────────────────────────────────────────────
+        private void RefreshMulti(UIDocument uidoc, Document doc)
+        {
+            var sym = doc.GetElement(Request.SymbolId) as FamilySymbol;
+            if (sym == null) { OnStatus?.Invoke("Family not found."); return; }
+
+            int totalDeleted = 0, totalPlaced = 0;
+            var cfg = Request.Config;
+
+            while (true)
+            {
+                OnStatus?.Invoke(totalPlaced == 0
+                    ? "Click rooms to refresh — ESC when done..."
+                    : $"Refreshed {totalPlaced} lamps. Click more rooms or ESC...");
+
+                SpatialElement space = null;
+                try
+                {
+                    var r = uidoc.Selection.PickObject(ObjectType.Element,
+                        new RoomOrSpaceFilter(), "Click a room — ESC to finish");
+                    space = doc.GetElement(r) as SpatialElement;
+                }
+                catch (OperationCanceledException) { break; }
+                catch { break; }
+
+                if (space == null) continue;
+                var (del, placed) = RefreshSingleSpace(doc, space, cfg, sym);
+                totalDeleted += del; totalPlaced += placed;
+            }
+            OnStatus?.Invoke($"Done: {totalDeleted} deleted, {totalPlaced} placed.");
+            OnPlaced?.Invoke(totalPlaced);
+        }
+
+        private (int deleted, int placed) RefreshSingleSpace(Document doc,
+            SpatialElement space, LampConfig cfg, FamilySymbol sym)
+        {
+            if (sym == null) return (0, 0);
+            if (!sym.IsActive)
+            { using (var t = new Transaction(doc,"Activate")){t.Start();sym.Activate();t.Commit();} }
+
+            double floorZ = space.Level?.Elevation ?? 0;
+            var bb = space.get_BoundingBox(null);
+            if (bb == null) return (0, 0);
+
+            double ukdZ   = ResolveUKDZ(doc, bb, space) - ToFeet(cfg.UKDOffset);
+            var    level  = GetNearestLevel(doc, ukdZ);
+
+            // Find and delete existing lamps in room
+            var toDelete = new List<ElementId>();
+            foreach (var cat in new[] { BuiltInCategory.OST_LightingFixtures, BuiltInCategory.OST_LightingDevices })
+            {
+                foreach (var fi in new FilteredElementCollector(doc)
+                    .OfClass(typeof(FamilyInstance)).OfCategory(cat)
+                    .Cast<FamilyInstance>())
+                {
+                    XYZ testPt = null;
+                    if (fi.Location is LocationPoint lp)
+                        testPt = new XYZ(lp.Point.X, lp.Point.Y, floorZ + 0.5);
+                    else if (fi.HostFace != null)
+                    {
+                        var b2 = fi.get_BoundingBox(null);
+                        if (b2 != null) testPt = new XYZ((b2.Min.X+b2.Max.X)/2, (b2.Min.Y+b2.Max.Y)/2, floorZ+0.5);
+                    }
+                    if (testPt == null) continue;
+                    try { if (IsPointInside(space, testPt)) toDelete.Add(fi.Id); } catch { }
+                }
+            }
+
+            double roomW = bb.Max.X - bb.Min.X, roomD = bb.Max.Y - bb.Min.Y;
+            double area  = UnitUtils.ConvertFromInternalUnits(space.Area, UnitTypeId.SquareMeters);
+            int rows, cols;
+            CalcGrid(cfg, area, roomW, roomD, out rows, out cols);
+            double angle = CalcAngle(cfg.Rotation, roomW, roomD);
+            var pts = CalcPoints(bb, ToFeet(cfg.WallMargin), rows, cols, ukdZ, space, floorZ);
+
+            bool isFaceBased = sym.Family.FamilyPlacementType == FamilyPlacementType.WorkPlaneBased
+                            || sym.Family.FamilyPlacementType == FamilyPlacementType.OneLevelBasedHosted;
+
+            int placed = 0;
+            using (var tx = new Transaction(doc, "ME-Tools: Refresh Room"))
+            {
+                tx.Start();
+                foreach (var id in toDelete) try { doc.Delete(id); } catch { }
+                foreach (var pt in pts)
+                {
+                    if (!IsPointInside(space, new XYZ(pt.X, pt.Y, floorZ + 0.5))) continue;
+                    FamilyInstance inst = null;
+                    try { inst = PlaceLampInstance(doc, sym, pt, level, ukdZ, angle); } catch { continue; }
+                    if (inst == null) continue;
+                    doc.Regenerate();
+                    if (!isFaceBased && Math.Abs(angle) > 0.001)
+                        try { ElementTransformUtils.RotateElement(doc, inst.Id,
+                            Line.CreateBound(pt, pt + XYZ.BasisZ), angle); } catch { }
+                    if (level != null)
+                        try { var p = inst.get_Parameter(BuiltInParameter.INSTANCE_SCHEDULE_ONLY_LEVEL_PARAM);
+                            if (p != null && !p.IsReadOnly) p.Set(level.Id); } catch { }
+                    placed++;
+                }
+                tx.Commit();
+            }
+            return (toDelete.Count, placed);
+        }
+
+        // ── PlaceOnLine: pick existing CurveElement, loop until ESC ──────
+        private void PlaceOnLine(UIDocument uidoc, Document doc)
+        {
+            var sym = doc.GetElement(Request.SymbolId) as FamilySymbol;
+            if (sym == null) { OnStatus?.Invoke("Family not found."); return; }
+            if (!sym.IsActive)
+            { using (var t = new Transaction(doc,"Activate")){t.Start();sym.Activate();t.Commit();} }
+
+            int totalPlaced = 0;
+            while (true)
+            {
+                OnStatus?.Invoke(totalPlaced == 0
+                    ? "Pick a model/detail line — ESC to stop..."
+                    : $"{totalPlaced} placed. Pick next line or ESC...");
+
+                Curve curve;
+                try
+                {
+                    var r = uidoc.Selection.PickObject(ObjectType.Element,
+                        new LineFilter(), "Pick a model line or detail line — ESC to finish");
+                    var ce = doc.GetElement(r) as CurveElement;
+                    if (ce == null) continue;
+                    curve = ce.GeometryCurve;
+                }
+                catch (OperationCanceledException) { break; }
+                catch (Exception ex) { OnStatus?.Invoke($"Error: {ex.Message}"); break; }
+
+                var start = curve.GetEndPoint(0);
+                var end   = curve.GetEndPoint(1);
+                double lengthFt = start.DistanceTo(end);
+                if (lengthFt < 0.01) continue;
+
+                var cfg        = Request.Config;
+                double spacingFt = ToFeet(cfg.LineSpacing);
+                double offsetFt  = ToFeet(cfg.UKDOffset);
+
+                int count; double startOffset;
+                if (cfg.LineMode == LineMode.ByCount)
+                {
+                    count = Math.Max(1, cfg.LineCount);
+                    startOffset = count == 1 ? lengthFt / 2.0 : 0;
+                    spacingFt   = count > 1 ? lengthFt / (count - 1) : 0;
+                }
+                else
+                {
+                    count = Math.Max(1, (int)Math.Round(lengthFt / spacingFt));
+                    startOffset = (lengthFt - (count - 1) * spacingFt) / 2.0;
+                }
+
+                var    direction = (end - start).Normalize();
+                var    midPt     = start + direction * (lengthFt / 2.0);
+                double z         = DetermineLineZ(doc, midPt, offsetFt);
+                var    level     = GetNearestLevel(doc, z);
+                double lineAngle = Math.Atan2(direction.Y, direction.X);
+                double angle     = cfg.LineOrientation == LineOrientation.AlongLine
+                    ? lineAngle + Math.PI / 2.0
+                    : lineAngle;
+
+                int placed = 0;
+                using (var tx = new Transaction(doc, "ME-Tools: Place Lamps on Line"))
+                {
+                    tx.Start();
+                    for (int i = 0; i < count; i++)
+                    {
+                        double dist = startOffset + i * spacingFt;
+                        var pt = new XYZ(start.X + direction.X * dist,
+                                         start.Y + direction.Y * dist, z);
+                        FamilyInstance inst = null;
+                        try { inst = PlaceLampInstance(doc, sym, pt, level, z, angle); } catch { continue; }
+                        if (inst == null) continue;
+                        doc.Regenerate();
+                        if (level != null)
+                            try { var p = inst.get_Parameter(BuiltInParameter.INSTANCE_SCHEDULE_ONLY_LEVEL_PARAM);
+                                if (p != null && !p.IsReadOnly) p.Set(level.Id); } catch { }
+                        placed++;
+                    }
+                    tx.Commit();
+                }
+                totalPlaced += placed;
+            }
+            OnStatus?.Invoke($"Done: {totalPlaced} lamps placed on lines.");
+            OnPlaced?.Invoke(totalPlaced);
+        }
+
+        private double DetermineLineZ(Document doc, XYZ midPt, double offsetFt)
+        {
+            try
+            {
+                var spaces = new FilteredElementCollector(doc)
+                    .OfClass(typeof(SpatialElement))
+                    .Cast<SpatialElement>()
+                    .Where(s => s.Area > 0);
+
+                foreach (var sp in spaces)
+                {
+                    var bb = sp.get_BoundingBox(null);
+                    if (bb == null) continue;
+                    if (midPt.X < bb.Min.X || midPt.X > bb.Max.X) continue;
+                    if (midPt.Y < bb.Min.Y || midPt.Y > bb.Max.Y) continue;
+                    double testZ = sp.Level?.Elevation ?? 0;
+                    if (!IsPointInside(sp, new XYZ(midPt.X, midPt.Y, testZ + 0.5))) continue;
+                    return ResolveUKDZ(doc, bb, sp) - offsetFt;
+                }
+            }
+            catch { }
+            return midPt.Z - offsetFt;
+        }
+
+        // ── Redistribute ──────────────────────────────────────────────────
+        private void Redistribute(UIDocument uidoc, Document doc)
+        {
+            var selected = uidoc.Selection.GetElementIds()
+                .Select(id => doc.GetElement(id) as FamilyInstance)
+                .Where(fi => fi?.Location is LocationPoint)
+                .OrderBy(fi => ((LocationPoint)fi.Location).Point.X)
+                .ThenBy(fi => ((LocationPoint)fi.Location).Point.Y)
+                .ToList();
+            if (selected.Count < 2) { OnStatus?.Invoke("Select at least 2 lamps to redistribute."); return; }
+
+            var pts  = selected.Select(fi => ((LocationPoint)fi.Location).Point).ToList();
+            double avgZ  = pts.Average(p => p.Z);
+            double spanX = pts.Max(p => p.X) - pts.Min(p => p.X);
+            double spanY = pts.Max(p => p.Y) - pts.Min(p => p.Y);
+            bool alongX  = spanX >= spanY;
+            List<XYZ> newPts; double angle = 0;
+
+            if (alongX)
+            {
+                double startX = pts.Min(p => p.X), endX = pts.Max(p => p.X);
+                double avgY   = pts.Average(p => p.Y);
+                double step   = (endX - startX) / (selected.Count - 1);
+                newPts = Enumerable.Range(0, selected.Count)
+                    .Select(i => new XYZ(startX + i * step, avgY, avgZ)).ToList();
+            }
+            else
+            {
+                var sortedY = selected.OrderBy(fi => ((LocationPoint)fi.Location).Point.Y).ToList();
+                pts = sortedY.Select(fi => ((LocationPoint)fi.Location).Point).ToList();
+                selected = sortedY;
+                double startY = pts.Min(p => p.Y), endY = pts.Max(p => p.Y);
+                double avgX   = pts.Average(p => p.X);
+                double step   = (endY - startY) / (selected.Count - 1);
+                newPts = Enumerable.Range(0, selected.Count)
+                    .Select(i => new XYZ(avgX, startY + i * step, avgZ)).ToList();
+                angle = Math.PI / 2;
+            }
+            using (var tx = new Transaction(doc, "ME-Tools: Redistribute Lamps"))
+            {
+                tx.Start();
+                for (int i = 0; i < selected.Count; i++)
+                    try
+                    {
+                        var fi = selected[i]; var oldPt = ((LocationPoint)fi.Location).Point;
+                        ElementTransformUtils.MoveElement(doc, fi.Id,
+                            new XYZ(newPts[i].X, newPts[i].Y, oldPt.Z) - oldPt);
+                        doc.Regenerate();
+                        if (Math.Abs(angle) > 0.001)
+                        {
+                            var axis = Line.CreateBound(new XYZ(newPts[i].X,newPts[i].Y,oldPt.Z),
+                                                        new XYZ(newPts[i].X,newPts[i].Y,oldPt.Z)+XYZ.BasisZ);
+                            var cur = fi.GetTransform();
+                            double delta = angle - Math.Atan2(cur.BasisX.Y, cur.BasisX.X);
+                            if (Math.Abs(delta) > 0.001)
+                                ElementTransformUtils.RotateElement(doc, fi.Id, axis, delta);
+                        }
+                    }
+                    catch { }
+                tx.Commit();
+            }
+            OnStatus?.Invoke($"Redistributed {selected.Count} lamps evenly.");
+        }
+
+        // ── Helpers ──────────────────────────────────────────────────────
+        private bool IsPointInside(SpatialElement space, XYZ pt)
+        {
+            try
+            {
+                if (space is Room r)   return r.IsPointInRoom(pt);
+                if (space is Space s)  return s.IsPointInSpace(pt);
+            }
+            catch { }
+            return true;
+        }
 
         private Level GetNearestLevel(Document doc, double z)
         {

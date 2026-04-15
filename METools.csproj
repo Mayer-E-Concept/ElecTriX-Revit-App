@@ -13,7 +13,7 @@
     <Company>Mayer E-Concept SRL</Company>
     <Product>ME-Tools for Autodesk Revit 2025</Product>
     <Copyright>© 2025 Mayer E-Concept SRL</Copyright>
-    <Version>1.0.2</Version>
+    <Version>1.0.0</Version>
   </PropertyGroup>
 
   <ItemGroup>
@@ -31,6 +31,9 @@
     <None Update="METools.addin">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </None>
+    <None Update="standard_worksets.json">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </None>
     <EmbeddedResource Include="Icons\*.png" />
   </ItemGroup>
 
@@ -41,12 +44,6 @@
     <Page Remove="SymmetricDistributor_Revit2025\**" />
     <Compile Remove="KonfigFenster.xaml.cs" />
     <Page Remove="KonfigFenster.xaml" />
-
-    <!-- LicenseWindow.cs and LicenseCheck.cs were added 13.04 but have         -->
-    <!-- unresolvable type-system conflicts. License UI is provided by           -->
-    <!-- SettingsWindow.cs instead. Exclude until they are rewritten.            -->
-    <Compile Remove="LicenseWindow.cs" />
-
   </ItemGroup>
 
   <ItemGroup>
@@ -59,12 +56,17 @@
       <RevitAddinsDir>C:\ProgramData\Autodesk\Revit\Addins\2025</RevitAddinsDir>
     </PropertyGroup>
     <MakeDir Directories="$(RevitAddinsDir)\Icons" Condition="!Exists('$(RevitAddinsDir)\Icons')" />
+    <MakeDir Directories="$(RevitAddinsDir)\config" Condition="!Exists('$(RevitAddinsDir)\config')" />
     <Copy SourceFiles="$(OutputPath)METools.dll"
           DestinationFolder="$(RevitAddinsDir)"
           SkipUnchangedFiles="false"
           ContinueOnError="true" />
     <Copy SourceFiles="$(ProjectDir)METools.addin"
           DestinationFolder="$(RevitAddinsDir)"
+          SkipUnchangedFiles="false"
+          ContinueOnError="true" />
+    <Copy SourceFiles="$(ProjectDir)standard_worksets.json"
+          DestinationFolder="$(RevitAddinsDir)\config"
           SkipUnchangedFiles="false"
           ContinueOnError="true" />
     <Copy SourceFiles="@(EmbeddedResource)"

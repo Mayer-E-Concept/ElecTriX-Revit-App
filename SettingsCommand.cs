@@ -1,37 +1,38 @@
-// SettingsCommand.cs — ME-Tools Settings Button
+// SettingsCommand.cs — ME-Tools
 // Mayer E-Concept SRL
-using System.Reflection;
-using System.Windows.Media.Imaging;
 using Autodesk.Revit.Attributes;
 using Autodesk.Revit.DB;
 using Autodesk.Revit.UI;
+using System.Diagnostics;
+using System.Windows.Interop;
 
 namespace METools
 {
-    [Transaction(TransactionMode.ReadOnly)]
+    [Transaction(TransactionMode.Manual)]
     [Regeneration(RegenerationOption.Manual)]
     public class SettingsCommand : IExternalCommand
     {
-        private static SettingsWindow _window;
+        // Accessible by SettingsWindow to call Revit API during ShowDialog
+        public static PushButton    RibbonButton    { get; set; }
+        public static UIApplication CurrentApp      { get; private set; }
+        public static Document      CurrentDocument => CurrentApp?.ActiveUIDocument?.Document;
 
-        /// <summary>Reference to the ribbon button — set by App.cs on startup.</summary>
-        public static PushButton RibbonButton { get; set; }
-
-        public Result Execute(
-            ExternalCommandData commandData,
-            ref string message,
-            ElementSet elements)
+        public Result Execute(ExternalCommandData commandData, ref string message, ElementSet elements)
         {
-            if (_window != null && _window.IsVisible)
-            {
-                _window.Activate();
-                _window.Focus();
-                return Result.Succeeded;
-            }
+            CurrentApp = commandData.Application;
 
-            _window = new SettingsWindow();
-            _window.Closed += (s, e) => _window = null;
-            _window.Show();
+            var win    = new SettingsWindow();
+            var helper = new WindowInteropHelper(win);
+            helper.Owner = Process.GetCurrentProcess().MainWindowHandle;
+            win.ShowDialog();
+
+            CurrentApp = null;
+
+            if (RibbonButton != null)
+                RibbonButton.LongDescription =
+                    $"Settings — Mayer E-Concept SRL\n\n" +
+                    "Appearance · Language · License · Worksets\n\n" +
+                    $"License status: {LicenseManager.StatusText}";
 
             return Result.Succeeded;
         }

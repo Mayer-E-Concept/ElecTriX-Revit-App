@@ -3,7 +3,6 @@
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
-using METools.Licensing;
 
 using Grid       = System.Windows.Controls.Grid;
 using TextBox    = System.Windows.Controls.TextBox;
@@ -72,11 +71,11 @@ namespace METools
             optGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(10) });
             optGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
-            var card30  = BuildOptionCard("30-Day Extension",
+            var card30 = BuildOptionCard("30-Day Extension",
                 "30 Tage verlängern",
                 "Ideal for short-term projects.\nActivated immediately with code.",
                 false);
-            var card1y  = BuildOptionCard("1-Year License",
+            var card1y = BuildOptionCard("1-Year License",
                 "1 Jahr Lizenz",
                 "Full access for 12 months.\nBest value for regular users.",
                 true);
@@ -108,11 +107,11 @@ namespace METools
             // ── Machine ID ───────────────────────────────────────────────────
             body.Children.Add(new TextBlock
             {
-                Text   = "YOUR MACHINE ID",
+                Text       = "YOUR MACHINE ID",
                 FontSize   = 10,
                 FontWeight = FontWeights.SemiBold,
                 Foreground = MeToolsTheme.BrMuted,
-                Margin = new Thickness(0, 0, 0, 6)
+                Margin     = new Thickness(0, 0, 0, 6)
             });
 
             var idRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 20) };
@@ -132,13 +131,13 @@ namespace METools
             };
             var copyBtn = new Button
             {
-                Content         = "Copy",
-                Margin          = new Thickness(8, 0, 0, 0),
-                Padding         = new Thickness(14, 6, 14, 6),
-                Background      = MeToolsTheme.BrSurface,
-                Foreground      = MeToolsTheme.BrText,
-                BorderBrush     = MeToolsTheme.BrBorder,
-                FontSize        = 12,
+                Content           = "Copy",
+                Margin            = new Thickness(8, 0, 0, 0),
+                Padding           = new Thickness(14, 6, 14, 6),
+                Background        = MeToolsTheme.BrSurface,
+                Foreground        = MeToolsTheme.BrText,
+                BorderBrush       = MeToolsTheme.BrBorder,
+                FontSize          = 12,
                 VerticalAlignment = VerticalAlignment.Center
             };
             copyBtn.Click += (s, e) =>
@@ -183,9 +182,9 @@ namespace METools
             };
             body.Children.Add(_statusTb);
 
-            _activateBtn = ActionBtn("Activate ME-Tools", true, Activate);
-            _activateBtn.HorizontalAlignment = HorizontalAlignment.Stretch;
-            _activateBtn.Height = 40;
+            _activateBtn                      = ActionBtn("Activate ME-Tools", true, Activate);
+            _activateBtn.HorizontalAlignment  = HorizontalAlignment.Stretch;
+            _activateBtn.Height               = 40;
             body.Children.Add(_activateBtn);
 
             RootDock.Children.Add(body);
@@ -212,14 +211,14 @@ namespace METools
             {
                 inner.Children.Add(new Border
                 {
-                    Background      = new SolidColorBrush(Color.FromArgb(60, accent.R, accent.G, accent.B)),
-                    BorderBrush     = new SolidColorBrush(accent),
-                    BorderThickness = new Thickness(1),
-                    CornerRadius    = new CornerRadius(4),
-                    Padding         = new Thickness(6, 2, 6, 2),
+                    Background          = new SolidColorBrush(Color.FromArgb(60, accent.R, accent.G, accent.B)),
+                    BorderBrush         = new SolidColorBrush(accent),
+                    BorderThickness     = new Thickness(1),
+                    CornerRadius        = new CornerRadius(4),
+                    Padding             = new Thickness(6, 2, 6, 2),
                     HorizontalAlignment = HorizontalAlignment.Left,
-                    Margin          = new Thickness(0, 0, 0, 8),
-                    Child           = new TextBlock
+                    Margin              = new Thickness(0, 0, 0, 8),
+                    Child               = new TextBlock
                     {
                         Text       = "RECOMMENDED",
                         FontSize   = 9,

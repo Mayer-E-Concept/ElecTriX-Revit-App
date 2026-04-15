@@ -5,7 +5,6 @@ using Autodesk.Revit.DB;
 using Autodesk.Revit.UI;
 using System.Collections.Generic;
 using System.Linq;
-using METools.Licensing;
 
 namespace METools.LampPlacer
 {
@@ -16,16 +15,24 @@ namespace METools.LampPlacer
 
         public Result Execute(ExternalCommandData commandData, ref string message, ElementSet elements)
         {
-            if (!LicenseCheck.Verify(commandData.Application.MainWindowHandle))
-                return Result.Cancelled;
-
             var uidoc = commandData.Application.ActiveUIDocument;
             var doc   = uidoc.Document;
 
             if (_window != null && _window.IsVisible)
             { _window.Activate(); _window.Focus(); return Result.Succeeded; }
 
+            // Load lighting families
             var families = LoadLightingFamilies(doc);
+
+            // Get active view level as default
+            ElementId defaultLevelId = ElementId.InvalidElementId;
+            try
+            {
+                if (uidoc.ActiveView is ViewPlan vp)
+                    defaultLevelId = vp.GenLevel?.Id ?? ElementId.InvalidElementId;
+            }
+            catch { }
+
             var handler  = new LampPlacerHandler();
             var extEvent = ExternalEvent.Create(handler);
 
@@ -39,14 +46,22 @@ namespace METools.LampPlacer
         private List<LampFamilyInfo> LoadLightingFamilies(Document doc)
         {
             var result = new List<LampFamilyInfo>();
-            var cats   = new[] { BuiltInCategory.OST_LightingFixtures, BuiltInCategory.OST_LightingDevices };
+            var cats   = new[]
+            {
+                BuiltInCategory.OST_LightingFixtures,
+                BuiltInCategory.OST_LightingDevices,
+            };
 
             foreach (var cat in cats)
             {
                 try
                 {
-                    foreach (var sym in new FilteredElementCollector(doc)
-                        .OfClass(typeof(FamilySymbol)).OfCategory(cat).Cast<FamilySymbol>())
+                    var symbols = new FilteredElementCollector(doc)
+                        .OfClass(typeof(FamilySymbol))
+                        .OfCategory(cat)
+                        .Cast<FamilySymbol>();
+
+                    foreach (var sym in symbols)
                         result.Add(new LampFamilyInfo
                         {
                             FamilyName = sym.Family?.Name ?? "",
@@ -60,7 +75,8 @@ namespace METools.LampPlacer
             return result
                 .GroupBy(f => f.FamilyName + "|" + f.TypeName)
                 .Select(g => g.First())
-                .OrderBy(f => f.FamilyName).ThenBy(f => f.TypeName)
+                .OrderBy(f => f.FamilyName)
+                .ThenBy(f => f.TypeName)
                 .ToList();
         }
     }

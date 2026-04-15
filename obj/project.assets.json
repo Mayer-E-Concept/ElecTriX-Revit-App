@@ -1,17 +1,17 @@
 {
-  "version": 3,
+  "version": 4,
   "targets": {
-    "net8.0-windows7.0": {}
+    "net8.0-windows": {}
   },
   "libraries": {},
   "projectFileDependencyGroups": {
-    "net8.0-windows7.0": []
+    "net8.0-windows": []
   },
   "packageFolders": {
     "C:\\Users\\user\\.nuget\\packages\\": {}
   },
   "project": {
-    "version": "1.0.2",
+    "version": "1.0.0",
     "restore": {
       "projectUniqueName": "X:\\02_sabloane\\01_Revit\\11_Revit_AddOn\\METools.csproj",
       "projectName": "METools",
@@ -30,7 +30,7 @@
         "C:\\Program Files (x86)\\Microsoft SDKs\\NuGetPackages\\": {}
       },
       "frameworks": {
-        "net8.0-windows7.0": {
+        "net8.0-windows": {
           "framework": "net8.0-windows7.0",
           "targetAlias": "net8.0-windows",
           "projectReferences": {}
@@ -46,10 +46,10 @@
         "auditLevel": "low",
         "auditMode": "direct"
       },
-      "SdkAnalysisLevel": "10.0.200"
+      "SdkAnalysisLevel": "10.0.300"
     },
     "frameworks": {
-      "net8.0-windows7.0": {
+      "net8.0-windows": {
         "framework": "net8.0-windows7.0",
         "targetAlias": "net8.0-windows",
         "imports": [
@@ -71,7 +71,7 @@
             "privateAssets": "none"
           }
         },
-        "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\10.0.201/PortableRuntimeIdentifierGraph.json"
+        "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\10.0.300-preview.0.26177.108/PortableRuntimeIdentifierGraph.json"
       }
     }
   }
