@@ -3,7 +3,7 @@
 ; Build: F9 in Inno Setup Compiler
 
 #define ProjectDir "X:\02_sabloane\01_Revit\11_Revit_AddOn"
-#define AppVersion "1.0.4-beta"
+#define AppVersion "1.0.6-beta"
 
 [Setup]
 AppName=ME-Tools fuer Revit
@@ -42,13 +42,13 @@ Name: "r2026"; Description: "Revit 2026"; Types: r2026 all custom
 Source: "{#ProjectDir}\bin\x64\Release\net8.0-windows\METools.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2025"; DestName: "METools.dll"; Flags: ignoreversion; Components: r2025
 Source: "{#ProjectDir}\METools.addin";                               DestDir: "{commonappdata}\Autodesk\Revit\Addins\2025"; DestName: "METools.addin"; Flags: ignoreversion; Components: r2025
 Source: "{#ProjectDir}\Icons\*";                                     DestDir: "{commonappdata}\Autodesk\Revit\Addins\2025\Icons";  Flags: ignoreversion recursesubdirs; Components: r2025
-Source: "{#ProjectDir}\config\standard_worksets.json";               DestDir: "{commonappdata}\Autodesk\Revit\Addins\2025\config"; Flags: ignoreversion onlyifdoesntexist; Components: r2025
+Source: "{#ProjectDir}\standard_worksets.json";               DestDir: "{commonappdata}\Autodesk\Revit\Addins\2025\config"; Flags: ignoreversion onlyifdoesntexist; Components: r2025
 
 ; ── Revit 2026 ────────────────────────────────────────────────────────────
 Source: "{#ProjectDir}\bin\x64\Release\net8.0-windows\METools.dll"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2026"; DestName: "METools.dll"; Flags: ignoreversion; Components: r2026
 Source: "{#ProjectDir}\METools.addin";                               DestDir: "{commonappdata}\Autodesk\Revit\Addins\2026"; DestName: "METools.addin"; Flags: ignoreversion; Components: r2026
 Source: "{#ProjectDir}\Icons\*";                                     DestDir: "{commonappdata}\Autodesk\Revit\Addins\2026\Icons";  Flags: ignoreversion recursesubdirs; Components: r2026
-Source: "{#ProjectDir}\config\standard_worksets.json";               DestDir: "{commonappdata}\Autodesk\Revit\Addins\2026\config"; Flags: ignoreversion onlyifdoesntexist; Components: r2026
+Source: "{#ProjectDir}\standard_worksets.json";               DestDir: "{commonappdata}\Autodesk\Revit\Addins\2026\config"; Flags: ignoreversion onlyifdoesntexist; Components: r2026
 
 [UninstallDelete]
 Type: files;         Name: "{commonappdata}\Autodesk\Revit\Addins\2025\METools.dll"

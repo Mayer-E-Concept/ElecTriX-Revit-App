@@ -1,7 +1,5 @@
 // SplashWindow.cs - ME-Tools Startup Splash
 // Mayer E-Concept SRL
-using System;
-using System.Reflection;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -11,8 +9,9 @@ using Color = System.Windows.Media.Color;
 namespace METools
 {
     /// <summary>
-    /// Startup splash shown once per Revit session.
-    /// Requires OK to close. Version is read live from the assembly.
+    /// Startup splash shown by SplashGate on first install, when
+    /// trial drops to ≤ 5 days, or when trial has expired.
+    /// Version is resolved live from the embedded setup.iss — never hardcoded.
     /// </summary>
     public class SplashWindow : MeToolsWindowBase
     {
@@ -23,19 +22,6 @@ namespace METools
             BuildContent();
         }
 
-        private static string AssemblyVersion
-        {
-            get
-            {
-                try
-                {
-                    var v = Assembly.GetExecutingAssembly().GetName().Version;
-                    return $"v{v.Major}.{v.Minor}.{v.Build}";
-                }
-                catch { return "v1.0"; }
-            }
-        }
-
         private void BuildContent()
         {
             var panel = new StackPanel
@@ -43,7 +29,6 @@ namespace METools
                 Margin = new Thickness(30, 20, 30, 24),
                 HorizontalAlignment = HorizontalAlignment.Center,
             };
-            // Panel fills all space below TitleBar (LastChildFill = true)
             RootDock.Children.Add(panel);
 
             // Logo
@@ -82,10 +67,10 @@ namespace METools
             // License badge
             panel.Children.Add(BuildLicenseBadge());
 
-            // Version - read live from assembly, never hardcoded
+            // Version — single source of truth: setup.iss (via SplashGate)
             panel.Children.Add(new TextBlock
             {
-                Text = $"{AssemblyVersion}  .  Mayer E-Concept SRL",
+                Text = $"v{SplashGate.GetVersion()}  ·  Mayer E-Concept SRL",
                 FontSize = 10, Foreground = MeToolsTheme.BrMuted,
                 HorizontalAlignment = HorizontalAlignment.Center,
                 Margin = new Thickness(0, 12, 0, 0),
@@ -99,7 +84,7 @@ namespace METools
             });
 
             // OK button
-            var okBtn = FooterBtn("OK  -  Continue", primary: true, onClick: () =>
+            var okBtn = FooterBtn("OK  ·  Continue", primary: true, onClick: () =>
             {
                 try { DialogResult = true; } catch { }
                 Close();
@@ -112,7 +97,7 @@ namespace METools
             {
                 panel.Children.Add(new TextBlock
                 {
-                    Text = "To enter a license key -> Settings button in the ribbon",
+                    Text = "To enter a license key → Settings in the ribbon",
                     FontSize = 10, Foreground = MeToolsTheme.BrMuted,
                     TextWrapping = TextWrapping.Wrap,
                     TextAlignment = TextAlignment.Center,
@@ -139,13 +124,13 @@ namespace METools
             {
                 bg    = Color.FromRgb(0x80, 0x20, 0x20);
                 dot   = Color.FromRgb(0xFF, 0x70, 0x70);
-                label = "Trial expired - please activate";
+                label = "Trial expired — please activate";
             }
             else
             {
                 bg    = Color.FromRgb(0x7A, 0x50, 0x10);
                 dot   = Color.FromRgb(0xFF, 0xC0, 0x50);
-                label = $"Beta access - {days} day{(days == 1 ? "" : "s")} remaining";
+                label = $"Beta access — {days} day{(days == 1 ? "" : "s")} remaining";
             }
 
             var badge = new Border

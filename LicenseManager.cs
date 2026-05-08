@@ -1,33 +1,35 @@
-// LicenseManager.cs — ME-Tools License Management
+// LicenseManager.cs — ME-Tools Trial License Management
 // Mayer E-Concept SRL
 // -----------------------------------------------------------------
-// Handles 30-day beta trial enforcement and license activation.
-// Architecture is open for a future full license-key system:
-// implement IsLicensed() to return true for valid keys.
+// Handles 30-day beta trial enforcement and holds the stub API used
+// by LicenseWindow / LicenseCheck. The real activation logic is a
+// clean seam: Activate(code) currently rejects all codes — replace
+// the body with real validation once the licensing backend is ready.
 // -----------------------------------------------------------------
 using System;
 using System.IO;
-using System.Net.NetworkInformation;
 using System.Security.Cryptography;
 using System.Text;
 
 namespace METools
 {
-    // ── License status (overall state of the installation) ────────────────
+    // Public-facing status used by LicenseWindow header text.
     public enum LicenseStatus
     {
-        Active,           // Trial or license is currently valid
-        TrialExpired,     // 30-day beta period ended, no license present
-        LicenseExpired    // A timed license was activated but has since expired
+        BetaActive,      // trial running
+        BetaExpiring,    // ≤ 5 days left
+        BetaExpired,     // trial ran out, no key
+        Licensed,        // valid key present
+        LicenseExpired,  // was licensed, now expired (future use)
     }
 
-    // ── License type returned by Activate() ───────────────────────────────
+    // Type of license granted by Activate().
     public enum LicenseType
     {
-        None,       // Activation failed — code invalid or already used
-        Extend30,   // 30-day extension code
-        Year1,      // 1-year license code
-        Permanent   // Perpetual license code
+        None,       // activation failed
+        Extend30,   // +30 days
+        Year1,      // 1-year license
+        Permanent,  // permanent license
     }
 
     internal static class LicenseManager
@@ -40,20 +42,21 @@ namespace METools
             "METools");
 
         private static readonly string LicFile = Path.Combine(DataDir, "lic.dat");
+        private static readonly string KeyFile = Path.Combine(DataDir, "key.dat");
 
-        // Simple XOR key — enough to prevent casual text-editor tampering
+        // Simple XOR key — enough to prevent casual text-editor tampering.
         private static readonly byte[] XorKey = { 0x4D, 0x45, 0x54, 0x6C }; // "METl"
 
         // ── Public API ────────────────────────────────────────────────────
 
         /// <summary>
-        /// Returns true when a valid activation code is saved on this machine.
-        /// Automatically verified against the code format on every call.
+        /// Stub for future full-license key validation.
+        /// Returns true only when a previously-activated key is on disk.
         /// </summary>
         public static bool IsLicensed()
         {
-            var key = SavedKey;
-            return !string.IsNullOrEmpty(key) && Activate(key) != LicenseType.None;
+            try { return File.Exists(KeyFile) && File.ReadAllText(KeyFile).Trim().Length > 0; }
+            catch { return false; }
         }
 
         /// <summary>True when the trial has expired and no valid license is present.</summary>
@@ -88,12 +91,92 @@ namespace METools
             }
         }
 
-        // ── Internal helpers ──────────────────────────────────────────────
+        /// <summary>Status enum used by LicenseWindow header and Settings.</summary>
+        public static LicenseStatus GetStatus()
+        {
+            if (IsLicensed()) return LicenseStatus.Licensed;
+            int d = DaysRemaining;
+            if (d <= 0) return LicenseStatus.BetaExpired;
+            if (d <= 5) return LicenseStatus.BetaExpiring;
+            return LicenseStatus.BetaActive;
+        }
+
+        /// <summary>Short machine identifier for activation-code binding.</summary>
+        public static string GetMachineId()
+        {
+            try
+            {
+                string seed = Environment.MachineName + "|" + Environment.UserDomainName;
+                using (var sha = SHA256.Create())
+                {
+                    var hash = sha.ComputeHash(Encoding.UTF8.GetBytes(seed));
+                    return BitConverter.ToString(hash, 0, 6).Replace("-", "");
+                }
+            }
+            catch { return "ME-TOOLS"; }
+        }
 
         /// <summary>
-        /// Returns the stored install date, or writes today's date on first run.
-        /// The date is XOR-obfuscated and Base64-encoded to prevent trivial tampering.
+        /// STUB — real activation not yet implemented. Returns LicenseType.None
+        /// for any input. Replace the body with real server/offline validation
+        /// when the licensing backend is ready. The seam on LicenseWindow and
+        /// the persistence in KeyFile already work.
         /// </summary>
+        public static LicenseType Activate(string code)
+        {
+            if (string.IsNullOrWhiteSpace(code)) return LicenseType.None;
+
+            // TODO: replace with real validation. Example seam:
+            //
+            //   var granted = MyLicenseServer.Verify(code, GetMachineId());
+            //   if (granted == LicenseType.None) return LicenseType.None;
+            //   PersistKey(code, granted);
+            //   return granted;
+
+            return LicenseType.None;
+        }
+
+        // ── Key persistence seam used by SettingsWindow ───────────────────
+        // These three members are the contract the Settings UI relies on.
+        // Replace the inner logic once the real license server is wired up;
+        // the UI code will not need to change.
+
+        /// <summary>The key currently persisted on disk, empty string if none.</summary>
+        public static string SavedKey
+        {
+            get
+            {
+                try { return File.Exists(KeyFile) ? (File.ReadAllText(KeyFile) ?? "").Trim() : ""; }
+                catch { return ""; }
+            }
+        }
+
+        /// <summary>
+        /// Attempts to activate with the given key. Returns true on success.
+        /// Current stub: accepts no keys — replace with real validator.
+        /// </summary>
+        public static bool TryActivate(string key)
+        {
+            var granted = Activate(key);
+            if (granted == LicenseType.None) return false;
+            try
+            {
+                Directory.CreateDirectory(DataDir);
+                File.WriteAllText(KeyFile, key.Trim());
+            }
+            catch { return false; }
+            return true;
+        }
+
+        /// <summary>Remove any stored key, returning the app to beta-trial mode.</summary>
+        public static void Deactivate()
+        {
+            try { if (File.Exists(KeyFile)) File.Delete(KeyFile); }
+            catch { }
+        }
+
+        // ── Internal helpers ──────────────────────────────────────────────
+
         private static DateTime GetOrCreateInstallDate()
         {
             try
@@ -106,10 +189,7 @@ namespace METools
                         return stored;
                 }
             }
-            catch
-            {
-                // Corrupt or unreadable — fall through to create a fresh record
-            }
+            catch { }
 
             var today = DateTime.Today;
             try
@@ -136,128 +216,6 @@ namespace METools
             for (int i = 0; i < bytes.Length; i++)
                 bytes[i] ^= XorKey[i % XorKey.Length];
             return Encoding.UTF8.GetString(bytes);
-        }
-
-        // ── Public API: status, machine ID, activation ────────────────────
-
-        /// <summary>
-        /// Returns the overall license status for display in the UI.
-        /// </summary>
-        public static LicenseStatus GetStatus()
-        {
-            if (IsLicensed())       return LicenseStatus.Active;
-            if (DaysRemaining > 0)  return LicenseStatus.Active;
-            return LicenseStatus.TrialExpired;
-        }
-
-        /// <summary>
-        /// Returns a stable, hardware-bound machine identifier.
-        /// Used to generate activation codes tied to this machine.
-        /// </summary>
-        public static string GetMachineId()
-        {
-            try
-            {
-                // Use the first physical MAC address as the basis
-                foreach (var nic in NetworkInterface.GetAllNetworkInterfaces())
-                {
-                    if (nic.NetworkInterfaceType == NetworkInterfaceType.Ethernet ||
-                        nic.NetworkInterfaceType == NetworkInterfaceType.Wireless80211)
-                    {
-                        var mac = nic.GetPhysicalAddress().ToString();
-                        if (!string.IsNullOrEmpty(mac) && mac != "000000000000")
-                        {
-                            // Hash and truncate to a readable 12-char ID
-                            using var sha = SHA256.Create();
-                            var hash = sha.ComputeHash(Encoding.UTF8.GetBytes(mac + "METools"));
-                            return BitConverter.ToString(hash, 0, 6).Replace("-", "").ToUpper();
-                        }
-                    }
-                }
-            }
-            catch { }
-
-            // Fallback: machine name hash
-            var fallback = Environment.MachineName + Environment.UserName;
-            using var sha2 = SHA256.Create();
-            var h = sha2.ComputeHash(Encoding.UTF8.GetBytes(fallback));
-            return BitConverter.ToString(h, 0, 6).Replace("-", "").ToUpper();
-        }
-
-        /// <summary>
-        /// Attempts to activate using the provided code.
-        /// Returns the LicenseType on success, LicenseType.None on failure.
-        /// Stub implementation — replace with real server validation when ready.
-        /// </summary>
-        public static LicenseType Activate(string code)
-        {
-            if (string.IsNullOrWhiteSpace(code)) return LicenseType.None;
-
-            // Code format: ME-XXXXXX-TYPE  (e.g. ME-A1B2C3-Y1 / -E30 / -PRM)
-            // This is a stub — replace with HMAC server call for production.
-            string upper = code.Trim().ToUpper();
-            if (upper.StartsWith("ME-") && upper.Length >= 10)
-            {
-                if (upper.EndsWith("-PRM"))  return LicenseType.Permanent;
-                if (upper.EndsWith("-Y1"))   return LicenseType.Year1;
-                if (upper.EndsWith("-E30"))  return LicenseType.Extend30;
-            }
-
-            return LicenseType.None;
-        }
-
-        // ── Key persistence file (separate from trial date file) ──────────
-        private static readonly string KeyFile = Path.Combine(DataDir, "key.dat");
-
-        /// <summary>
-        /// The activation code currently saved on this machine, or null if none.
-        /// Stored obfuscated on disk; decoded on read.
-        /// </summary>
-        public static string SavedKey
-        {
-            get
-            {
-                try
-                {
-                    if (!File.Exists(KeyFile)) return null;
-                    var raw = File.ReadAllText(KeyFile).Trim();
-                    return string.IsNullOrEmpty(raw) ? null : Deobfuscate(raw);
-                }
-                catch { return null; }
-            }
-        }
-
-        /// <summary>
-        /// Validates and, on success, persists the activation code to disk.
-        /// Returns true when the code is valid and was saved successfully.
-        /// Use instead of Activate() when the UI should also store the result.
-        /// </summary>
-        public static bool TryActivate(string code)
-        {
-            var result = Activate(code);
-            if (result == LicenseType.None) return false;
-
-            try
-            {
-                Directory.CreateDirectory(DataDir);
-                File.WriteAllText(KeyFile, Obfuscate(code.Trim()), Encoding.UTF8);
-            }
-            catch { /* activation is still logically valid even if save fails */ }
-
-            return true;
-        }
-
-        /// <summary>
-        /// Removes the saved activation key from disk, reverting to trial/expired state.
-        /// </summary>
-        public static void Deactivate()
-        {
-            try
-            {
-                if (File.Exists(KeyFile))
-                    File.Delete(KeyFile);
-            }
-            catch { }
         }
     }
 }

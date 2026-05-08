@@ -4,28 +4,76 @@ using System.Linq;
 using Autodesk.Revit.DB;
 using Autodesk.Revit.DB.Electrical;
 
-
 namespace METools.FamilyPlacer
 {
+    /// <summary>Detaillierte Info zu einem Verteiler im Modell.</summary>
+    public class VerteilerDetails
+    {
+        public ElementId ElementId          { get; set; }
+        public string    Name               { get; set; }
+        public string    CircuitPrefix      { get; set; }
+        public string    CircuitPrefixSeparator { get; set; }
+        public string    NamingSchemeName   { get; set; }
+        public ElementId NamingSchemeId     { get; set; }
+        public XYZ       Position           { get; set; }
+    }
+
+    /// <summary>Circuit Naming Scheme im Projekt.</summary>
+    public class NamingSchemeInfo
+    {
+        public ElementId Id   { get; set; }
+        public string    Name { get; set; }
+    }
+
     public static class RevitDatenHelper
     {
         private const string PARAM_SONDERSTECKDOSE = "Sondersteckdose";
 
-        // ─── Räume ────────────────────────────────────────────────────
+        // Parameter-IDs aus Revit API (verifiziert via Nonica)
+        private const int PARAM_CIRCUIT_PREFIX            = -1140085;
+        private const int PARAM_CIRCUIT_PREFIX_SEPARATOR  = -1140086;
+        private const int PARAM_CIRCUIT_NAMING            = -1140087;
+
+        // ─── Räume + MEP-Spaces ───────────────────────────────────────
         public static List<(string Nummer, string Name)> LeseAlleRaeume(Document doc)
         {
-            return new FilteredElementCollector(doc)
-                .OfCategory(BuiltInCategory.OST_Rooms)
-                .WhereElementIsNotElementType()
-                .Cast<Autodesk.Revit.DB.Architecture.Room>()
-                .Where(r => r.Area > 0)
-                .Select(r =>
+            var list = new List<(string, string)>();
+
+            // Architektur-Räume
+            try
+            {
+                foreach (var r in new FilteredElementCollector(doc)
+                    .OfCategory(BuiltInCategory.OST_Rooms)
+                    .WhereElementIsNotElementType()
+                    .Cast<Autodesk.Revit.DB.Architecture.Room>()
+                    .Where(r => r.Area > 0))
                 {
                     var nummer = r.get_Parameter(BuiltInParameter.ROOM_NUMBER)?.AsString() ?? "";
                     var name   = r.get_Parameter(BuiltInParameter.ROOM_NAME)?.AsString() ?? "";
-                    return (nummer, name);
-                })
-                .ToList();
+                    if (!string.IsNullOrWhiteSpace(nummer) || !string.IsNullOrWhiteSpace(name))
+                        list.Add((nummer, name));
+                }
+            }
+            catch { }
+
+            // MEP-Spaces
+            try
+            {
+                foreach (var el in new FilteredElementCollector(doc)
+                    .OfCategory(BuiltInCategory.OST_MEPSpaces)
+                    .WhereElementIsNotElementType())
+                {
+                    var sp = el as Autodesk.Revit.DB.Mechanical.Space;
+                    if (sp == null || sp.Area <= 0) continue;
+                    var nummer = sp.get_Parameter(BuiltInParameter.ROOM_NUMBER)?.AsString() ?? "";
+                    var name   = sp.get_Parameter(BuiltInParameter.ROOM_NAME)?.AsString() ?? "";
+                    if (!string.IsNullOrWhiteSpace(nummer) || !string.IsNullOrWhiteSpace(name))
+                        list.Add((nummer, name));
+                }
+            }
+            catch { }
+
+            return list;
         }
 
         public static List<string> LeseEinzigartigeRaumtypen(Document doc)
@@ -47,84 +95,299 @@ namespace METools.FamilyPlacer
                 .ToList();
         }
 
+        // ─── Diagnose ────────────────────────────────────────────────
+        public class DiagnoseErgebnis
+        {
+            public int    AnzahlRaeume      { get; set; }
+            public int    AnzahlMEPSpaces   { get; set; }
+            public int    UnplatzierteRaum { get; set; }
+            public int    GesamtPlatziert   { get; set; }
+            public bool   AllesDefaultName  { get; set; }
+            public string KurzText          { get; set; } = "";
+            public string DetailText        { get; set; } = "";
+        }
+
+        public static DiagnoseErgebnis ErstelleDiagnose(Document doc)
+        {
+            var d = new DiagnoseErgebnis();
+
+            try
+            {
+                var rooms = new FilteredElementCollector(doc)
+                    .OfCategory(BuiltInCategory.OST_Rooms)
+                    .WhereElementIsNotElementType()
+                    .Cast<Autodesk.Revit.DB.Architecture.Room>().ToList();
+                d.AnzahlRaeume       = rooms.Count(r => r.Area > 0);
+                d.UnplatzierteRaum   = rooms.Count(r => r.Area <= 0);
+            }
+            catch { }
+
+            try
+            {
+                var spaces = new FilteredElementCollector(doc)
+                    .OfCategory(BuiltInCategory.OST_MEPSpaces)
+                    .WhereElementIsNotElementType().ToList();
+                d.AnzahlMEPSpaces = spaces.Count(s => (s as Autodesk.Revit.DB.Mechanical.Space)?.Area > 0);
+            }
+            catch { }
+
+            d.GesamtPlatziert = d.AnzahlRaeume + d.AnzahlMEPSpaces;
+
+            var alle = LeseAlleRaeume(doc);
+            d.AllesDefaultName = alle.Count > 0
+                && alle.All(r => string.IsNullOrWhiteSpace(r.Name)
+                              || r.Name.Equals("Raum", StringComparison.OrdinalIgnoreCase)
+                              || r.Name.Equals("Room", StringComparison.OrdinalIgnoreCase));
+
+            if (d.GesamtPlatziert == 0)
+                d.KurzText = "Keine Räume oder MEP-Spaces im Modell";
+            else if (d.AnzahlRaeume > 0 && d.AnzahlMEPSpaces > 0)
+                d.KurzText = $"{d.AnzahlRaeume} Räume + {d.AnzahlMEPSpaces} MEP-Spaces";
+            else if (d.AnzahlRaeume > 0)
+                d.KurzText = $"{d.AnzahlRaeume} Räume gefunden";
+            else
+                d.KurzText = $"{d.AnzahlMEPSpaces} MEP-Spaces gefunden";
+
+            if (d.UnplatzierteRaum > 0)
+                d.KurzText += $" ({d.UnplatzierteRaum} unplatziert ignoriert)";
+
+            d.DetailText = $"Räume: {d.AnzahlRaeume}, MEP-Spaces: {d.AnzahlMEPSpaces}";
+            return d;
+        }
+
         // ─── Sondersteckdosen ─────────────────────────────────────────
         public static HashSet<string> LeseSonderkuerzel(Document doc)
         {
-            var kategorien = new[]
+            var kat = new[] { BuiltInCategory.OST_ElectricalFixtures, BuiltInCategory.OST_ElectricalEquipment };
+            var k = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var c in kat)
             {
-                BuiltInCategory.OST_ElectricalFixtures,
-                BuiltInCategory.OST_ElectricalEquipment,
-            };
-
-            var kuerzel = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-            foreach (var kat in kategorien)
-            {
-                var elemente = new FilteredElementCollector(doc)
-                    .OfCategory(kat)
-                    .WhereElementIsNotElementType()
-                    .ToElements();
-
-                foreach (var el in elemente)
+                try
                 {
-                    var param = el.LookupParameter(PARAM_SONDERSTECKDOSE);
-                    var wert  = param?.AsString()?.Trim().ToUpper();
-                    if (!string.IsNullOrWhiteSpace(wert))
-                        kuerzel.Add(wert);
+                    foreach (var el in new FilteredElementCollector(doc).OfCategory(c)
+                        .WhereElementIsNotElementType().ToElements())
+                    {
+                        var p = el.LookupParameter(PARAM_SONDERSTECKDOSE);
+                        var w = p?.AsString()?.Trim().ToUpperInvariant();
+                        if (!string.IsNullOrWhiteSpace(w)) k.Add(w);
+                    }
                 }
+                catch { }
             }
-
-            // Standardkürzel immer einschließen
-            foreach (var k in RaumHelper.StandardKuerzel)
-                kuerzel.Add(k);
-
-            return kuerzel;
+            foreach (var s in RaumHelper.StandardKuerzel) k.Add(s);
+            return k;
         }
 
-        // ─── Verteiler ────────────────────────────────────────────────
-        public static List<(string Id, string Name, XYZ Position)> LeseVerteiler(Document doc)
+        // ─── Verteiler mit allen Details ──────────────────────────────
+        /// <summary>
+        /// Liest alle Verteiler mit Panel-Name (user-definiert), Circuit Prefix,
+        /// Separator und aktuell zugewiesenem Naming Scheme. Toleranter Filter:
+        /// akzeptiert alle FamilyInstances in OST_ElectricalEquipment.
+        /// </summary>
+        public static List<VerteilerDetails> LeseVerteilerDetails(Document doc)
         {
-            return new FilteredElementCollector(doc)
-                .OfCategory(BuiltInCategory.OST_ElectricalEquipment)
-                .WhereElementIsNotElementType()
-                .Where(el =>
+            const int PARAM_PANEL_NAME = -1140078;  // RBS_ELEC_PANEL_NAME_PARAM
+
+            var result = new List<VerteilerDetails>();
+            try
+            {
+                foreach (var fi in new FilteredElementCollector(doc)
+                    .OfCategory(BuiltInCategory.OST_ElectricalEquipment)
+                    .WhereElementIsNotElementType()
+                    .OfClass(typeof(FamilyInstance))
+                    .Cast<FamilyInstance>())
                 {
-                    var name = el.Name ?? "";
-                    return name.StartsWith("V-", StringComparison.OrdinalIgnoreCase)
-                        || name.StartsWith("V_", StringComparison.OrdinalIgnoreCase)
-                        || name.ToUpper().Contains("VERTEILER")
-                        || name.ToUpper().Contains("VTLR");
-                })
-                .Select(el =>
-                {
-                    var pos = (el.Location as LocationPoint)?.Point ?? XYZ.Zero;
-                    return (el.UniqueId, el.Name, pos);
-                })
-                .ToList();
+                    // Panel Name-Parameter (das ist der *echte* Verteilername wie im
+                    // Eigenschafteneditor sichtbar) — fallback auf fi.Name
+                    string panelName = LesePrefix(fi, PARAM_PANEL_NAME, "Panel Name");
+                    if (string.IsNullOrWhiteSpace(panelName)) panelName = fi.Name ?? "";
+
+                    string circuitPrefix          = LesePrefix(fi, PARAM_CIRCUIT_PREFIX,           "Circuit Prefix");
+                    string circuitPrefixSeparator = LesePrefix(fi, PARAM_CIRCUIT_PREFIX_SEPARATOR, "Circuit Prefix Separator");
+
+                    // Heuristik: echter Verteiler braucht entweder Circuit Prefix, Panel Name,
+                    // oder ist mindestens eine ElectricalEquipment-Instanz (toleranter Filter)
+                    bool istEchterVerteiler =
+                        !string.IsNullOrWhiteSpace(circuitPrefix)
+                        || !string.IsNullOrWhiteSpace(panelName)
+                        || (fi.MEPModel is ElectricalEquipment);
+                    if (!istEchterVerteiler) continue;
+
+                    var d = new VerteilerDetails
+                    {
+                        ElementId              = fi.Id,
+                        Name                   = panelName,
+                        CircuitPrefix          = circuitPrefix,
+                        CircuitPrefixSeparator = circuitPrefixSeparator,
+                        Position               = (fi.Location as LocationPoint)?.Point ?? XYZ.Zero,
+                    };
+
+                    // Naming-Scheme (Param ist ElementId-Typ)
+                    try
+                    {
+                        Parameter p = null;
+                        try { p = fi.get_Parameter((BuiltInParameter)PARAM_CIRCUIT_NAMING); } catch { }
+                        if (p == null) p = fi.LookupParameter("Circuit Naming");
+                        if (p != null && p.StorageType == StorageType.ElementId)
+                        {
+                            var sid = p.AsElementId();
+                            if (sid != null && sid.IntegerValue > 0)
+                            {
+                                d.NamingSchemeId = sid;
+                                var scheme = doc.GetElement(sid);
+                                d.NamingSchemeName = scheme?.Name ?? "";
+                            }
+                        }
+                    }
+                    catch { }
+
+                    result.Add(d);
+                }
+            }
+            catch { }
+            return result;
+        }
+
+        private static string LesePrefix(FamilyInstance fi, int paramId, string nameFallback = null)
+        {
+            try
+            {
+                Parameter p = null;
+                try { p = fi.get_Parameter((BuiltInParameter)paramId); } catch { }
+                if (p == null && !string.IsNullOrEmpty(nameFallback))
+                    p = fi.LookupParameter(nameFallback);
+                return p?.AsString() ?? "";
+            }
+            catch { return ""; }
+        }
+
+        // ─── Stromkreise ──────────────────────────────────────────────
+        /// <summary>Info zu einem bestehenden Stromkreis im Modell.</summary>
+        public class StromkreisInfo
+        {
+            public ElementId    Id                 { get; set; }
+            public string       LoadName           { get; set; } = "";
+            public string       CircuitNumber      { get; set; } = "";
+            public string       LoadClassification { get; set; } = "";
+            public string       PanelName          { get; set; } = "";
+            public List<string> Raumnummern        { get; set; } = new List<string>();
+            public int          AnzahlBauteile     { get; set; }
         }
 
         /// <summary>
-        /// Versucht für jeden Verteiler den Raum/Wohnung automatisch zu ermitteln
-        /// (Verteiler liegt im Flur der Wohnung → GetRoomAtPoint).
+        /// Liest alle ElectricalSystems (Power-Circuits) im Dokument.
+        /// Liefert Display-Info zur Anzeige im Panels-Tab.
         /// </summary>
+        public static List<StromkreisInfo> LeseAlleStromkreise(Document doc)
+        {
+            // Parameter-IDs aus Revit 2025 (verifiziert via Nonica auf Circuit 28590951)
+            const int PARAM_CIRCUIT_NUMBER         = -1140103;  // Circuit Number
+            const int PARAM_LOAD_NAME              = -1140089;  // Load Name
+            const int PARAM_LOAD_CLASSIFICATION    = -1140120;  // Load Classification
+            const int PARAM_CIRCUIT_PANEL          = -1140104;  // Panel
+
+            var result = new List<StromkreisInfo>();
+            try
+            {
+                foreach (var sys in new FilteredElementCollector(doc)
+                    .OfClass(typeof(ElectricalSystem))
+                    .Cast<ElectricalSystem>())
+                {
+                    if (sys.SystemType != ElectricalSystemType.PowerCircuit) continue;
+
+                    var info = new StromkreisInfo
+                    {
+                        Id                 = sys.Id,
+                        LoadName           = LeseStringParam(sys, PARAM_LOAD_NAME,           "Load Name"),
+                        CircuitNumber      = LeseStringParam(sys, PARAM_CIRCUIT_NUMBER,      "Circuit Number"),
+                        LoadClassification = LeseStringParam(sys, PARAM_LOAD_CLASSIFICATION, "Load Classification"),
+                        PanelName          = LeseStringParam(sys, PARAM_CIRCUIT_PANEL,       "Panel"),
+                    };
+
+                    // Räume aus den Bauteilen sammeln
+                    try
+                    {
+                        var raumSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                        foreach (Element el in sys.Elements)
+                        {
+                            info.AnzahlBauteile++;
+                            if (el is FamilyInstance fi)
+                            {
+                                string rn = "";
+                                try { rn = fi.Space?.get_Parameter(BuiltInParameter.ROOM_NUMBER)?.AsString() ?? ""; } catch { }
+                                if (string.IsNullOrWhiteSpace(rn))
+                                    try { rn = fi.Room?.get_Parameter(BuiltInParameter.ROOM_NUMBER)?.AsString() ?? ""; } catch { }
+                                if (!string.IsNullOrWhiteSpace(rn)) raumSet.Add(rn);
+                            }
+                        }
+                        info.Raumnummern.AddRange(raumSet);
+                    }
+                    catch { }
+
+                    result.Add(info);
+                }
+            }
+            catch { }
+            return result.OrderBy(s => s.PanelName, StringComparer.OrdinalIgnoreCase)
+                         .ThenBy(s => s.LoadName, StringComparer.OrdinalIgnoreCase)
+                         .ToList();
+        }
+
+        /// <summary>
+        /// Liest einen String-Parameter über BuiltInParameter-Cast, mit LookupParameter-Fallback.
+        /// Robustes Pattern für Parameter die je nach Revit-Version unterschiedlich heißen.
+        /// </summary>
+        private static string LeseStringParam(Element el, int paramId, string nameFallback)
+        {
+            try
+            {
+                Parameter p = null;
+                try { p = el.get_Parameter((BuiltInParameter)paramId); } catch { }
+                if (p == null && !string.IsNullOrEmpty(nameFallback))
+                    p = el.LookupParameter(nameFallback);
+                if (p == null) return "";
+                if (p.StorageType == StorageType.String) return p.AsString() ?? "";
+                return p.AsValueString() ?? "";
+            }
+            catch { return ""; }
+        }
+
+        // ─── Circuit Naming Schemes ───────────────────────────────────
+        /// <summary>
+        /// Listet alle im Projekt definierten Circuit Naming Schemes.
+        /// </summary>
+        public static List<NamingSchemeInfo> LeseVerfuegbareNamingSchemes(Document doc)
+        {
+            var result = new List<NamingSchemeInfo>();
+            try
+            {
+                foreach (var el in new FilteredElementCollector(doc)
+                    .OfClass(typeof(CircuitNamingScheme)))
+                {
+                    result.Add(new NamingSchemeInfo { Id = el.Id, Name = el.Name ?? "" });
+                }
+            }
+            catch { }
+            return result.OrderBy(s => s.Name, StringComparer.OrdinalIgnoreCase).ToList();
+        }
+
+        // ─── Verteilerzuordnung (bestehend, minimal angepasst) ────────
+        public static List<(string Id, string Name, XYZ Position)> LeseVerteiler(Document doc)
+        {
+            return LeseVerteilerDetails(doc)
+                .Select(v => (v.ElementId.IntegerValue.ToString(), v.Name, v.Position))
+                .ToList();
+        }
+
         public static List<VerteilerzuordnungEintrag> ErmittleVerteilerzuordnung(
-            Document doc,
-            SchemaHelper.SchemaErgebnis schema)
+            Document doc, SchemaHelper.SchemaErgebnis schema)
         {
             var verteiler = LeseVerteiler(doc);
             var raeume    = LeseAlleRaeume(doc);
             var ergebnis  = new List<VerteilerzuordnungEintrag>();
 
-            // Phase für GetRoomAtPoint
             Phase phase = null;
-            try
-            {
-                var phases = new FilteredElementCollector(doc)
-                    .OfClass(typeof(Phase))
-                    .Cast<Phase>()
-                    .ToList();
-                phase = phases.LastOrDefault();
-            }
+            try { phase = new FilteredElementCollector(doc).OfClass(typeof(Phase)).Cast<Phase>().LastOrDefault(); }
             catch { }
 
             foreach (var (id, name, pos) in verteiler)
@@ -132,44 +395,35 @@ namespace METools.FamilyPlacer
                 string wohnungsId = "W-??";
                 bool automatisch  = false;
 
-                // Versuche Raum am Verteiler-Standort zu finden
                 if (phase != null && pos != XYZ.Zero)
                 {
                     try
                     {
-                        var raumAmPunkt = doc.GetRoomAtPoint(pos, phase);
-                        if (raumAmPunkt != null)
+                        var raum = doc.GetRoomAtPoint(pos, phase);
+                        if (raum != null)
                         {
-                            var nummer = raumAmPunkt
-                                .get_Parameter(BuiltInParameter.ROOM_NUMBER)?.AsString() ?? "";
-                            wohnungsId   = SchemaHelper.ExtrahiereWohnungsId(nummer, schema);
-                            automatisch  = wohnungsId != "W-??";
+                            var nummer = raum.get_Parameter(BuiltInParameter.ROOM_NUMBER)?.AsString() ?? "";
+                            wohnungsId  = SchemaHelper.ExtrahiereWohnungsId(nummer, schema);
+                            automatisch = wohnungsId != "W-??";
                         }
                     }
                     catch { }
                 }
 
-                // Räume dieser Wohnung zusammenstellen
-                var raumNamenDerWohnung = raeume
-                    .Where(r =>
-                    {
-                        var wid = SchemaHelper.ExtrahiereWohnungsId(r.Nummer, schema);
-                        return wid == wohnungsId;
-                    })
+                var raumNamen = raeume
+                    .Where(r => SchemaHelper.ExtrahiereWohnungsId(r.Nummer, schema) == wohnungsId)
                     .Select(r => RaumHelper.Normalisiere(r.Name))
-                    .Distinct()
-                    .ToList();
+                    .Distinct().ToList();
 
                 ergebnis.Add(new VerteilerzuordnungEintrag
                 {
-                    WohnungsId          = wohnungsId,
-                    VerteilerId         = id,
-                    VerteilerName       = name,
-                    Raeume              = raumNamenDerWohnung,
-                    AutomatischErkannt  = automatisch,
+                    WohnungsId         = wohnungsId,
+                    VerteilerId        = id,
+                    VerteilerName      = name,
+                    Raeume             = raumNamen,
+                    AutomatischErkannt = automatisch,
                 });
             }
-
             return ergebnis.OrderBy(e => e.WohnungsId).ToList();
         }
     }

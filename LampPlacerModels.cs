@@ -11,20 +11,18 @@ namespace METools.LampPlacer
         public ElementId SymbolId   { get; set; }
     }
 
-    public enum DistributionMode { AreaBased, ManualGrid }
-    public enum RotationMode     { Auto, Deg0, Deg90 }
-    public enum LineMode        { BySpacing, ByCount }
-    public enum LineOrientation { AlongLine, Perpendicular }
-
-    public enum LampAction
+    public class LevelInfo
     {
-        PlaceSingle,
-        PlaceMulti,
-        Redistribute,
-        RefreshRoom,
-        RefreshMulti,
-        PlaceOnLine
+        public ElementId Id        { get; set; } = ElementId.InvalidElementId;
+        public string    Name      { get; set; } = "";
+        public double    Elevation { get; set; } = 0.0;   // in internal units (feet)
     }
+
+    public enum DistributionMode { AreaBased, ManualGrid, Line }
+    public enum LineMode          { BySpacing, ByCount }
+    public enum LineRotation      { AlongLine, Perpendicular }
+    public enum RotationMode      { Auto, Deg0, Deg90 }
+    public enum LampAction        { PlaceSingle, PlaceMulti, Redistribute, RefreshRoom, PlaceLine }
 
     public class LampConfig
     {
@@ -34,13 +32,19 @@ namespace METools.LampPlacer
         public double           SqmPerLamp   { get; set; } = 12.0;
         public int              ManualRows   { get; set; } = 2;
         public int              ManualCols   { get; set; } = 2;
+
+        // Line mode
+        public LineMode         LineMode     { get; set; } = LineMode.BySpacing;
+        public double           LineSpacing  { get; set; } = 2000.0;  // mm between lamps
+        public int              LineCount    { get; set; } = 4;       // number of lamps on line
+        public LineRotation     LineRotation { get; set; } = LineRotation.AlongLine;
+
         public double           WallMargin   { get; set; } = 1500.0;
         public RotationMode     Rotation     { get; set; } = RotationMode.Auto;
         public double           UKDOffset    { get; set; } = 0.0;
-        public double           LineSpacing     { get; set; } = 2000.0;
-        public int              LineCount       { get; set; } = 4;
-        public LineMode         LineMode        { get; set; } = LineMode.BySpacing;
-        public LineOrientation  LineOrientation { get; set; } = LineOrientation.AlongLine;
+
+        // Reference level — reliable fallback when no slab face is found at the UKD
+        public ElementId        FallbackLevelId { get; set; } = ElementId.InvalidElementId;
     }
 
     public class LampRequest

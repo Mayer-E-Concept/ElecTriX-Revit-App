@@ -23,22 +23,9 @@ namespace METools
     public class SettingsWindow : MeToolsWindowBase
     {
         // ── Version ───────────────────────────────────────────────────────
-        private static string AppVersion
-        {
-            get
-            {
-                try
-                {
-                    var loc  = Assembly.GetExecutingAssembly().Location;
-                    var fvi  = System.Diagnostics.FileVersionInfo.GetVersionInfo(loc);
-                    var v    = fvi.ProductVersion ?? fvi.FileVersion ?? "1.0";
-                    var plus = v.IndexOf('+');
-                    if (plus > 0) v = v.Substring(0, plus);
-                    return $"v{v}";
-                }
-                catch { return "v1.0"; }
-            }
-        }
+        // Single source of truth: setup.iss (read via SplashGate).
+        // Update #define AppVersion in setup.iss → rebuild → shown here.
+        private static string AppVersion => $"v{SplashGate.GetVersion()}";
 
         // ── Tab panels ────────────────────────────────────────────────────
         private StackPanel _panAppearance;

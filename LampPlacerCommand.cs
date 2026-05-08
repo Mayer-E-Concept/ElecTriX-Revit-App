@@ -24,7 +24,10 @@ namespace METools.LampPlacer
             // Load lighting families
             var families = LoadLightingFamilies(doc);
 
-            // Get active view level as default
+            // Load levels (sorted low → high)
+            var levels = LoadLevels(doc);
+
+            // Get active view level as default reference level
             ElementId defaultLevelId = ElementId.InvalidElementId;
             try
             {
@@ -36,7 +39,7 @@ namespace METools.LampPlacer
             var handler  = new LampPlacerHandler();
             var extEvent = ExternalEvent.Create(handler);
 
-            _window = new LampPlacerWindow(extEvent, handler, families);
+            _window = new LampPlacerWindow(extEvent, handler, families, levels, defaultLevelId);
             _window.Closed += (s, e) => _window = null;
             _window.Show();
 
@@ -78,6 +81,25 @@ namespace METools.LampPlacer
                 .OrderBy(f => f.FamilyName)
                 .ThenBy(f => f.TypeName)
                 .ToList();
+        }
+
+        private List<LevelInfo> LoadLevels(Document doc)
+        {
+            try
+            {
+                return new FilteredElementCollector(doc)
+                    .OfClass(typeof(Level))
+                    .Cast<Level>()
+                    .Select(l => new LevelInfo
+                    {
+                        Id        = l.Id,
+                        Name      = l.Name ?? "",
+                        Elevation = l.Elevation,
+                    })
+                    .OrderBy(l => l.Elevation)
+                    .ToList();
+            }
+            catch { return new List<LevelInfo>(); }
         }
     }
 }
