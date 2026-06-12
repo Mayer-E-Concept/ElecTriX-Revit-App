@@ -9,6 +9,7 @@ namespace METools.LampPlacer
         public string    FamilyName { get; set; } = "";
         public string    TypeName   { get; set; } = "";
         public ElementId SymbolId   { get; set; }
+        public FamilyPlacementType Placement { get; set; } = FamilyPlacementType.Invalid;
     }
 
     public class LevelInfo
@@ -19,10 +20,11 @@ namespace METools.LampPlacer
     }
 
     public enum DistributionMode { AreaBased, ManualGrid, Line }
+    public enum PlacementSurface { Face, WorkPlane }
     public enum LineMode          { BySpacing, ByCount }
     public enum LineRotation      { AlongLine, Perpendicular }
     public enum RotationMode      { Auto, Deg0, Deg90 }
-    public enum LampAction        { PlaceSingle, PlaceMulti, Redistribute, RefreshRoom, PlaceLine }
+    public enum LampAction        { PlaceSingle, PlaceMulti, Redistribute, RefreshRoom, PlaceLine, PlaceGrid }
 
     public class LampConfig
     {
@@ -38,9 +40,12 @@ namespace METools.LampPlacer
         public double           LineSpacing  { get; set; } = 2000.0;  // mm between lamps
         public int              LineCount    { get; set; } = 4;       // number of lamps on line
         public LineRotation     LineRotation { get; set; } = LineRotation.AlongLine;
+        public string           LineStyleName{ get; set; } = "";    // guide detail-line style
 
         public double           WallMargin   { get; set; } = 1500.0;
         public RotationMode     Rotation     { get; set; } = RotationMode.Auto;
+        public PlacementSurface Surface      { get; set; } = PlacementSurface.WorkPlane;
+        public double           OverlapThreshold { get; set; } = 300;   // mm, min gap to existing fixtures
         public double           UKDOffset    { get; set; } = 0.0;
 
         // Reference level — reliable fallback when no slab face is found at the UKD

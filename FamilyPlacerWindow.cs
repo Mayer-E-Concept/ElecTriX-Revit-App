@@ -36,6 +36,10 @@ namespace METools.FamilyPlacer
         // ── State ─────────────────────────────────────────────────────────────
         private readonly ExternalEvent         _extEvent;
         private readonly FamilyPlacerHandler   _handler;
+        private readonly ExternalEvent                _inspectEvent;
+        private readonly FamilyParamInspectorHandler  _inspectHandler;
+        private readonly Dictionary<string, List<FamilyParamInfo>> _paramCache
+            = new Dictionary<string, List<FamilyParamInfo>>();
         private readonly List<FamilyTypeInfo>  _allFamilies;
         private          List<PlacerTemplate>  _templates;
         private          string                _orientation = "Vertical";
@@ -57,7 +61,9 @@ namespace METools.FamilyPlacer
                                   FamilyPlacerHandler handler,
                                   List<FamilyTypeInfo> families,
                                   List<LevelInfo> levels,
-                                  ElementId defaultLevelId)
+                                  ElementId defaultLevelId,
+                                  ExternalEvent inspectEvent,
+                                  FamilyParamInspectorHandler inspectHandler)
         {
             _extEvent        = extEvent;
             _handler         = handler;
@@ -65,6 +71,8 @@ namespace METools.FamilyPlacer
             _templates       = TemplateManager.Load();
             _levels          = levels;
             _selectedLevelId = defaultLevelId;
+            _inspectEvent    = inspectEvent;
+            _inspectHandler  = inspectHandler;
 
             // Wire handler callbacks
             _handler.OnStatus = msg => Dispatcher.Invoke(() => SetStatus(msg));
@@ -77,6 +85,7 @@ namespace METools.FamilyPlacer
         }
 
         protected override void OnThemeChanged() { Background = MeToolsTheme.BrBg; }
+        protected override string AppKey => "FamilyPlacer";
 
         // ─────────────────────────────────────────────────────────────────────
         // UI BUILD
@@ -140,11 +149,11 @@ namespace METools.FamilyPlacer
             _tplCombo.SelectionChanged += TplCombo_SelectionChanged;
             Grid.SetColumn(_tplCombo, 0);
 
-            var btnSave = MakeIconBtn("💾", "Save current config as template", SaveTemplate);
+            var btnSave = MakeIconBtn("\uE74E", "Save current config as template", SaveTemplate);
             btnSave.Margin = new Thickness(5, 0, 0, 0);
             Grid.SetColumn(btnSave, 1);
 
-            var btnDel = MakeIconBtn("🗑", "Delete selected template", DeleteTemplate);
+            var btnDel = MakeIconBtn("\uE74D", "Delete selected template", DeleteTemplate);
             btnDel.Margin = new Thickness(4, 0, 0, 0);
             Grid.SetColumn(btnDel, 2);
 
@@ -188,13 +197,20 @@ namespace METools.FamilyPlacer
 
             // Column headers
             var hdr = new Grid { Margin = new Thickness(0, 0, 0, 4) };
-            hdr.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(20) });   // handle
-            hdr.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(20) });   // #
-            hdr.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) }); // family
-            hdr.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(70) });   // height
-            hdr.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(52) });   // offset
-            hdr.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(30) });   // del
-            AddHdr(hdr, "Family", 2); AddHdr(hdr, "Niveau(mm)", 3); AddHdr(hdr, "Offset ×", 4);
+            hdr.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(18) });   // 0 handle
+            hdr.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(22) });   // 1 #
+            hdr.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) }); // 2 family
+            hdr.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(6) });    // 3 gap
+            hdr.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(56) });   // 4 niveau
+            hdr.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(4) });    // 5 gap
+            hdr.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(40) });   // 6 off X
+            hdr.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(3) });    // 7 gap
+            hdr.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(40) });   // 8 off Y
+            hdr.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(6) });    // 9 gap
+            hdr.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(28) });   // 10 gear
+            hdr.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(4) });    // 11 gap
+            hdr.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(28) });   // 12 del
+            AddHdr(hdr, "Family", 2); AddHdr(hdr, "Niveau", 4); AddHdr(hdr, "Off X", 6); AddHdr(hdr, "Off Y", 8);
             body.Children.Add(hdr);
 
             _slotPanel = new StackPanel { Margin = new Thickness(0, 0, 0, 6) };
@@ -228,32 +244,9 @@ namespace METools.FamilyPlacer
             // Divider
             body.Children.Add(new Separator { Margin = new Thickness(0, 0, 0, 10) });
 
-            // Info box
-            var info = new Border
-            {
-                Background      = new SolidColorBrush(Color.FromRgb(0xe8, 0xf4, 0xf4)),
-                BorderBrush     = new SolidColorBrush(Color.FromArgb(80, 0x18, 0x5f, 0x5f)),
-                BorderThickness = new Thickness(1),
-                CornerRadius    = new CornerRadius(4),
-                Padding         = new Thickness(10, 7, 10, 7),
-                Margin          = new Thickness(0, 0, 0, 12),
-            };
-            var infoSp = new StackPanel { Orientation = Orientation.Horizontal };
-            infoSp.Children.Add(new TextBlock
-            {
-                Text      = "ℹ  ",
-                FontSize  = 13,
-                Foreground = MeToolsTheme.BrPetrol,
-            });
-            infoSp.Children.Add(new TextBlock
-            {
-                Text       = "SPACEBAR to rotate (90°) before placing · Wall detection active · Free workplane supported",
-                FontSize   = 11,
-                Foreground = MeToolsTheme.BrActiveFg,
-                TextWrapping = TextWrapping.Wrap,
-            });
-            info.Child = infoSp;
-            body.Children.Add(info);
+            // Info box (same style as Lamp Placer)
+            body.Children.Add(InfoBox(
+                "SPACEBAR to rotate (90\u00B0) before placing \u00B7 Wall detection active \u00B7 Free workplane supported"));
 
             // Place buttons row
             var btnRow = new Grid();
@@ -279,7 +272,7 @@ namespace METools.FamilyPlacer
 
         private void AddSlot(FamilySlot data = null)
         {
-            var row = new SlotRow(_allFamilies, data, _rows.Count + 1);
+            var row = new SlotRow(_allFamilies, data, _rows.Count + 1, RequestFamilyParams);
             row.OnRemove  = () => RemoveSlot(row);
             row.OnChanged = UpdateCount;
             _rows.Add(row);
@@ -301,6 +294,25 @@ namespace METools.FamilyPlacer
         {
             int valid = _rows.Count(r => !string.IsNullOrEmpty(r.Slot.FamilyName));
             _statusCount.Text = $"{valid} famil{(valid != 1 ? "ies" : "y")} configured";
+        }
+
+        private void RequestFamilyParams(string fam, string type, Action<List<FamilyParamInfo>> cb)
+        {
+            if (cb == null) return;
+            if (string.IsNullOrEmpty(fam)) { cb(new List<FamilyParamInfo>()); return; }
+            string key = fam + "|" + (type ?? "");
+            if (_paramCache.TryGetValue(key, out var cached)) { cb(cached); return; }
+            if (_inspectEvent == null || _inspectHandler == null) { cb(new List<FamilyParamInfo>()); return; }
+
+            _inspectHandler.FamilyName = fam;
+            _inspectHandler.TypeName   = type ?? "";
+            _inspectHandler.OnResult   = list => Dispatcher.Invoke(() =>
+            {
+                var safe = list ?? new List<FamilyParamInfo>();
+                _paramCache[key] = safe;
+                cb(safe);
+            });
+            _inspectEvent.Raise();
         }
 
         private void SetStatus(string msg) => _statusTxt.Text = msg;
@@ -348,7 +360,14 @@ namespace METools.FamilyPlacer
 
         private void TplCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
-            if (_tplCombo.SelectedIndex <= 0) return;
+            if (_tplCombo.SelectedIndex <= 0)
+            {
+                // "Select Template" / new -> reset to a single blank slot
+                _rows.Clear();
+                _slotPanel.Children.Clear();
+                AddSlot();
+                return;
+            }
             var tpl = _templates[_tplCombo.SelectedIndex - 1];
 
             // Load orientation
@@ -367,23 +386,44 @@ namespace METools.FamilyPlacer
 
         private void SaveTemplate()
         {
-            var dlg = new SaveTemplateDialog();
-            if (dlg.ShowDialog() != true || string.IsNullOrEmpty(dlg.TemplateName)) return;
+            string name;
 
-            var name = dlg.TemplateName.Trim();
-            var existing = _templates.FirstOrDefault(t => t.Name == name);
-            if (existing != null) _templates.Remove(existing);
-
-            _templates.Add(new PlacerTemplate
+            if (_tplCombo.SelectedIndex > 0)
             {
-                Name        = name,
-                Orientation = _orientation,
-                Slots       = _rows.Select(r => r.Slot).ToList(),
-            });
+                // A named template is loaded -> overwrite it silently, no prompt
+                name = _templates[_tplCombo.SelectedIndex - 1].Name;
+            }
+            else
+            {
+                // No template selected -> Save As (ask for a name)
+                var dlg = new SaveTemplateDialog();
+                if (dlg.ShowDialog() != true || string.IsNullOrEmpty(dlg.TemplateName)) return;
+                name = dlg.TemplateName.Trim();
+                if (name.Length == 0) return;
+            }
+
+            var slots = _rows.Select(r => r.Slot).ToList();
+            var existing = _templates.FirstOrDefault(t => t.Name == name);
+            if (existing != null)
+            {
+                // update in place (keeps list order)
+                existing.Orientation = _orientation;
+                existing.Slots       = slots;
+            }
+            else
+            {
+                _templates.Add(new PlacerTemplate
+                {
+                    Name        = name,
+                    Orientation = _orientation,
+                    Slots       = slots,
+                });
+            }
+
             TemplateManager.Save(_templates);
             RefreshTemplateCombo();
 
-            // Select the newly saved template
+            // Re-select the saved template
             var idx = _templates.FindIndex(t => t.Name == name);
             if (idx >= 0) _tplCombo.SelectedIndex = idx + 1;
         }
@@ -455,7 +495,9 @@ namespace METools.FamilyPlacer
             {
                 Content         = icon,
                 Width           = 30, Height = 30,
-                FontSize        = 13,
+                FontSize        = 14,
+                FontFamily      = new FontFamily("Segoe MDL2 Assets"),
+                Foreground      = MeToolsTheme.Current == MeTheme.Dark ? Brushes.White : MeToolsTheme.BrText,
                 ToolTip         = tip,
                 Background      = MeToolsTheme.BrBtnBg,
                 BorderBrush     = MeToolsTheme.BrBorder,
@@ -514,7 +556,7 @@ namespace METools.FamilyPlacer
                 Background      = isOutline ? MeToolsTheme.BrBtnBg : MeToolsTheme.BrPetrol,
                 BorderBrush     = MeToolsTheme.BrPetrol,
                 BorderThickness = new Thickness(1.5),
-                Foreground      = isOutline ? MeToolsTheme.BrPetrol : Brushes.White,
+                Foreground      = isOutline ? (MeToolsTheme.Current == MeTheme.Dark ? Brushes.White : MeToolsTheme.BrPetrol) : Brushes.White,
                 Cursor          = Cursors.Hand,
             };
             btn.Click      += (s, e) => onClick();
@@ -601,27 +643,38 @@ namespace METools.FamilyPlacer
         public FamilySlot Slot    { get; } = new FamilySlot();
 
         private readonly List<FamilyTypeInfo> _all;
+        private readonly Action<string, string, Action<List<FamilyParamInfo>>> _requestParams;
         private ComboBox   _familyCmb, _typeCmb;
-        private TextBox    _heightTxt, _offsetTxt;
+        private TextBox    _heightTxt, _offXTxt, _offYTxt;
         private TextBlock  _idxBadge;
         private int        _index;
 
-// Farben von MeToolsTheme
+        private Button     _gearBtn;
+        private TextBlock  _gearDot;
+        private System.Windows.Controls.Primitives.Popup _popup;
+        private StackPanel _paramFieldsPanel;
+        private string     _paramsBuiltKey;
 
-        public SlotRow(List<FamilyTypeInfo> all, FamilySlot data, int index)
+        public SlotRow(List<FamilyTypeInfo> all, FamilySlot data, int index,
+                       Action<string, string, Action<List<FamilyParamInfo>>> requestParams)
         {
-            _all   = all;
-            _index = index;
+            _all           = all;
+            _index         = index;
+            _requestParams = requestParams;
 
             if (data != null)
             {
                 Slot.FamilyName   = data.FamilyName;
                 Slot.TypeName     = data.TypeName;
                 Slot.Height       = data.Height;
-                Slot.OffsetFactor = data.OffsetFactor;
+                Slot.OffsetX      = data.OffsetX;
+                Slot.OffsetY      = data.OffsetY;
+                if (data.ParamOverrides != null)
+                    Slot.ParamOverrides = new Dictionary<string, string>(data.ParamOverrides);
             }
 
             Container = BuildRow();
+            UpdateGearDot();
         }
 
         public void SetIndex(int i)
@@ -643,20 +696,24 @@ namespace METools.FamilyPlacer
             };
 
             var g = new Grid();
-            g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(18) });   // handle
-            g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(22) });   // index
-            g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) }); // family+type
-            g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(6) });    // gap
-            g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(70) });   // height
-            g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(4) });    // gap
-            g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(52) });   // offset
-            g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(6) });    // gap
-            g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(28) });   // del
+            g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(18) });   // 0 handle
+            g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(22) });   // 1 index
+            g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) }); // 2 family+type
+            g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(6) });    // 3 gap
+            g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(56) });   // 4 niveau
+            g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(4) });    // 5 gap
+            g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(40) });   // 6 off X
+            g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(3) });    // 7 gap
+            g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(40) });   // 8 off Y
+            g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(6) });    // 9 gap
+            g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(28) });   // 10 gear
+            g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(4) });    // 11 gap
+            g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(28) });   // 12 del
 
             // Drag handle
             var handle = new TextBlock
             {
-                Text = "⠿", FontSize = 13,
+                Text = "\u283F", FontSize = 13,
                 Foreground = new SolidColorBrush(Color.FromRgb(0xa8, 0xb4, 0xbb)),
                 VerticalAlignment = VerticalAlignment.Center,
                 Cursor = Cursors.SizeNS,
@@ -748,7 +805,7 @@ namespace METools.FamilyPlacer
 
             // Height
             var hSp = new StackPanel { Margin = new Thickness(0) };
-            hSp.Children.Add(Lbl("Niveau (mm)"));
+            hSp.Children.Add(Lbl("Niveau"));
             _heightTxt = new TextBox
             {
                 Text   = Slot.Height.ToString("F0"),
@@ -764,12 +821,12 @@ namespace METools.FamilyPlacer
             hSp.Children.Add(_heightTxt);
             Grid.SetColumn(hSp, 4); g.Children.Add(hSp);
 
-            // Offset factor
-            var oSp = new StackPanel();
-            oSp.Children.Add(Lbl("Offset ×"));
-            _offsetTxt = new TextBox
+            // Offset X factor (horizontal)
+            var oxSp = new StackPanel();
+            oxSp.Children.Add(Lbl("Off X"));
+            _offXTxt = new TextBox
             {
-                Text   = Slot.OffsetFactor.ToString(),
+                Text   = Slot.OffsetX.ToString(),
                 Height = 28, FontSize = 12,
                 TextAlignment = TextAlignment.Center,
                 VerticalContentAlignment = VerticalAlignment.Center,
@@ -778,14 +835,64 @@ namespace METools.FamilyPlacer
                 BorderBrush = METools.MeToolsTheme.BrBorder,
                 BorderThickness = new Thickness(1),
             };
-            _offsetTxt.TextChanged += OffsetChanged;
-            oSp.Children.Add(_offsetTxt);
-            Grid.SetColumn(oSp, 6); g.Children.Add(oSp);
+            _offXTxt.TextChanged += OffsetXChanged;
+            oxSp.Children.Add(_offXTxt);
+            Grid.SetColumn(oxSp, 6); g.Children.Add(oxSp);
+
+            // Offset Y factor (vertical)
+            var oySp = new StackPanel();
+            oySp.Children.Add(Lbl("Off Y"));
+            _offYTxt = new TextBox
+            {
+                Text   = Slot.OffsetY.ToString(),
+                Height = 28, FontSize = 12,
+                TextAlignment = TextAlignment.Center,
+                VerticalContentAlignment = VerticalAlignment.Center,
+                Background = METools.MeToolsTheme.BrInput,
+                Foreground = METools.MeToolsTheme.BrText,
+                BorderBrush = METools.MeToolsTheme.BrBorder,
+                BorderThickness = new Thickness(1),
+            };
+            _offYTxt.TextChanged += OffsetYChanged;
+            oySp.Children.Add(_offYTxt);
+            Grid.SetColumn(oySp, 8); g.Children.Add(oySp);
+
+            // Gear (per-family parameters) + override dot
+            _gearBtn = new Button
+            {
+                Content         = "\u2699",
+                Width           = 26, Height = 26,
+                FontSize        = 13,
+                Background      = METools.MeToolsTheme.BrBtnBg,
+                BorderBrush     = METools.MeToolsTheme.BrBorder,
+                BorderThickness = new Thickness(1),
+                Foreground      = METools.MeToolsTheme.BrMuted,
+                VerticalAlignment = VerticalAlignment.Center,
+                Cursor          = Cursors.Hand,
+                ToolTip         = "Family parameters",
+            };
+            _gearBtn.Click += (s, e) => ToggleParamsPopup();
+
+            var gearGrid = new Grid { VerticalAlignment = VerticalAlignment.Center };
+            gearGrid.Children.Add(_gearBtn);
+            _gearDot = new TextBlock
+            {
+                Text                = "\u25CF",
+                FontSize            = 8,
+                Foreground          = MeToolsTheme.BrPetrol,
+                HorizontalAlignment = HorizontalAlignment.Right,
+                VerticalAlignment   = VerticalAlignment.Top,
+                Margin              = new Thickness(0, -1, 1, 0),
+                IsHitTestVisible    = false,
+                Visibility          = Visibility.Collapsed,
+            };
+            gearGrid.Children.Add(_gearDot);
+            Grid.SetColumn(gearGrid, 10); g.Children.Add(gearGrid);
 
             // Remove button
             var delBtn = new Button
             {
-                Content         = "×",
+                Content         = "\u00D7",
                 Width           = 26, Height = 26,
                 FontSize        = 14,
                 Background      = METools.MeToolsTheme.BrBtnBg,
@@ -804,10 +911,173 @@ namespace METools.FamilyPlacer
                 delBtn.Foreground  = MeToolsTheme.BrMuted;
                 delBtn.BorderBrush = MeToolsTheme.BrBorder;
             };
-            Grid.SetColumn(delBtn, 8); g.Children.Add(delBtn);
+            Grid.SetColumn(delBtn, 12); g.Children.Add(delBtn);
 
             border.Child = g;
             return border;
+        }
+
+        // --- Parameter popup ---
+        private void ToggleParamsPopup()
+        {
+            if (_popup == null) BuildPopupShell();
+            _popup.IsOpen = !_popup.IsOpen;
+            if (_popup.IsOpen) EnsureParamsLoaded();
+        }
+
+        private void BuildPopupShell()
+        {
+            _paramFieldsPanel = new StackPanel();
+
+            var header = new TextBlock
+            {
+                Text       = "Family Parameters",
+                FontSize   = 11, FontWeight = FontWeights.Bold,
+                Foreground = MeToolsTheme.BrText,
+                Margin     = new Thickness(0, 0, 0, 6),
+            };
+
+            var scroll = new ScrollViewer
+            {
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                MaxHeight = 320,
+                Content   = _paramFieldsPanel,
+            };
+
+            var inner = new StackPanel { Margin = new Thickness(10, 8, 10, 8) };
+            inner.Children.Add(header);
+            inner.Children.Add(scroll);
+
+            var shell = new Border
+            {
+                Background      = MeToolsTheme.BrSurface,
+                BorderBrush     = MeToolsTheme.BrBorder,
+                BorderThickness = new Thickness(1),
+                CornerRadius    = new CornerRadius(5),
+                Width           = 240,
+                Child           = inner,
+                Effect          = new System.Windows.Media.Effects.DropShadowEffect
+                {
+                    BlurRadius = 10, ShadowDepth = 2, Opacity = 0.25, Color = Colors.Black,
+                },
+            };
+
+            _popup = new System.Windows.Controls.Primitives.Popup
+            {
+                PlacementTarget    = _gearBtn,
+                Placement          = System.Windows.Controls.Primitives.PlacementMode.Bottom,
+                StaysOpen          = false,
+                AllowsTransparency = true,
+                Child              = shell,
+            };
+        }
+
+        private void EnsureParamsLoaded()
+        {
+            string key = (Slot.FamilyName ?? "") + "|" + (Slot.TypeName ?? "");
+            if (_paramsBuiltKey == key) return;
+
+            _paramFieldsPanel.Children.Clear();
+            if (string.IsNullOrEmpty(Slot.FamilyName))
+            {
+                _paramFieldsPanel.Children.Add(InfoLine("Select a family first."));
+                _paramsBuiltKey = null;
+                return;
+            }
+
+            _paramFieldsPanel.Children.Add(InfoLine("Loading..."));
+            _requestParams?.Invoke(Slot.FamilyName, Slot.TypeName, infos =>
+            {
+                _paramsBuiltKey = key;
+                PopulateFields(infos);
+            });
+        }
+
+        private void PopulateFields(List<FamilyParamInfo> infos)
+        {
+            _paramFieldsPanel.Children.Clear();
+            if (infos == null || infos.Count == 0)
+            {
+                _paramFieldsPanel.Children.Add(InfoLine("No editable instance parameters."));
+                return;
+            }
+            foreach (var p in infos)
+            {
+                if (p.Kind == "yesno") _paramFieldsPanel.Children.Add(BuildBoolField(p));
+                else                   _paramFieldsPanel.Children.Add(BuildNumField(p));
+            }
+            UpdateGearDot();
+        }
+
+        private FrameworkElement BuildNumField(FamilyParamInfo p)
+        {
+            var sp = new StackPanel { Margin = new Thickness(0, 0, 0, 7) };
+            string suffix = p.Kind == "length" ? " (mm)" : "";
+            sp.Children.Add(new TextBlock
+            {
+                Text       = p.Label + suffix,
+                FontSize   = 10, FontWeight = FontWeights.Bold,
+                Foreground = MeToolsTheme.BrMuted,
+                Margin     = new Thickness(0, 0, 0, 2),
+            });
+
+            string cur = Slot.ParamOverrides.TryGetValue(p.Name, out var ov) ? ov : p.DefaultValue;
+            var tb = new TextBox
+            {
+                Text   = cur, Height = 26, FontSize = 11,
+                VerticalContentAlignment = VerticalAlignment.Center,
+                Background = MeToolsTheme.BrInput, Foreground = MeToolsTheme.BrText,
+                BorderBrush = MeToolsTheme.BrBorder, BorderThickness = new Thickness(1),
+                CaretBrush = MeToolsTheme.BrText,
+            };
+            tb.TextChanged += (s, e) =>
+            {
+                var t = tb.Text?.Trim() ?? "";
+                if (t == (p.DefaultValue ?? "")) Slot.ParamOverrides.Remove(p.Name);
+                else                             Slot.ParamOverrides[p.Name] = t;
+                UpdateGearDot();
+                OnChanged?.Invoke();
+            };
+            sp.Children.Add(tb);
+            return sp;
+        }
+
+        private FrameworkElement BuildBoolField(FamilyParamInfo p)
+        {
+            bool def = p.DefaultValue == "1";
+            bool cur = Slot.ParamOverrides.TryGetValue(p.Name, out var ov) ? ov == "1" : def;
+            var cb = new CheckBox
+            {
+                Content    = p.Label,
+                IsChecked  = cur,
+                FontSize   = 11,
+                Foreground = MeToolsTheme.BrText,
+                Margin     = new Thickness(0, 2, 0, 7),
+            };
+            cb.Checked   += (s, e) => ApplyBool(p, true,  def);
+            cb.Unchecked += (s, e) => ApplyBool(p, false, def);
+            return cb;
+        }
+
+        private void ApplyBool(FamilyParamInfo p, bool val, bool def)
+        {
+            if (val == def) Slot.ParamOverrides.Remove(p.Name);
+            else            Slot.ParamOverrides[p.Name] = val ? "1" : "0";
+            UpdateGearDot();
+            OnChanged?.Invoke();
+        }
+
+        private TextBlock InfoLine(string t) => new TextBlock
+        {
+            Text = t, FontSize = 11, Foreground = MeToolsTheme.BrMuted,
+            TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 2, 0, 2),
+        };
+
+        private void UpdateGearDot()
+        {
+            if (_gearDot != null)
+                _gearDot.Visibility = (Slot.ParamOverrides != null && Slot.ParamOverrides.Count > 0)
+                    ? Visibility.Visible : Visibility.Collapsed;
         }
 
         public void ApplyTheme()
@@ -816,7 +1086,9 @@ namespace METools.FamilyPlacer
             if (_familyCmb != null) METools.MeToolsWindowBase.ApplyComboStyle(_familyCmb);
             if (_typeCmb   != null) METools.MeToolsWindowBase.ApplyComboStyle(_typeCmb);
             if (_heightTxt != null) { _heightTxt.Background = METools.MeToolsTheme.BrInput; _heightTxt.Foreground = METools.MeToolsTheme.BrText; _heightTxt.BorderBrush = METools.MeToolsTheme.BrBorder; _heightTxt.CaretBrush = METools.MeToolsTheme.BrText; }
-            if (_offsetTxt != null) { _offsetTxt.Background = METools.MeToolsTheme.BrInput; _offsetTxt.Foreground = METools.MeToolsTheme.BrText; _offsetTxt.BorderBrush = METools.MeToolsTheme.BrBorder; _offsetTxt.CaretBrush = METools.MeToolsTheme.BrText; }
+            if (_offXTxt != null) { _offXTxt.Background = METools.MeToolsTheme.BrInput; _offXTxt.Foreground = METools.MeToolsTheme.BrText; _offXTxt.BorderBrush = METools.MeToolsTheme.BrBorder; _offXTxt.CaretBrush = METools.MeToolsTheme.BrText; }
+            if (_offYTxt != null) { _offYTxt.Background = METools.MeToolsTheme.BrInput; _offYTxt.Foreground = METools.MeToolsTheme.BrText; _offYTxt.BorderBrush = METools.MeToolsTheme.BrBorder; _offYTxt.CaretBrush = METools.MeToolsTheme.BrText; }
+            if (_gearBtn   != null) { _gearBtn.Background = METools.MeToolsTheme.BrBtnBg; _gearBtn.Foreground = METools.MeToolsTheme.BrMuted; _gearBtn.BorderBrush = METools.MeToolsTheme.BrBorder; }
         }
 
         private TextBlock Lbl(string t) => new TextBlock
@@ -831,7 +1103,7 @@ namespace METools.FamilyPlacer
         private void RefreshTypes()
         {
             _typeCmb.Items.Clear();
-            // SelectedItem is now a ComboBoxItem — read Tag for family name
+            // SelectedItem is now a ComboBoxItem -- read Tag for family name
             var selectedItem = _familyCmb.SelectedItem as ComboBoxItem;
             var family = selectedItem?.Tag as string;
             if (string.IsNullOrEmpty(family)) return;
@@ -845,6 +1117,9 @@ namespace METools.FamilyPlacer
         {
             var item = _familyCmb.SelectedItem as ComboBoxItem;
             Slot.FamilyName = item?.Tag as string ?? "";
+            Slot.ParamOverrides.Clear();   // different family -> different param set
+            _paramsBuiltKey = null;
+            UpdateGearDot();
             RefreshTypes();
             OnChanged?.Invoke();
         }
@@ -852,6 +1127,7 @@ namespace METools.FamilyPlacer
         private void TypeChanged(object s, SelectionChangedEventArgs e)
         {
             Slot.TypeName = _typeCmb.SelectedItem as string ?? "";
+            _paramsBuiltKey = null;        // defaults may differ per type
             OnChanged?.Invoke();
         }
 
@@ -860,9 +1136,14 @@ namespace METools.FamilyPlacer
             if (double.TryParse(_heightTxt.Text, out double h)) Slot.Height = h;
         }
 
-        private void OffsetChanged(object s, TextChangedEventArgs e)
+        private void OffsetXChanged(object s, TextChangedEventArgs e)
         {
-            if (int.TryParse(_offsetTxt.Text, out int o)) Slot.OffsetFactor = o;
+            if (int.TryParse(_offXTxt.Text, out int o)) Slot.OffsetX = o;
+        }
+
+        private void OffsetYChanged(object s, TextChangedEventArgs e)
+        {
+            if (int.TryParse(_offYTxt.Text, out int o)) Slot.OffsetY = o;
         }
     }
 

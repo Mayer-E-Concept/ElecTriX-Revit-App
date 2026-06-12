@@ -15,17 +15,29 @@ namespace METools.LampPlacer
 
         public Result Execute(ExternalCommandData commandData, ref string message, ElementSet elements)
         {
-            var uidoc = commandData.Application.ActiveUIDocument;
+            Open(commandData.Application);
+            return Result.Succeeded;
+        }
+
+        public static void Open(UIApplication uiApp)
+        {
+            var uidoc = uiApp.ActiveUIDocument;
             var doc   = uidoc.Document;
 
             if (_window != null && _window.IsVisible)
-            { _window.Activate(); _window.Focus(); return Result.Succeeded; }
+            { _window.Activate(); _window.Focus(); return; }
+
+            AppSwitcher.Ensure();
+            MeToolsWindowBase.RevitHandle = uiApp.MainWindowHandle;
 
             // Load lighting families
             var families = LoadLightingFamilies(doc);
 
             // Load levels (sorted low → high)
             var levels = LoadLevels(doc);
+
+            // Load detail line styles (subcategories of Lines)
+            var lineStyles = LoadLineStyles(doc);
 
             // Get active view level as default reference level
             ElementId defaultLevelId = ElementId.InvalidElementId;
@@ -39,14 +51,12 @@ namespace METools.LampPlacer
             var handler  = new LampPlacerHandler();
             var extEvent = ExternalEvent.Create(handler);
 
-            _window = new LampPlacerWindow(extEvent, handler, families, levels, defaultLevelId);
+            _window = new LampPlacerWindow(extEvent, handler, families, levels, defaultLevelId, lineStyles);
             _window.Closed += (s, e) => _window = null;
             _window.Show();
-
-            return Result.Succeeded;
         }
 
-        private List<LampFamilyInfo> LoadLightingFamilies(Document doc)
+        private static List<LampFamilyInfo> LoadLightingFamilies(Document doc)
         {
             var result = new List<LampFamilyInfo>();
             var cats   = new[]
@@ -70,6 +80,7 @@ namespace METools.LampPlacer
                             FamilyName = sym.Family?.Name ?? "",
                             TypeName   = sym.Name ?? "Default",
                             SymbolId   = sym.Id,
+                            Placement  = sym.Family?.FamilyPlacementType ?? FamilyPlacementType.Invalid,
                         });
                 }
                 catch { }
@@ -83,7 +94,7 @@ namespace METools.LampPlacer
                 .ToList();
         }
 
-        private List<LevelInfo> LoadLevels(Document doc)
+        private static List<LevelInfo> LoadLevels(Document doc)
         {
             try
             {
@@ -100,6 +111,22 @@ namespace METools.LampPlacer
                     .ToList();
             }
             catch { return new List<LevelInfo>(); }
+        }
+
+        private static List<string> LoadLineStyles(Document doc)
+        {
+            var names = new List<string>();
+            try
+            {
+                var lineCat = doc.Settings.Categories.get_Item(BuiltInCategory.OST_Lines);
+                if (lineCat != null)
+                    foreach (Category sub in lineCat.SubCategories)
+                        if (sub != null && !string.IsNullOrWhiteSpace(sub.Name))
+                            names.Add(sub.Name);
+            }
+            catch { }
+            names.Sort();
+            return names;
         }
     }
 }

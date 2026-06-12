@@ -10,7 +10,17 @@ namespace METools.FamilyPlacer
         public string FamilyName   { get; set; } = "";
         public string TypeName     { get; set; } = "";
         public double Height       { get; set; } = 85.0;
-        public int    OffsetFactor { get; set; } = 0;
+        public int    OffsetX { get; set; } = 0;
+        public int    OffsetY { get; set; } = 0;
+        public Dictionary<string,string> ParamOverrides { get; set; } = new Dictionary<string,string>();
+    }
+
+    public class FamilyParamInfo
+    {
+        public string Name         { get; set; } = ""; // Revit parameter key (German)
+        public string Label        { get; set; } = ""; // English display label
+        public string Kind         { get; set; } = ""; // "length" | "int" | "double" | "yesno"
+        public string DefaultValue { get; set; } = ""; // display string (mm for length)
     }
     public class PlacerTemplate
     {

@@ -119,8 +119,8 @@ namespace METools.FamilyPlacer
 
                     // Set params on first instance
                     SetNiveau(firstInst, slots[0].Height);
-                    SetParamInt(firstInst, slots[0].OffsetFactor,
-                        Request.Orientation == "Horizontal" ? "2DX_Versatzfaktor" : "2DY_Versatzfaktor");
+                    ApplyOffset(firstInst, slots[0]);
+                    ApplyOverrides(firstInst, slots[0]);
                     total++;
 
                     // Place remaining slots
@@ -170,8 +170,8 @@ namespace METools.FamilyPlacer
                             catch { }
 
                         SetNiveau(inst, slot.Height);
-                        SetParamInt(inst, slot.OffsetFactor,
-                            Request.Orientation == "Horizontal" ? "2DX_Versatzfaktor" : "2DY_Versatzfaktor");
+                        ApplyOffset(inst, slot);
+                        ApplyOverrides(inst, slot);
                         total++;
                     }
                 }
@@ -207,6 +207,58 @@ namespace METools.FamilyPlacer
 
         private void SetParamInt(FamilyInstance inst, int val, string name)
         { try { inst.LookupParameter(name)?.Set(val); } catch { } }
+
+        // Routes the per-slot offsets to the family axes according to the arrangement.
+        // Side by Side (Horizontal): Off X -> 2DX, Off Y -> 2DY.
+        // Stacked (Vertical): transposed, so the same offsets spread vertically.
+        private void ApplyOffset(FamilyInstance inst, FamilySlot slot)
+        {
+            bool sideBySide = Request.Orientation == "Horizontal";
+            int x = sideBySide ? slot.OffsetX : slot.OffsetY;
+            int y = sideBySide ? slot.OffsetY : slot.OffsetX;
+            SetParamInt(inst, x, "2DX_Versatzfaktor");
+            SetParamInt(inst, y, "2DY_Versatzfaktor");
+        }
+
+        private void ApplyOverrides(FamilyInstance inst, FamilySlot slot)
+        {
+            if (slot?.ParamOverrides == null) return;
+            foreach (var kv in slot.ParamOverrides)
+                SetParamGeneric(inst, kv.Key, kv.Value);
+        }
+
+        private void SetParamGeneric(FamilyInstance inst, string name, string raw)
+        {
+            try
+            {
+                var p = inst.LookupParameter(name);
+                if (p == null || p.IsReadOnly) return;
+                switch (p.StorageType)
+                {
+                    case StorageType.Integer:
+                        if (int.TryParse(raw, out int iv)) p.Set(iv);
+                        break;
+                    case StorageType.Double:
+                        if (double.TryParse(raw, out double dv))
+                        {
+                            bool isLen = false;
+                            try
+                            {
+                                var uid = p.GetUnitTypeId();
+                                isLen = uid != null && !string.IsNullOrEmpty(uid.TypeId)
+                                        && uid.TypeId != "autodesk.unit.unit:none-1.0.0";
+                            }
+                            catch { }
+                            p.Set(isLen ? UnitUtils.ConvertToInternalUnits(dv, UnitTypeId.Millimeters) : dv);
+                        }
+                        break;
+                    case StorageType.String:
+                        p.Set(raw);
+                        break;
+                }
+            }
+            catch { }
+        }
 
         private XYZ GetPt(FamilyInstance fi)
         { try { if (fi.Location is LocationPoint lp) return lp.Point; } catch { } return null; }

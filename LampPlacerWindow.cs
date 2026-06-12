@@ -26,16 +26,20 @@ namespace METools.LampPlacer
         readonly List<LampFamilyInfo> _fams;
         readonly List<LevelInfo>      _levels;
         readonly ElementId            _defaultLevelId;
+        readonly List<string>         _lineStyles;
         LampConfig _cfg = new LampConfig();
 
-        ComboBox   _famCmb, _typCmb, _lvlCmb;
+        ComboBox   _famCmb, _typCmb, _lvlCmb, _lineStyleCmb;
         Button     _btnArea, _btnGrid, _btnLine;
+        Button     _mainBtn, _multiBtn;
         StackPanel _areaSp, _gridSp, _lineSp;
         Button     _btnAuto, _btn0, _btn90;
+        Button     _btnFace, _btnWP;
+        TextBlock  _placeDetectTb;
         Button     _btnLineSpacing, _btnLineCount;
         Button     _btnLineAlong, _btnLinePerp;
         StackPanel _lineSpacingRow, _lineCountRow;
-        TextBox    _sqmTb, _wallTb, _offsetTb, _rowsTb, _colsTb;
+        TextBox    _sqmTb, _wallTb, _offsetTb, _rowsTb, _colsTb, _overlapTb;
         TextBox    _lineSpacingTb, _lineCountTb;
         TextBlock  _infoTb, _lvlHelpTb;
 
@@ -47,14 +51,17 @@ namespace METools.LampPlacer
         public LampPlacerWindow(ExternalEvent evt, LampPlacerHandler h,
                                 List<LampFamilyInfo> fams,
                                 List<LevelInfo> levels,
-                                ElementId defaultLevelId)
+                                ElementId defaultLevelId,
+                                List<string> lineStyles)
         {
             _evt = evt; _h = h; _fams = fams;
+            _lineStyles     = lineStyles      ?? new List<string>();
             _levels         = levels          ?? new List<LevelInfo>();
             _defaultLevelId = defaultLevelId  ?? ElementId.InvalidElementId;
 
             h.OnStatus = m => Dispatcher.Invoke(() => StatusLeft.Text = m);
             h.OnPlaced = n => Dispatcher.Invoke(() => StatusLeft.Text = $"Done: {n} lamps placed.");
+            h.OnPromptSpacing = def => ShowSpacingDialog(def);
 
             InitWindow("Lamp Placer", 440);
             Build();
@@ -97,6 +104,20 @@ namespace METools.LampPlacer
 
             _typCmb = METools.MeToolsWindowBase.StyledCombo(28, 12); _typCmb.Margin = new Thickness(0, 0, 0, 14);
             _body.Children.Add(_typCmb);
+
+            // PLACEMENT (face vs work plane)
+            _body.Children.Add(Sec("Placement"));
+            var placeRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 4) };
+            _btnFace = ToggleBtn("Place on Face",       false, () => SetSurface(PlacementSurface.Face));
+            _btnWP   = ToggleBtn("Place on Work Plane", true,  () => SetSurface(PlacementSurface.WorkPlane));
+            _btnFace.MinWidth = 120; _btnWP.MinWidth = 150;
+            _btnFace.Margin = new Thickness(0, 0, 5, 0);
+            placeRow.Children.Add(_btnFace); placeRow.Children.Add(_btnWP);
+            _body.Children.Add(placeRow);
+            _placeDetectTb = new TextBlock { Text = "Select a family to detect hosting.", FontSize = 10,
+                Foreground = MeToolsTheme.BrMuted, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 14) };
+            _body.Children.Add(_placeDetectTb);
+            UpdatePlacementDetection();
 
             // DISTRIBUTION MODE
             _body.Children.Add(Sec("Distribution Mode"));
@@ -160,14 +181,14 @@ namespace METools.LampPlacer
             _lineSpacingRow.Children.Add(new TextBlock { Text = "Spacing (mm):", FontSize = 11, Foreground = MeToolsTheme.BrText, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 0) });
             _lineSpacingTb = Num("2000"); _lineSpacingTb.Width = 70; _lineSpacingTb.TextChanged += (s, e) => UpdateInfo();
             _lineSpacingRow.Children.Add(_lineSpacingTb);
-            _lineSpacingRow.Children.Add(new TextBlock { Text = "  (distance between lamps, centered on line)", FontSize = 10, Foreground = MeToolsTheme.BrMuted, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(6, 0, 0, 0) });
+            _lineSpacingRow.Children.Add(new TextBlock { Text = "  (default spacing; you confirm it after clicking the first lamp)", FontSize = 10, Foreground = MeToolsTheme.BrMuted, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(6, 0, 0, 0) });
             _lineSp.Children.Add(_lineSpacingRow);
 
             _lineCountRow = new StackPanel { Orientation = Orientation.Horizontal, Visibility = Visibility.Collapsed, Margin = new Thickness(0, 0, 0, 6) };
             _lineCountRow.Children.Add(new TextBlock { Text = "Count:", FontSize = 11, Foreground = MeToolsTheme.BrText, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 0) });
             _lineCountTb = Num("4"); _lineCountTb.Width = 50; _lineCountTb.TextChanged += (s, e) => UpdateInfo();
             _lineCountRow.Children.Add(_lineCountTb);
-            _lineCountRow.Children.Add(new TextBlock { Text = "  (evenly distributed from start to end)", FontSize = 10, Foreground = MeToolsTheme.BrMuted, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(6, 0, 0, 0) });
+            _lineCountRow.Children.Add(new TextBlock { Text = "  (evenly divided along the line: equal wall + lamp gaps)", FontSize = 10, Foreground = MeToolsTheme.BrMuted, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(6, 0, 0, 0) });
             _lineSp.Children.Add(_lineCountRow);
 
             // Line: orientation toggle (along line / perpendicular)
@@ -185,6 +206,13 @@ namespace METools.LampPlacer
             lineRotRow.Children.Add(_btnLinePerp);
             _lineSp.Children.Add(lineRotRow);
 
+            // Drawing is done with Revit's native Detail Line tool (rubber-band + snaps).
+            _lineSp.Children.Add(new TextBlock {
+                Text = "Draw guide line(s) with Revit's Detail Line tool, then click Place Along "
+                     + "Line and select them. Keep/delete of the lines is asked afterwards.",
+                FontSize = 10, Foreground = MeToolsTheme.BrMuted, TextWrapping = TextWrapping.Wrap,
+                Margin = new Thickness(0, 8, 0, 4) });
+
             _body.Children.Add(_lineSp);
 
             // WALL MARGIN
@@ -194,6 +222,12 @@ namespace METools.LampPlacer
             _wallTb = Num("1500"); _wallTb.Width = 80;
             wm.Children.Add(_wallTb);
             _body.Children.Add(wm);
+
+            var ov = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 14) };
+            ov.Children.Add(new TextBlock { Text = "Min. gap to existing fixture (mm):", FontSize = 11, Foreground = MeToolsTheme.BrText, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 0) });
+            _overlapTb = Num("300"); _overlapTb.Width = 80;
+            ov.Children.Add(_overlapTb);
+            _body.Children.Add(ov);
 
             // ROTATION (Area / Grid)
             _body.Children.Add(Sec("Rotation"));
@@ -258,21 +292,16 @@ namespace METools.LampPlacer
             // Info Box
             _body.Children.Add(InfoBox("Lamps distributed symmetrically from room center · Room boundaries checked · Height = room UKD"));
 
-            // BUTTONS
+            // BUTTONS - main action is mode-dependent; Multiple Rooms shows for Area-based only
             var btnRow = new Grid { Margin = new Thickness(0, 0, 0, 6) };
             btnRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             btnRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(5) });
             btnRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1.3, GridUnitType.Star) });
-            var b1 = ActionBtn("▶  Place in Room",   false, () => DoPlace(LampAction.PlaceSingle));
-            var b2 = ActionBtn("⊕  Multiple Rooms",  true,  () => DoPlace(LampAction.PlaceMulti));
-            Grid.SetColumn(b1, 0); Grid.SetColumn(b2, 2);
-            btnRow.Children.Add(b1); btnRow.Children.Add(b2);
+            _mainBtn  = ActionBtn("\u25B6  Place in Room",  false, DoMainAction);
+            _multiBtn = ActionBtn("\u2295  Multiple Rooms", true,  () => DoPlace(LampAction.PlaceMulti));
+            Grid.SetColumn(_mainBtn, 0); Grid.SetColumn(_multiBtn, 2);
+            btnRow.Children.Add(_mainBtn); btnRow.Children.Add(_multiBtn);
             _body.Children.Add(btnRow);
-
-            var lineBtn = ActionBtn("📏  Place Along Line", true, () => DoPlace(LampAction.PlaceLine));
-            lineBtn.Margin  = new Thickness(0, 6, 0, 0);
-            lineBtn.ToolTip = "Click two points to define a line. Lamps will be placed along it using the spacing or count set above.";
-            _body.Children.Add(lineBtn);
 
             var rb = ActionBtn("↺  Redistribute Selected Lamps", true, () => DoPlace(LampAction.Redistribute));
             rb.Margin = new Thickness(0, 4, 0, 0);
@@ -287,13 +316,14 @@ namespace METools.LampPlacer
         }
 
         protected override void OnThemeChanged() => ApplyTheme();
+        protected override string AppKey => "LampPlacer";
 
         void ApplyTheme()
         {
             if (_scroll != null) _scroll.Background = MeToolsTheme.BrBg;
             if (_body   != null) _body.Background   = MeToolsTheme.BrBg;
 
-            foreach (var tb in new[] { _sqmTb, _wallTb, _offsetTb, _rowsTb, _colsTb, _lineSpacingTb, _lineCountTb })
+            foreach (var tb in new[] { _sqmTb, _wallTb, _offsetTb, _rowsTb, _colsTb, _lineSpacingTb, _lineCountTb, _overlapTb })
             {
                 if (tb == null) continue;
                 tb.Background  = MeToolsTheme.BrInput;
@@ -304,12 +334,14 @@ namespace METools.LampPlacer
             if (_famCmb    != null) METools.MeToolsWindowBase.ApplyComboStyle(_famCmb);
             if (_typCmb    != null) METools.MeToolsWindowBase.ApplyComboStyle(_typCmb);
             if (_lvlCmb    != null) METools.MeToolsWindowBase.ApplyComboStyle(_lvlCmb);
+            if (_lineStyleCmb != null) METools.MeToolsWindowBase.ApplyComboStyle(_lineStyleCmb);
             if (_infoTb    != null) _infoTb.Foreground    = MeToolsTheme.BrMuted;
             if (_lvlHelpTb != null) _lvlHelpTb.Foreground = MeToolsTheme.BrMuted;
             SetDist(_cfg.Distribution);
             SetRot(_cfg.Rotation);
             SetLineMode(_cfg.LineMode);
             SetLineRot(_cfg.LineRotation);
+            UpdatePlacementDetection();
         }
 
         void FamChanged(object s, SelectionChangedEventArgs e)
@@ -322,10 +354,37 @@ namespace METools.LampPlacer
                 _typCmb.Items.Add(t.TypeName);
             if (_typCmb.Items.Count > 0) { _typCmb.SelectedIndex = 0; _cfg.TypeName = _typCmb.Items[0] as string ?? ""; }
             _typCmb.SelectionChanged += TypChanged;
+            UpdatePlacementDetection();
         }
 
         void TypChanged(object s, SelectionChangedEventArgs e)
             => _cfg.TypeName = _typCmb.SelectedItem as string ?? "";
+
+        void SetSurface(PlacementSurface s)
+        {
+            if (s == PlacementSurface.Face && _btnFace != null && !_btnFace.IsEnabled) return;
+            _cfg.Surface = s;
+            UpdateToggle(_btnFace, s == PlacementSurface.Face);
+            UpdateToggle(_btnWP,   s == PlacementSurface.WorkPlane);
+        }
+
+        void UpdatePlacementDetection()
+        {
+            if (_btnFace == null || _btnWP == null) return;
+            var info = _fams.FirstOrDefault(f => f.FamilyName == _cfg.FamilyName);
+            var pt   = info?.Placement ?? FamilyPlacementType.Invalid;
+            bool faceBased = pt == FamilyPlacementType.WorkPlaneBased;
+
+            _btnFace.IsEnabled = faceBased;
+            _btnFace.Opacity   = faceBased ? 1.0 : 0.45;
+            if (!faceBased) SetSurface(PlacementSurface.WorkPlane);
+            else            SetSurface(_cfg.Surface);
+
+            if (_placeDetectTb != null)
+                _placeDetectTb.Text = pt == FamilyPlacementType.Invalid
+                    ? "Select a family to detect hosting."
+                    : $"Detected: {pt}" + (faceBased ? " - face placement available." : " - work plane / level only.");
+        }
 
         void SetDist(DistributionMode m)
         {
@@ -336,6 +395,16 @@ namespace METools.LampPlacer
             if (_areaSp != null) _areaSp.Visibility = m == DistributionMode.AreaBased ? Visibility.Visible : Visibility.Collapsed;
             if (_gridSp != null) _gridSp.Visibility = m == DistributionMode.ManualGrid ? Visibility.Visible : Visibility.Collapsed;
             if (_lineSp != null) _lineSp.Visibility = m == DistributionMode.Line       ? Visibility.Visible : Visibility.Collapsed;
+            if (_mainBtn != null)
+                _mainBtn.Content = m == DistributionMode.Line      ? "\uD83D\uDCCF  Place Along Line"
+                                 : m == DistributionMode.ManualGrid ? "\u25A6  Place Grid"
+                                 :                                    "\u25B6  Place in Room";
+            if (_multiBtn != null)
+            {
+                bool showMulti = m == DistributionMode.AreaBased;
+                _multiBtn.Visibility = showMulti ? Visibility.Visible : Visibility.Collapsed;
+                if (_mainBtn != null) Grid.SetColumnSpan(_mainBtn, showMulti ? 1 : 3);
+            }
             UpdateInfo();
         }
 
@@ -364,7 +433,7 @@ namespace METools.LampPlacer
             UpdateToggle(_btn90,   r == RotationMode.Deg90);
         }
 
-        void UpdateToggle(Button b, bool active)
+        new void UpdateToggle(Button b, bool active)
         {
             if (b == null) return;
             b.Background  = active ? MeToolsTheme.BrActiveBg  : MeToolsTheme.BrSurface;
@@ -401,15 +470,62 @@ namespace METools.LampPlacer
             }
         }
 
+        // Small themed modal asking for the lamp spacing (mm). Returns null if cancelled.
+        public double? ShowSpacingDialog(double defaultMm)
+        {
+            double? result = null;
+            var dlg = new Window
+            {
+                Title = "Lamp spacing",
+                Width = 300, SizeToContent = SizeToContent.Height,
+                ResizeMode = ResizeMode.NoResize, WindowStyle = WindowStyle.ToolWindow,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                Background = MeToolsTheme.BrSurface, Owner = this
+            };
+            var sp = new StackPanel { Margin = new Thickness(16) };
+            sp.Children.Add(new TextBlock { Text = "Distance between lamps (mm):",
+                Foreground = MeToolsTheme.BrText, Margin = new Thickness(0, 0, 0, 8) });
+            var tb = Num(((int)Math.Round(defaultMm)).ToString()); tb.Width = 120;
+            sp.Children.Add(tb);
+            var row = new StackPanel { Orientation = Orientation.Horizontal,
+                HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 14, 0, 0) };
+            var ok = new Button { Content = "OK", Width = 72, Margin = new Thickness(0, 0, 6, 0),
+                IsDefault = true, Background = MeToolsTheme.BrPetrol, Foreground = Brushes.White,
+                BorderBrush = MeToolsTheme.BrPetrol, Padding = new Thickness(0, 4, 0, 4) };
+            var cancel = new Button { Content = "Cancel", Width = 72, IsCancel = true,
+                Background = MeToolsTheme.BrInput, Foreground = MeToolsTheme.BrText,
+                BorderBrush = MeToolsTheme.BrBorder, Padding = new Thickness(0, 4, 0, 4) };
+            ok.Click += (s, e) =>
+            {
+                if (double.TryParse(tb.Text, out double v) && v > 0) { result = v; dlg.DialogResult = true; }
+                else { tb.Focus(); tb.SelectAll(); }
+            };
+            row.Children.Add(ok); row.Children.Add(cancel);
+            sp.Children.Add(row);
+            dlg.Content = sp;
+            dlg.Loaded += (s, e) => { tb.Focus(); tb.SelectAll(); };
+            dlg.ShowDialog();
+            return result;
+        }
+
+        void DoMainAction()
+        {
+            if (_cfg.Distribution == DistributionMode.Line)            DoPlace(LampAction.PlaceLine);
+            else if (_cfg.Distribution == DistributionMode.ManualGrid) DoPlace(LampAction.PlaceGrid);
+            else                                                       DoPlace(LampAction.PlaceSingle);
+        }
+
         void DoPlace(LampAction action)
         {
             _cfg.WallMargin  = double.TryParse(_wallTb.Text,        out double w)  ? w  : 1500;
+            _cfg.OverlapThreshold = double.TryParse(_overlapTb.Text, out double og) ? og : 300;
             _cfg.UKDOffset   = double.TryParse(_offsetTb.Text,      out double o)  ? o  : 0;
             _cfg.SqmPerLamp  = double.TryParse(_sqmTb?.Text,        out double s)  ? s  : 12;
             _cfg.ManualRows  = int.TryParse(_rowsTb?.Text,          out int r)     ? r  : 2;
             _cfg.ManualCols  = int.TryParse(_colsTb?.Text,          out int c)     ? c  : 2;
             _cfg.LineSpacing = double.TryParse(_lineSpacingTb?.Text, out double ls) ? ls : 2000;
             _cfg.LineCount   = int.TryParse(_lineCountTb?.Text,      out int lc)    ? lc : 4;
+            _cfg.LineStyleName = _lineStyleCmb?.SelectedItem as string ?? "";
 
             // Reference level (fallback) aktuell aus der Combo
             _cfg.FallbackLevelId = (_lvlCmb?.SelectedItem as ComboBoxItem)?.Tag as ElementId
@@ -428,7 +544,8 @@ namespace METools.LampPlacer
             StatusLeft.Text = action == LampAction.Redistribute ? "Redistributing selected lamps..." :
                               action == LampAction.PlaceMulti   ? "Click rooms — ESC when done" :
                               action == LampAction.RefreshRoom  ? "Click a room to refresh lamps..." :
-                              action == LampAction.PlaceLine    ? "Click start and end point of the line..." :
+                              action == LampAction.PlaceLine    ? "Select the guide line(s) you drew with the Detail Line tool..." :
+                              action == LampAction.PlaceGrid    ? "Click the 4 corners of the area for the grid..." :
                                                                   "Click a room to place lamps";
             _evt.Raise();
         }

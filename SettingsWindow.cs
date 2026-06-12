@@ -65,10 +65,20 @@ namespace METools
         }
 
         // ── Build UI ──────────────────────────────────────────────────────
+        private StackPanel _contentRoot;
+
         private void BuildContent()
         {
-            var stack = new StackPanel();
-            stack.Children.Add(BuildTabBar());
+            _contentRoot = new StackPanel();
+            RootDock.Children.Add(_contentRoot);
+            PopulateContent();
+        }
+
+        // Rebuilds the whole content with the current theme (called on theme switch)
+        private void PopulateContent()
+        {
+            _contentRoot.Children.Clear();
+            _contentRoot.Children.Add(BuildTabBar());
 
             var contentBorder = new Border
             {
@@ -88,12 +98,9 @@ namespace METools
             contentStack.Children.Add(_panLicense);
             contentStack.Children.Add(_panWorksets);
             contentBorder.Child = contentStack;
-            stack.Children.Add(contentBorder);
+            _contentRoot.Children.Add(contentBorder);
 
-            // ── FIX: Add as last child (fill) — NOT Insert before StatusBar
-            RootDock.Children.Add(stack);
-
-            ShowTab(0);
+            ShowTab(_activeTab);
         }
 
         // ── Tab bar ───────────────────────────────────────────────────────
@@ -461,11 +468,7 @@ namespace METools
         protected override void OnThemeChanged()
         {
             base.OnThemeChanged();
-            ShowTab(_activeTab);
-            if (_cbLanguage    != null) ApplyComboStyle(_cbLanguage);
-            if (_tbKey         != null) { _tbKey.Background = MeToolsTheme.BrInput; _tbKey.Foreground = MeToolsTheme.BrInputFg; _tbKey.BorderBrush = MeToolsTheme.BrBorder; _tbKey.CaretBrush = MeToolsTheme.BrText; }
-            if (_tbNewWorkset  != null) { _tbNewWorkset.Background = MeToolsTheme.BrInput; _tbNewWorkset.Foreground = MeToolsTheme.BrInputFg; _tbNewWorkset.BorderBrush = MeToolsTheme.BrBorder; _tbNewWorkset.CaretBrush = MeToolsTheme.BrText; }
-            if (_lbWorksets    != null) { _lbWorksets.Background = MeToolsTheme.BrInput; _lbWorksets.Foreground = MeToolsTheme.BrText; _lbWorksets.BorderBrush = MeToolsTheme.BrBorder; }
+            PopulateContent();   // full rebuild -> every element repainted in the new theme
         }
     }
 

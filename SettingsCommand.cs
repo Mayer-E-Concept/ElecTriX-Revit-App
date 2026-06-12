@@ -3,8 +3,6 @@
 using Autodesk.Revit.Attributes;
 using Autodesk.Revit.DB;
 using Autodesk.Revit.UI;
-using System.Diagnostics;
-using System.Windows.Interop;
 
 namespace METools
 {
@@ -20,10 +18,9 @@ namespace METools
         public Result Execute(ExternalCommandData commandData, ref string message, ElementSet elements)
         {
             CurrentApp = commandData.Application;
+            MeToolsWindowBase.RevitHandle = CurrentApp.MainWindowHandle;
 
-            var win    = new SettingsWindow();
-            var helper = new WindowInteropHelper(win);
-            helper.Owner = Process.GetCurrentProcess().MainWindowHandle;
+            var win = new SettingsWindow();
             win.ShowDialog();
 
             CurrentApp = null;

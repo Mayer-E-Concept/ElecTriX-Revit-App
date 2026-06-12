@@ -15,7 +15,12 @@ namespace METools.FamilyPlacer
 
         public Result Execute(ExternalCommandData commandData, ref string message, ElementSet elements)
         {
-            var uiApp = commandData.Application;
+            Open(commandData.Application);
+            return Result.Succeeded;
+        }
+
+        public static void Open(UIApplication uiApp)
+        {
             var uidoc = uiApp.ActiveUIDocument;
             var doc   = uidoc.Document;
 
@@ -24,8 +29,11 @@ namespace METools.FamilyPlacer
             {
                 _window.Activate();
                 _window.Focus();
-                return Result.Succeeded;
+                return;
             }
+
+            AppSwitcher.Ensure();
+            MeToolsWindowBase.RevitHandle = uiApp.MainWindowHandle;
 
             // Load families + levels from document
             var families = FamilyLoader.LoadFromDocument(doc);
@@ -58,12 +66,15 @@ namespace METools.FamilyPlacer
             var handler  = new FamilyPlacerHandler { AllFamilies = families };
             var extEvent = ExternalEvent.Create(handler);
 
+            // Inspector event for reading family parameters on demand
+            var inspectHandler = new FamilyParamInspectorHandler();
+            var inspectEvent   = ExternalEvent.Create(inspectHandler);
+
             // Create and show modeless window
-            _window = new FamilyPlacerWindow(extEvent, handler, families, levels, defaultLevelId);
+            _window = new FamilyPlacerWindow(extEvent, handler, families, levels, defaultLevelId,
+                                             inspectEvent, inspectHandler);
             _window.Closed += (s, e) => _window = null;
             _window.Show();
-
-            return Result.Succeeded;
         }
     }
 }

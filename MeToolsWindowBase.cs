@@ -24,6 +24,9 @@ namespace METools
         private bool        _isDialog;
         private Border      _outerBorder;
 
+        // Revit main window handle (set by commands) -> keeps windows above Revit.
+        public static System.IntPtr RevitHandle = System.IntPtr.Zero;
+
         // ── Fenster initialisieren ────────────────────────────────────────
         protected void InitWindow(string title, double width = 480, bool isDialog = false)
         {
@@ -33,7 +36,16 @@ namespace METools
             WindowStyle           = WindowStyle.None;
             AllowsTransparency    = false;
             ResizeMode            = ResizeMode.CanResizeWithGrip;
-            WindowStartupLocation = WindowStartupLocation.CenterScreen;
+            WindowStartupLocation = WindowStartupLocation.Manual;
+            var _wa = System.Windows.SystemParameters.WorkArea;
+            Left = _wa.Right - Width - 24;
+            Top  = _wa.Top + 40;
+            Loaded += (s, e) =>
+            {
+                var wa = System.Windows.SystemParameters.WorkArea;
+                Left = wa.Right - ActualWidth - 24;
+                Top  = wa.Top + System.Math.Max(0, (wa.Height - ActualHeight) / 2);
+            };
             FontFamily            = new FontFamily("Segoe UI");
             FontSize              = 12;
 
@@ -73,6 +85,11 @@ namespace METools
             });
             MeToolsTheme.ThemeChanged += _themeHandler;
             Closed += (s, e) => MeToolsTheme.ThemeChanged -= _themeHandler;
+
+            // Glue to Revit: stays above the Revit window, minimizes/restores with it,
+            // but remains a separate, movable window.
+            if (RevitHandle != System.IntPtr.Zero)
+                try { new System.Windows.Interop.WindowInteropHelper(this).Owner = RevitHandle; } catch { }
         }
 
         // ── Titelleiste (immer gleich für ALLE Fenster) ───────────────────
@@ -116,6 +133,26 @@ namespace METools
                 Foreground = new SolidColorBrush(Color.FromArgb(160, 255, 255, 255)),
                 VerticalAlignment = VerticalAlignment.Center,
             });
+            if (AppKey != null)
+            {
+                var caret = new Button
+                {
+                    Content = "\u25BE", FontSize = 13, FontWeight = FontWeights.Bold,
+                    Width = 34, Height = 26, Padding = new Thickness(0),
+                    Margin = new Thickness(8, 1, 0, 0),
+                    Background = new SolidColorBrush(Color.FromArgb(36, 255, 255, 255)),
+                    BorderThickness = new Thickness(0),
+                    Foreground = Brushes.White,
+                    Cursor = Cursors.Hand, VerticalAlignment = VerticalAlignment.Center,
+                    ToolTip = "Switch app",
+                };
+                caret.Template = RoundedBtnTemplate();
+                var caretBg = caret.Background;
+                caret.MouseEnter += (s, e) => caret.Background = new SolidColorBrush(Color.FromArgb(80, 255, 255, 255));
+                caret.MouseLeave += (s, e) => caret.Background = caretBg;
+                caret.Click += (s, e) => ShowAppMenu(caret);
+                tp.Children.Add(caret);
+            }
             Grid.SetColumn(tp, 1);
             bar.Children.Add(tp);
 
@@ -198,6 +235,74 @@ namespace METools
 
         // ── Theme-Hook für Unterklassen ───────────────────────────────────
         protected virtual void OnThemeChanged() { }
+
+        // ── App-Switcher (title dropdown) ─────────────────────────
+        // Override in a window to enable the title dropdown (null = no switcher).
+        protected virtual string AppKey => null;
+
+        private System.Windows.Controls.Primitives.Popup _appPopup;
+
+        private void ShowAppMenu(UIElement anchor)
+        {
+            var panel = new StackPanel();
+            foreach (var app in AppSwitcher.Apps)
+            {
+                var key = app.Key;
+                bool current = key == AppKey;
+                var row = new Border
+                {
+                    Height = 34, CornerRadius = new CornerRadius(4),
+                    Padding = new Thickness(14, 0, 18, 0),
+                    Background = current ? MeToolsTheme.BrActiveBg : Brushes.Transparent,
+                    Cursor = current ? Cursors.Arrow : Cursors.Hand,
+                    Child = new TextBlock
+                    {
+                        Text = app.Label, FontSize = 12,
+                        Foreground = current ? MeToolsTheme.BrActiveFg : MeToolsTheme.BrText,
+                        FontWeight = current ? FontWeights.SemiBold : FontWeights.Normal,
+                        VerticalAlignment   = VerticalAlignment.Center,
+                        HorizontalAlignment = HorizontalAlignment.Left,
+                    },
+                };
+                if (!current)
+                {
+                    row.MouseEnter += (s, e) => row.Background = MeToolsTheme.BrActiveBg;
+                    row.MouseLeave += (s, e) => row.Background = Brushes.Transparent;
+                    row.MouseLeftButtonUp += (s, e) =>
+                    {
+                        if (_appPopup != null) _appPopup.IsOpen = false;
+                        AppSwitcher.SwitchTo(key);
+                        Close();
+                    };
+                }
+                panel.Children.Add(row);
+            }
+
+            var shell = new Border
+            {
+                Background = MeToolsTheme.BrSurface,
+                BorderBrush = MeToolsTheme.BrBorder,
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(6),
+                MinWidth = 180,
+                Padding = new Thickness(4),
+                Child = panel,
+                Effect = new System.Windows.Media.Effects.DropShadowEffect
+                {
+                    BlurRadius = 12, ShadowDepth = 2, Opacity = 0.3, Color = Colors.Black,
+                },
+            };
+
+            _appPopup = new System.Windows.Controls.Primitives.Popup
+            {
+                PlacementTarget = anchor,
+                Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom,
+                StaysOpen = false,
+                AllowsTransparency = true,
+                Child = shell,
+            };
+            _appPopup.IsOpen = true;
+        }
 
 
         // ── Styled ComboBox via XAML-String (einzig zuverlässige Methode) ──────
@@ -408,7 +513,7 @@ namespace METools
         {
             var bgNorm = outline ? MeToolsTheme.BrBtnBg       : MeToolsTheme.BrPetrol;
             var bgHov  = outline ? MeToolsTheme.BrActiveBg    : MeToolsTheme.BrPetrolDark;
-            var fg     = outline ? MeToolsTheme.BrPetrol       : Brushes.White;
+            var fg     = outline ? (MeToolsTheme.Current == MeTheme.Dark ? Brushes.White : MeToolsTheme.BrPetrol) : Brushes.White;
             var b = new Button
             {
                 Content = label, Height = 36, FontSize = 13, FontWeight = FontWeights.SemiBold,
