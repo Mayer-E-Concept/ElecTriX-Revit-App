@@ -18,6 +18,35 @@ namespace METools
                     METools.LampPlacer.LampPlacerCommand.Open(app);
                 else if (Target == "FamilyPlacer")
                     METools.FamilyPlacer.FamilyPlacerCommand.Open(app);
+                else if (Target == "CircuitTagger")
+                    METools.FamilyPlacer.CircuitTaggerCommand.Open(app);
+                else if (Target == "FamilyBrowser")
+                    METools.FamilyBrowserCommand.Open(app);
+                else if (Target == "FixLevel")
+                    TryOpen("METools.FixLevelCommand", app);
+                else if (Target == "Statistics")
+                    TryOpen("METools.StatisticsCommand", app);
+            }
+            catch { }
+        }
+
+        private static void TryOpen(string typeName, UIApplication app)
+        {
+            try
+            {
+                var t  = System.Type.GetType($"{typeName}, METools");
+                if (t == null)
+                {
+                    // Try all loaded assemblies
+                    foreach (var asm in System.AppDomain.CurrentDomain.GetAssemblies())
+                    {
+                        t = asm.GetType(typeName);
+                        if (t != null) break;
+                    }
+                }
+                if (t == null) return;
+                var m = t.GetMethod("Open", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
+                m?.Invoke(null, new object[] { app });
             }
             catch { }
         }
@@ -31,8 +60,12 @@ namespace METools
         public static readonly List<(string Key, string Label)> Apps =
             new List<(string, string)>
             {
-                ("FamilyPlacer", "Family Placer"),
-                ("LampPlacer",   "Lamp Placer"),
+                ("FamilyPlacer",  "Family Placer"),
+                ("FamilyBrowser", "Family Browser"),
+                ("LampPlacer",    "Lamp Placer"),
+                ("FixLevel",      "Fix Level"),
+                ("CircuitTagger", "Circuit Tagger"),
+                ("Statistics",    "Statistics"),
             };
 
         private static AppSwitchHandler _handler;

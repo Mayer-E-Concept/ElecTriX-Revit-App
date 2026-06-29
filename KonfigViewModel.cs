@@ -97,7 +97,7 @@ namespace METools.FamilyPlacer
         public int    AnzahlStromkreise  { get { return Stromkreise.Count; } }
         public string AnzeigeName        { get { return string.IsNullOrWhiteSpace(VerteilerName) ? "(ohne Name)" : VerteilerName; } }
         public string PrefixAnzeige      { get { return string.IsNullOrWhiteSpace(CircuitPrefix)  ? "(kein Prefix)" : CircuitPrefix; } }
-        public string StatusTooltip { get { return AutomatischErkannt ? "Automatisch erkannt" : "Manuell zugeordnet"; } }
+        public string StatusTooltip { get { return AutomatischErkannt ? "Automatically detected" : "Manually assigned"; } }
 
         public event PropertyChangedEventHandler PropertyChanged;
         private void OnChanged([CallerMemberName] string n = null)
@@ -108,7 +108,7 @@ namespace METools.FamilyPlacer
     {
         private readonly Document _doc;
         private readonly ElecTriXSettings _settings;
-        private string _schemaInfo         = "Schema wird erkannt...";
+        private string _schemaInfo         = "Detecting schema...";
         private string _schemaBeschreibung = "";
         private int    _offeneZuordnungen;
         private string _fehlerMeldung      = "";
@@ -191,8 +191,8 @@ namespace METools.FamilyPlacer
             if (stale > 0)
             {
                 var toteListe = string.Join(", ", toteNamen.Take(3));
-                _speicherInfo = $"⚠ {stale} Räume zeigen auf {toteNamen.Count} toten Verteiler ({toteListe}). " +
-                                "Im Panels-Tab umleiten auf existierende Verteiler.";
+                _speicherInfo = $"⚠ {stale} rooms point to {toteNamen.Count} dead panel(s) ({toteListe}). " +
+                                "Re-route them in the Panels tab to existing panels.";
             }
 
             // Toter-Verteiler-Liste fürs UI verfügbar machen
@@ -355,13 +355,13 @@ namespace METools.FamilyPlacer
             // Info-Text
             if (diag.GesamtPlatziert == 0)
             {
-                SchemaInfo         = "Keine Räume / MEP-Spaces gefunden";
+                SchemaInfo         = "No rooms / MEP spaces found";
                 SchemaBeschreibung = diag.DetailText;
             }
             else
             {
                 SchemaInfo         = diag.KurzText + "  |  Schema: " + schema.Beschreibung;
-                SchemaBeschreibung = "Beispiel: " + schema.Beispiel;
+                SchemaBeschreibung = "Example: " + schema.Beispiel;
             }
 
             AktualisiereStatistik();

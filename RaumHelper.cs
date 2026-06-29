@@ -127,7 +127,7 @@ namespace METools.FamilyPlacer
         {
             var nummern = raumnummern.Where(n => !string.IsNullOrWhiteSpace(n)).ToList();
             if (nummern.Count == 0)
-                return new SchemaErgebnis { Typ = SchemaTyp.Unbekannt, Beschreibung = "Keine Raumnummern gefunden", Konfidenz = 0 };
+                return new SchemaErgebnis { Typ = SchemaTyp.Unbekannt, Beschreibung = "No room numbers found", Konfidenz = 0 };
 
             foreach (var schema in Schemata)
             {
@@ -154,7 +154,7 @@ namespace METools.FamilyPlacer
             return new SchemaErgebnis
             {
                 Typ = SchemaTyp.Unbekannt,
-                Beschreibung = "Schema nicht erkannt — manuell zuordnen",
+                Beschreibung = "Schema not detected — assign manually",
                 Konfidenz = 0,
                 WohnungsIdExtraktor = _ => "W-??"
             };

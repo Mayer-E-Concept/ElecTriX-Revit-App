@@ -14,6 +14,10 @@ namespace METools.FamilyPlacer
         public string TypeName   { get; set; } = "";
         public Action<List<FamilyParamInfo>> OnResult { get; set; }
 
+        // Lightweight mode: sample the most-common Niveau from placed instances (no EditFamily).
+        public bool SampleNiveauOnly { get; set; } = false;
+        public Action<double?> OnNiveau { get; set; }
+
         // Inline-handled params (own UI columns) -- excluded from the popup
         private static readonly HashSet<string> _inlineParams =
             new HashSet<string> { "Niveau", "2DX_Versatzfaktor", "2DY_Versatzfaktor" };
@@ -37,6 +41,17 @@ namespace METools.FamilyPlacer
 
         public void Execute(UIApplication app)
         {
+            if (SampleNiveauOnly)
+            {
+                SampleNiveauOnly = false;
+                double? mm = null;
+                try { mm = FamilyHeightScanner.MostCommonNiveauMm(app.ActiveUIDocument.Document, FamilyName); }
+                catch { }
+                var ncb = OnNiveau; OnNiveau = null;
+                ncb?.Invoke(mm);
+                return;
+            }
+
             var result = new List<FamilyParamInfo>();
             try
             {
@@ -72,6 +87,33 @@ namespace METools.FamilyPlacer
                 foreach (FamilyType ft in fm.Types)
                     if (ft.Name == typeName) { ftype = ft; break; }
                 if (ftype == null) ftype = fm.CurrentType;
+
+                // Niveau = mounting-height default; surfaced inline for the height field (not the popup)
+                try
+                {
+                    FamilyParameter niv = null;
+                    foreach (FamilyParameter fp in fm.Parameters)
+                        if (fp.Definition != null && fp.Definition.Name == "Niveau") { niv = fp; break; }
+                    if (niv != null && niv.IsInstance && niv.StorageType == StorageType.Double)
+                    {
+                        string nval = "";
+                        if (ftype != null && ftype.HasValue(niv))
+                        {
+                            double iv = ftype.AsDouble(niv) ?? 0.0;
+                            double mm = UnitUtils.ConvertFromInternalUnits(iv, UnitTypeId.Millimeters);
+                            nval = mm.ToString("0.###");
+                        }
+                        list.Add(new FamilyParamInfo
+                        {
+                            Name         = "Niveau",
+                            Label        = ParamLabels.Translate("Niveau"),
+                            Kind         = "length",
+                            DefaultValue = nval,
+                            Inline       = true,
+                        });
+                    }
+                }
+                catch { }
 
                 foreach (FamilyParameter fp in fm.Parameters)
                 {

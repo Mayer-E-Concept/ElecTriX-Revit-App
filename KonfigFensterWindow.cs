@@ -23,10 +23,12 @@ namespace METools.FamilyPlacer
         private readonly KonfigViewModel _vm;
 
         // Tab-System
-        private Border      _tab1, _tab2, _tab3;
-        private StackPanel  _panel1, _panel2, _panel3;
+        private Border      _tab1, _tab2, _tab3, _tab4;
+        private StackPanel  _panel1, _panel2, _panel3, _panel4;
         private Border      _activeTab;
         private StackPanel  _activePanel;
+        // Apartment order for the Rooms tab (list of WohnungsId strings, user-reorderable)
+        private List<string> _apartmentOrder = new List<string>();
 
         // Footer
         private TextBlock   _txtZugeordnet, _txtOffen, _txtAuto;
@@ -54,7 +56,7 @@ namespace METools.FamilyPlacer
             BuildFooter();
 
             // ── StatusBar (auch Dock.Bottom) ──────────────────────────────
-            BuildStatusBar($"{_vm.RaumZeilen.Count + _vm.SonderZeilen.Count} Einträge");
+            BuildStatusBar($"{_vm.RaumZeilen.Count + _vm.SonderZeilen.Count} entries");
 
             // ── Tab-Leiste ────────────────────────────────────────────────
             var tabBar = BuildTabBar();
@@ -76,6 +78,7 @@ namespace METools.FamilyPlacer
             outerStack.Children.Add(_panel1);
             outerStack.Children.Add(_panel2);
             outerStack.Children.Add(_panel3);
+            outerStack.Children.Add(_panel4);
             scroll.Content = outerStack;
             contentGrid.Children.Add(scroll);
 
@@ -97,17 +100,24 @@ namespace METools.FamilyPlacer
             };
             var sp = new StackPanel { Orientation = Orientation.Horizontal };
 
+            _apartmentOrder = _vm.RaumZeilen
+                .Select(z => z.Verteiler ?? "")
+                .Distinct().OrderBy(id => id).ToList();
+
             _panel1 = BuildRaeumePanel();
             _panel2 = BuildSonderPanel();
             _panel3 = BuildVerteilerPanel();
+            _panel4 = BuildPresetsPanel();
 
             _tab1 = MakeTab("Rooms",           MeToolsTheme.CPetrol,  () => ShowTab(_tab1, _panel1));
             _tab2 = MakeTab("Special Outlets", MeToolsTheme.COrange,  () => ShowTab(_tab2, _panel2));
-            _tab3 = MakeTab("Panels",         MeToolsTheme.CBlue,   () => ShowTab(_tab3, _panel3));
+            _tab3 = MakeTab("Panels",          MeToolsTheme.CBlue,   () => ShowTab(_tab3, _panel3));
+            _tab4 = MakeTab("Presets",         Color.FromRgb(138,99,210), () => ShowTab(_tab4, _panel4));
 
             sp.Children.Add(_tab1);
             sp.Children.Add(_tab2);
             sp.Children.Add(_tab3);
+            sp.Children.Add(_tab4);
             bar.Child = sp;
             return bar;
         }
@@ -192,11 +202,13 @@ namespace METools.FamilyPlacer
         }
 
         // ── Panel 1: Räume mit 4 Scheme-Parameter-Feldern ─────────────────
+        StackPanel _raeumeOuterSp;   // held for apartment reorder rebuild
+
         StackPanel BuildRaeumePanel()
         {
             var sp = new StackPanel { Visibility = Visibility.Collapsed };
             sp.Children.Add(SectionBadge("Rooms — Circuit Parameters",
-                MeToolsTheme.BrPetrol, $"{_vm.RaumZeilen.Count} Räume"));
+                MeToolsTheme.BrPetrol, $"{_vm.RaumZeilen.Count} room(s) loaded"));
 
             var info = new Border
             {
@@ -212,7 +224,7 @@ namespace METools.FamilyPlacer
             });
             infoSp.Children.Add(new TextBlock
             {
-                Text = "Alle 4 Scheme-Werte pro Raum editierbar. Defaults kommen aus dem Circuit Prefix des Verteilers.",
+                Text = "All 4 scheme values per room are editable. Defaults come from the panel's circuit prefix.",
                 FontSize = 10, Foreground = MeToolsTheme.BrMuted, Margin = new Thickness(0, 2, 0, 0),
                 TextWrapping = TextWrapping.Wrap,
             });
@@ -226,48 +238,324 @@ namespace METools.FamilyPlacer
                 return sp;
             }
 
-            var container = GridContainer();
-            GridHeader8(container, "Room #", "Name", "Panel", "Vorsich.", "FI-Kreis", "Sicher.", "Gerät", "●");
-
-            foreach (var z in _vm.RaumZeilen)
-            {
-                var cb = VerteilerDropdown(z);
-                var vs = SmallInput(z.Vorsicherung, "Vorsicherung");
-                var fi = SmallInput(z.FIKreis,      "FI-Kreis");
-                var si = SmallInput(z.Stromkreis,   "Sicherung (Haupt-Kreis)");
-                var ge = SmallInput(z.Geraet,       "Gerät");
-
-                _allComboBoxes.Add(cb);
-                _allSkInputs.Add(vs); _allSkInputs.Add(fi); _allSkInputs.Add(si); _allSkInputs.Add(ge);
-
-                var dot = StatusDotForRow(z);
-
-                vs.TextChanged += (s, e) => { z.Vorsicherung = vs.Text; };
-                fi.TextChanged += (s, e) => { z.FIKreis      = fi.Text; };
-                si.TextChanged += (s, e) =>
-                {
-                    z.Stromkreis = si.Text;
-                    UpdateDotForRow(dot, z); _vm.AktualisiereStatistik(); RefreshFooter();
-                };
-                ge.TextChanged += (s, e) => { z.Geraet = ge.Text; };
-                cb.SelectionChanged += (s, e) =>
-                {
-                    z.Verteiler = cb.Text ?? (cb.SelectedItem as string) ?? "";
-                    UpdateDotForRow(dot, z); _vm.AktualisiereStatistik(); RefreshFooter();
-                };
-                cb.LostFocus += (s, e) =>
-                {
-                    z.Verteiler = cb.Text ?? "";
-                    UpdateDotForRow(dot, z); _vm.AktualisiereStatistik(); RefreshFooter();
-                };
-
-                GridDataRow8(container,
-                    TextCell(z.RaumNummer ?? "", true, mono: true),
-                    TextCell(z.RaumName ?? "", false),
-                    cb, vs, fi, si, ge, dot);
-            }
-            sp.Children.Add(container);
+            _raeumeOuterSp = new StackPanel();
+            RebuildApartmentGroups();
+            sp.Children.Add(_raeumeOuterSp);
             return sp;
+        }
+
+        void RebuildApartmentGroups()
+        {
+            if (_raeumeOuterSp == null) return;
+            _raeumeOuterSp.Children.Clear();
+            _allComboBoxes.Clear();
+            _allSkInputs.Clear();
+
+            // Group rooms by Verteiler (panel name = apartment identifier on RaumZeile)
+            var byApt = _vm.RaumZeilen
+                .GroupBy(z => z.Verteiler ?? "")
+                .ToDictionary(g => g.Key, g => g.ToList());
+
+            // Any ids not yet in order list get appended
+            foreach (var id in byApt.Keys.Where(k => !_apartmentOrder.Contains(k)))
+                _apartmentOrder.Add(id);
+
+            int aptIdx = 0;
+            foreach (var aptId in _apartmentOrder)
+            {
+                if (!byApt.ContainsKey(aptId)) continue;
+                var rooms = byApt[aptId];
+                int idx = aptIdx; // capture for lambdas
+
+                // Group header
+                var hdr = new Border
+                {
+                    Background = MeToolsTheme.BrSurface, BorderBrush = MeToolsTheme.BrBorder,
+                    BorderThickness = new Thickness(0, 0, 0, 1),
+                    Padding = new Thickness(8, 5, 8, 5), Margin = new Thickness(0, aptIdx == 0 ? 0 : 8, 0, 2),
+                };
+                var hdrSp = new StackPanel { Orientation = Orientation.Horizontal };
+                var hdrLabel = new TextBlock
+                {
+                    Text = string.IsNullOrEmpty(aptId) ? "Unassigned rooms" : aptId,
+                    FontWeight = FontWeights.SemiBold, FontSize = 11,
+                    Foreground = MeToolsTheme.BrPetrol,
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Margin = new Thickness(0, 0, 8, 0),
+                };
+                var hdrCount = new TextBlock
+                {
+                    Text = rooms.Count.ToString() + " rooms",
+                    FontSize = 10, Foreground = MeToolsTheme.BrMuted,
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Margin = new Thickness(0, 0, 14, 0),
+                };
+                hdrSp.Children.Add(hdrLabel);
+                hdrSp.Children.Add(hdrCount);
+
+                // Up/Down reorder buttons (only when more than one apartment)
+                if (_apartmentOrder.Count(id => byApt.ContainsKey(id)) > 1)
+                {
+                    var btnUp = new System.Windows.Controls.Button
+                    {
+                        Content = "▲", Width = 22, Height = 20, FontSize = 9,
+                        Margin = new Thickness(0, 0, 3, 0),
+                        Background = System.Windows.Media.Brushes.Transparent,
+                        BorderBrush = MeToolsTheme.BrBorder,
+                        Foreground = MeToolsTheme.BrMuted,
+                        ToolTip = "Move apartment up",
+                        IsEnabled = idx > 0,
+                    };
+                    var capturedId = aptId;
+                    btnUp.Click += (s, e) =>
+                    {
+                        int pos = _apartmentOrder.IndexOf(capturedId);
+                        if (pos > 0) { _apartmentOrder.RemoveAt(pos); _apartmentOrder.Insert(pos - 1, capturedId); }
+                        RebuildApartmentGroups();
+                    };
+                    var btnDown = new System.Windows.Controls.Button
+                    {
+                        Content = "▼", Width = 22, Height = 20, FontSize = 9,
+                        Margin = new Thickness(0, 0, 0, 0),
+                        Background = System.Windows.Media.Brushes.Transparent,
+                        BorderBrush = MeToolsTheme.BrBorder,
+                        Foreground = MeToolsTheme.BrMuted,
+                        ToolTip = "Move apartment down",
+                        IsEnabled = idx < _apartmentOrder.Count(id => byApt.ContainsKey(id)) - 1,
+                    };
+                    btnDown.Click += (s, e) =>
+                    {
+                        int pos = _apartmentOrder.IndexOf(capturedId);
+                        if (pos < _apartmentOrder.Count - 1) { _apartmentOrder.RemoveAt(pos); _apartmentOrder.Insert(pos + 1, capturedId); }
+                        RebuildApartmentGroups();
+                    };
+                    hdrSp.Children.Add(btnUp);
+                    hdrSp.Children.Add(btnDown);
+                }
+
+                hdr.Child = hdrSp;
+                // Only show group header when there are multiple distinct panels
+                if (_apartmentOrder.Count(id => byApt.ContainsKey(id)) > 1)
+                    _raeumeOuterSp.Children.Add(hdr);
+
+                // Room rows for this apartment
+                var container = GridContainer();
+                GridHeader8(container, "Room #", "Name", "Panel", "Pre-fuse", "GFCI Circuit", "Circuit", "Device", "●");
+
+                foreach (var z in rooms)
+                {
+                    var cb = VerteilerDropdown(z);
+                    var vs = SmallInput(z.Vorsicherung, "Pre-fuse");
+                    var fi = SmallInput(z.FIKreis,      "GFCI Circuit");
+                    var si = SmallInput(z.Stromkreis,   "Circuit");
+                    var ge = SmallInput(z.Geraet,       "Device");
+
+                    _allComboBoxes.Add(cb);
+                    _allSkInputs.Add(vs); _allSkInputs.Add(fi); _allSkInputs.Add(si); _allSkInputs.Add(ge);
+
+                    var dot = StatusDotForRow(z);
+
+                    vs.TextChanged += (sender, e) => { z.Vorsicherung = vs.Text; };
+                    fi.TextChanged += (sender, e) => { z.FIKreis      = fi.Text; };
+                    si.TextChanged += (sender, e) =>
+                    {
+                        z.Stromkreis = si.Text;
+                        UpdateDotForRow(dot, z); _vm.AktualisiereStatistik(); RefreshFooter();
+                    };
+                    ge.TextChanged += (sender, e) => { z.Geraet = ge.Text; };
+                    cb.SelectionChanged += (sender, e) =>
+                    {
+                        z.Verteiler = cb.Text ?? (cb.SelectedItem as string) ?? "";
+                        UpdateDotForRow(dot, z); _vm.AktualisiereStatistik(); RefreshFooter();
+                    };
+                    cb.LostFocus += (sender, e) =>
+                    {
+                        z.Verteiler = cb.Text ?? "";
+                        UpdateDotForRow(dot, z); _vm.AktualisiereStatistik(); RefreshFooter();
+                    };
+
+                    GridDataRow8(container,
+                        TextCell(z.RaumNummer ?? "", true, mono: true),
+                        TextCell(z.RaumName ?? "", false),
+                        cb, vs, fi, si, ge, dot);
+                }
+                _raeumeOuterSp.Children.Add(container);
+                aptIdx++;
+            }
+        }
+
+        // ── Panel 4: Circuit Presets ──────────────────────────────────────
+        // Stores room-type name → circuit/panel mappings. "Apply Presets" fills
+        // the circuit fields of all matching rooms in the Rooms tab automatically.
+        private readonly List<CircuitPresetEntry> _circuitPresets = new List<CircuitPresetEntry>();
+
+        class CircuitPresetEntry
+        {
+            public string RoomTypeKeyword { get; set; } = "";  // e.g. "bedroom", "hallway"
+            public string Panel           { get; set; } = "";
+            public string Circuit         { get; set; } = "";
+            public string PreFuse         { get; set; } = "";
+            public string GFCICircuit     { get; set; } = "";
+            public string Device          { get; set; } = "";
+        }
+
+        StackPanel BuildPresetsPanel()
+        {
+            var sp = new StackPanel { Visibility = Visibility.Collapsed };
+            sp.Children.Add(SectionBadge("Circuit Presets — Auto-fill by room type",
+                MeToolsTheme.BrPetrol, "match by keyword"));
+
+            var desc = new TextBlock
+            {
+                Text = "Define circuit defaults per room type keyword. Click 'Apply Presets' to fill matching " +
+                       "rooms in the Rooms tab. The keyword is matched against the room's canonical name " +
+                       "(e.g. 'bedroom', 'bathroom', 'hallway', 'kitchen'). Case-insensitive.",
+                FontSize = 10, Foreground = MeToolsTheme.BrMuted,
+                Margin = new Thickness(0, 0, 0, 10), TextWrapping = TextWrapping.Wrap,
+            };
+            sp.Children.Add(desc);
+
+            // Preset list container (rebuilt when entries change)
+            var listSp = new StackPanel();
+            sp.Children.Add(listSp);
+
+            Action rebuildList = null;
+            rebuildList = () =>
+            {
+                listSp.Children.Clear();
+                // Header row
+                var hdrGrid = new Grid { Margin = new Thickness(0, 0, 0, 2) };
+                foreach (var w in new[] { 130.0, 120.0, 90.0, 70.0, 70.0, 90.0, 30.0 })
+                    hdrGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(w) });
+                var headers = new[] { "Room keyword", "Panel", "Circuit", "Pre-fuse", "GFCI", "Device", "" };
+                for (int hi = 0; hi < headers.Length; hi++)
+                {
+                    var htb = new TextBlock { Text = headers[hi], FontSize = 10,
+                        Foreground = MeToolsTheme.BrMuted, FontWeight = FontWeights.SemiBold,
+                        Margin = new Thickness(4, 0, 4, 0) };
+                    Grid.SetColumn(htb, hi); hdrGrid.Children.Add(htb);
+                }
+                listSp.Children.Add(hdrGrid);
+
+                for (int pi = 0; pi < _circuitPresets.Count; pi++)
+                {
+                    var entry = _circuitPresets[pi];
+                    int capturedIdx = pi;
+                    var rowGrid = new Grid { Margin = new Thickness(0, 2, 0, 2) };
+                    foreach (var w in new[] { 130.0, 120.0, 90.0, 70.0, 70.0, 90.0, 30.0 })
+                        rowGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(w) });
+
+                    var tbKeyword  = PresetInput(entry.RoomTypeKeyword, "e.g. bedroom");
+                    var tbPanel    = PresetInput(entry.Panel,    "Panel name");
+                    var tbCircuit  = PresetInput(entry.Circuit,  "Circuit");
+                    var tbPreFuse  = PresetInput(entry.PreFuse,  "Pre-fuse");
+                    var tbGFCI     = PresetInput(entry.GFCICircuit, "GFCI");
+                    var tbDevice   = PresetInput(entry.Device,   "Device");
+
+                    tbKeyword.TextChanged += (s, e) => entry.RoomTypeKeyword = tbKeyword.Text;
+                    tbPanel.TextChanged   += (s, e) => entry.Panel           = tbPanel.Text;
+                    tbCircuit.TextChanged += (s, e) => entry.Circuit         = tbCircuit.Text;
+                    tbPreFuse.TextChanged += (s, e) => entry.PreFuse         = tbPreFuse.Text;
+                    tbGFCI.TextChanged    += (s, e) => entry.GFCICircuit     = tbGFCI.Text;
+                    tbDevice.TextChanged  += (s, e) => entry.Device          = tbDevice.Text;
+
+                    var btnDel = new System.Windows.Controls.Button
+                    {
+                        Content = "×", Width = 22, Height = 22, FontSize = 12,
+                        Background = System.Windows.Media.Brushes.Transparent,
+                        BorderBrush = MeToolsTheme.BrBorder, Foreground = MeToolsTheme.BrMuted,
+                        ToolTip = "Remove this preset",
+                    };
+                    btnDel.Click += (s, e) => { _circuitPresets.RemoveAt(capturedIdx); rebuildList(); };
+
+                    Grid.SetColumn(tbKeyword, 0); Grid.SetColumn(tbPanel,   1);
+                    Grid.SetColumn(tbCircuit, 2); Grid.SetColumn(tbPreFuse, 3);
+                    Grid.SetColumn(tbGFCI,    4); Grid.SetColumn(tbDevice,  5);
+                    Grid.SetColumn(btnDel,    6);
+                    rowGrid.Children.Add(tbKeyword); rowGrid.Children.Add(tbPanel);
+                    rowGrid.Children.Add(tbCircuit); rowGrid.Children.Add(tbPreFuse);
+                    rowGrid.Children.Add(tbGFCI);    rowGrid.Children.Add(tbDevice);
+                    rowGrid.Children.Add(btnDel);
+                    listSp.Children.Add(rowGrid);
+                }
+            };
+
+            rebuildList();
+
+            // Add + Apply buttons
+            var btnRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 10, 0, 0) };
+
+            var btnAdd = FooterBtn("+ Add Preset", false, () =>
+            {
+                _circuitPresets.Add(new CircuitPresetEntry());
+                rebuildList();
+            });
+            btnAdd.Margin = new Thickness(0, 0, 8, 0);
+            btnRow.Children.Add(btnAdd);
+
+            var btnApply = FooterBtn("Apply Presets to Rooms", true, () =>
+            {
+                int applied = 0;
+                foreach (var z in _vm.RaumZeilen)
+                {
+                    var canonical = (z.KanonischerName ?? z.RaumName ?? "").ToLowerInvariant();
+                    foreach (var preset in _circuitPresets)
+                    {
+                        if (string.IsNullOrWhiteSpace(preset.RoomTypeKeyword)) continue;
+                        if (canonical.Contains(preset.RoomTypeKeyword.ToLowerInvariant()))
+                        {
+                            if (!string.IsNullOrWhiteSpace(preset.Panel))
+                                z.Verteiler = preset.Panel;
+                            if (!string.IsNullOrWhiteSpace(preset.Circuit))
+                                z.Stromkreis = preset.Circuit;
+                            if (!string.IsNullOrWhiteSpace(preset.PreFuse))
+                                z.Vorsicherung = preset.PreFuse;
+                            if (!string.IsNullOrWhiteSpace(preset.GFCICircuit))
+                                z.FIKreis = preset.GFCICircuit;
+                            if (!string.IsNullOrWhiteSpace(preset.Device))
+                                z.Geraet = preset.Device;
+                            applied++;
+                            break; // first matching preset wins
+                        }
+                    }
+                }
+                _vm.AktualisiereStatistik(); RefreshFooter();
+                // Rebuild rooms panel to reflect new values
+                RebuildApartmentGroups();
+                MessageBox.Show($"Applied presets to {applied} room(s).",
+                    "Circuit Presets", MessageBoxButton.OK, MessageBoxImage.Information);
+            });
+            btnRow.Children.Add(btnApply);
+            sp.Children.Add(btnRow);
+            return sp;
+        }
+
+        TextBox PresetInput(string text, string tip) => new TextBox
+        {
+            Text = text ?? "", Height = 24, Margin = new Thickness(2, 0, 2, 0),
+            Padding = new Thickness(4, 2, 4, 2), FontSize = 11,
+            VerticalContentAlignment = System.Windows.VerticalAlignment.Center,
+            Background = MeToolsTheme.BrInput, Foreground = MeToolsTheme.BrInputFg,
+            BorderBrush = MeToolsTheme.BrBorder, ToolTip = tip,
+        };
+
+        // ── Number Rooms ──────────────────────────────────────────────────
+        // Writes room numbers in format XYZ where X=Haus, Y=floor index, Z=apartment
+        // to the ROOM_NUMBER parameter of each room in the model.
+        void OnNumberRooms()
+        {
+            // Show a simple input dialog
+            var dlg = new NumberRoomsDialog(_doc, _vm.RaumZeilen.ToList());
+            dlg.Owner = this;
+            if (dlg.ShowDialog() == true)
+            {
+                // Refresh the rooms panel after numbering
+                _apartmentOrder = _vm.RaumZeilen
+                    .Select(z => z.Verteiler ?? "")
+                    .Distinct().OrderBy(id => id).ToList();
+                RebuildApartmentGroups();
+                RefreshFooter();
+            }
         }
 
         ComboBox VerteilerDropdown(RaumZeile z)
@@ -293,7 +581,7 @@ namespace METools.FamilyPlacer
                     // Toter Eintrag — rot hinterlegen, User soll das neu zuweisen
                     cb.Text = z.Verteiler + "  ⚠";
                     cb.BorderBrush = MeToolsTheme.BrOrange;
-                    cb.ToolTip = "Dieser Verteiler existiert nicht mehr im Modell. Bitte neu zuweisen.";
+                    cb.ToolTip = "This panel no longer exists in the model. Please re-assign.";
                 }
             }
             return cb;
@@ -318,7 +606,7 @@ namespace METools.FamilyPlacer
             var sp = new StackPanel { Visibility = Visibility.Collapsed };
 
             sp.Children.Add(SectionBadge("Special Outlets → Stromkreis",
-                MeToolsTheme.BrOrange, $"{_vm.SonderZeilen.Count} Kürzel"));
+                MeToolsTheme.BrOrange, $"{_vm.SonderZeilen.Count} codes"));
 
             var container = GridContainer();
             GridHeader(container, "Code", "Device", "Circuit", "Status");
@@ -373,7 +661,7 @@ namespace METools.FamilyPlacer
                 Background = MeToolsTheme.BrInput, Foreground = MeToolsTheme.BrInputFg,
                 BorderBrush = MeToolsTheme.BrBorder, FontSize = 11,
                 ItemsSource = _vm.VerfuegbareNamingSchemes,
-                ToolTip = "Wird auf alle Verteiler angewendet, für die Kreise erstellt werden.",
+                ToolTip = "Applied to all panels for which circuits are created.",
             };
             if (!string.IsNullOrWhiteSpace(_vm.GewaehltesNamingScheme))
                 _namingSchemeCombo.SelectedItem = _vm.GewaehltesNamingScheme;
@@ -393,7 +681,7 @@ namespace METools.FamilyPlacer
             };
             matchRow.Children.Add(new TextBlock
             {
-                Text = "Räume automatisch zu Verteilern zuordnen anhand Match-Prefix:",
+                Text = "Auto-assign rooms to panels by match prefix:",
                 FontSize = 11, Foreground = MeToolsTheme.BrMuted,
                 VerticalAlignment = VerticalAlignment.Center,
                 Margin = new Thickness(0, 0, 10, 0),
@@ -437,8 +725,8 @@ namespace METools.FamilyPlacer
                 });
                 migSp.Children.Add(new TextBlock
                 {
-                    Text = "Diese Verteiler existieren im Modell nicht (mehr). " +
-                           "Wähle einen Ersatz und klicke 'Umleiten' um alle Räume zu migrieren.",
+                    Text = "These panels no longer exist in the model. " +
+                           "Select a replacement and click 'Re-route' to migrate all rooms.",
                     FontSize = 11, TextWrapping = TextWrapping.Wrap,
                     Foreground = System.Windows.Media.Brushes.White,
                     Margin = new Thickness(0, 0, 0, 8),
@@ -477,7 +765,7 @@ namespace METools.FamilyPlacer
                     };
                     var btn = new System.Windows.Controls.Button
                     {
-                        Content = "Umleiten", Height = 24, FontSize = 11,
+                        Content = "Re-route", Height = 24, FontSize = 11,
                         Margin = new Thickness(6, 0, 0, 0),
                         Background = MeToolsTheme.BrPetrol,
                         Foreground = System.Windows.Media.Brushes.White,
@@ -490,14 +778,14 @@ namespace METools.FamilyPlacer
                         var neu = combo.SelectedItem as string;
                         if (string.IsNullOrWhiteSpace(neu))
                         {
-                            MessageBox.Show("Bitte zuerst einen Ziel-Verteiler auswählen.",
-                                "Umleiten", MessageBoxButton.OK, MessageBoxImage.Warning);
+                            MessageBox.Show("Please select a target panel first.",
+                                "Re-route", MessageBoxButton.OK, MessageBoxImage.Warning);
                             return;
                         }
                         int n = _vm.MigriereVerteiler(capturedAlt, neu);
                         MessageBox.Show($"{n} Räume wurden von '{capturedAlt}' auf '{neu}' umgeleitet.\n\n" +
                             "Zum Speichern: 'Save' klicken.",
-                            "Umleiten", MessageBoxButton.OK, MessageBoxImage.Information);
+                            "Re-route", MessageBoxButton.OK, MessageBoxImage.Information);
                         ReloadRoomsPanel();
                         ReloadPanelsPanel();
                     };
@@ -535,7 +823,7 @@ namespace METools.FamilyPlacer
                     VerticalContentAlignment = System.Windows.VerticalAlignment.Center,
                     Background = MeToolsTheme.BrInput, Foreground = MeToolsTheme.BrInputFg,
                     BorderBrush = MeToolsTheme.BrBorder,
-                    ToolTip = "Räume deren Nummer mit diesem Prefix beginnt werden diesem Verteiler zugeordnet.",
+                    ToolTip = "Rooms whose number starts with this prefix will be assigned to this panel.",
                 };
                 prefixField.TextChanged += (s, e) => { v.MatchPrefix = prefixField.Text; };
                 _allSkInputs.Add(prefixField);
@@ -724,8 +1012,8 @@ namespace METools.FamilyPlacer
                 Foreground = MeToolsTheme.BrMuted,
                 BorderBrush = MeToolsTheme.BrBorder,
                 Cursor = System.Windows.Input.Cursors.Hand,
-                ToolTip = "ElecTriX-Einstellungen öffnen (JSON-Datei in Editor)\n" +
-                          "Templates, Kategorie-Labels, Match-Prefix-Patterns, Parameter-Namen",
+                ToolTip = "Open ElecTriX settings (JSON file in editor)\n" +
+                          "Templates, category labels, match-prefix patterns, parameter names",
             };
             btnSettings.Click += (s, e) =>
             {
@@ -733,19 +1021,25 @@ namespace METools.FamilyPlacer
                 {
                     ElecTriXSettingsStorage.OeffneInEditor();
                     MessageBox.Show(
-                        "Die Datei 'electrix-settings.json' wurde im Editor geöffnet:\n\n" +
+                        "The file 'electrix-settings.json' was opened in the editor:\n\n" +
                         ElecTriXSettingsStorage.GetSettingsPath() + "\n\n" +
-                        "Nach dem Editieren: Datei speichern, Dialog hier schließen und neu öffnen " +
+                        "After editing: save the file, close this dialog and reopen it " +
                         "damit die Änderungen wirksam werden.",
                         "ElecTriX Settings", MessageBoxButton.OK, MessageBoxImage.Information);
                 }
                 catch (Exception ex)
                 {
-                    MessageBox.Show("Konnte Settings nicht öffnen:\n" + ex.Message,
-                        "Fehler", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    MessageBox.Show("Could not open settings:\n" + ex.Message,
+                        "Error", MessageBoxButton.OK, MessageBoxImage.Warning);
                 }
             };
             btnSp.Children.Add(btnSettings);
+
+            var btnNumberRooms = FooterBtn("Number Rooms", false, OnNumberRooms);
+            btnNumberRooms.Padding = new System.Windows.Thickness(10, 0, 10, 0);
+            btnNumberRooms.Margin  = new Thickness(0, 0, 6, 0);
+            btnNumberRooms.ToolTip = "Write room numbers in format HFS (Haus-Floor-Suite) to Revit room parameters";
+            btnSp.Children.Add(btnNumberRooms);
 
             var btnCancel = FooterBtn("Cancel", false, () => OnCloseClicked());
             btnCancel.Margin = new Thickness(0, 0, 6, 0);
@@ -802,13 +1096,13 @@ namespace METools.FamilyPlacer
             _vm.SpeichernCommand.Execute(null);
             if (!_vm.GespeichertErfolgreich)
             {
-                MessageBox.Show("Speichern fehlgeschlagen:\n\n" + (_vm.FehlerMeldung ?? "(unbekannt)"),
-                    "ElecTriX — Fehler", MessageBoxButton.OK, MessageBoxImage.Warning);
+                MessageBox.Show("Save failed:\n\n" + (_vm.FehlerMeldung ?? "(unknown)"),
+                    "ElecTriX", MessageBoxButton.OK, MessageBoxImage.Warning);
                 return false;
             }
             if (!silent)
-                MessageBox.Show("Konfiguration gespeichert.\n\n" + (_vm.SpeicherInfo ?? "") +
-                    "\n\nFür dauerhafte Speicherung: Revit-Projekt mit Strg+S sichern.",
+                MessageBox.Show("Configuration saved.\n\n" + (_vm.SpeicherInfo ?? "") +
+                    "\n\nFor permanent storage: save the Revit project with Ctrl+S.",
                     "ElecTriX", MessageBoxButton.OK, MessageBoxImage.Information);
             return true;
         }
@@ -820,7 +1114,7 @@ namespace METools.FamilyPlacer
             _vm.AktualisiereStatistik();
             if (_vm.OffeneZuordnungen > 0)
             {
-                var r = MessageBox.Show($"{_vm.OffeneZuordnungen} Zuordnungen pending. Trotzdem speichern?",
+                var r = MessageBox.Show($"{_vm.OffeneZuordnungen} assignments pending. Save anyway?",
                     "Pending", MessageBoxButton.YesNo, MessageBoxImage.Question);
                 if (r == MessageBoxResult.No) return;
             }
@@ -844,20 +1138,20 @@ namespace METools.FamilyPlacer
             try { result = new CircuitBuilderHandler().Run(uiDoc); }
             catch (Exception ex)
             {
-                MessageBox.Show("Fehler:\n\n" + ex.Message, "ElecTriX",
+                MessageBox.Show("Error:\n\n" + ex.Message, "ElecTriX",
                     MessageBoxButton.OK, MessageBoxImage.Error);
                 return;
             }
 
-            var td = new Autodesk.Revit.UI.TaskDialog("ElecTriX — Stromkreise")
+            var td = new Autodesk.Revit.UI.TaskDialog("ElecTriX — Circuits")
             {
                 MainInstruction = result.Abgebrochen
-                    ? "Abgebrochen"
+                    ? "Cancelled"
                     : (result.KreiseErstellt > 0
-                        ? result.KreiseErstellt + " Stromkreise erstellt"
+                        ? result.KreiseErstellt + " circuits created"
                         : (result.BestehendeKreiseUpdated > 0
-                            ? result.BestehendeKreiseUpdated + " Kreise aktualisiert"
-                            : "Keine Kreise erstellt")),
+                            ? result.BestehendeKreiseUpdated + " circuits updated"
+                            : "No circuits created")),
                 MainContent   = result.BuildSummary(),
                 CommonButtons = Autodesk.Revit.UI.TaskDialogCommonButtons.Close,
             };

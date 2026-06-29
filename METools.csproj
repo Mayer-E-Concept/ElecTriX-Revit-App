@@ -71,14 +71,17 @@
     <Copy SourceFiles="$(OutputPath)METools.dll"
           DestinationFolder="$(RevitAddinsDir)"
           SkipUnchangedFiles="false"
+          OverwriteReadOnlyFiles="true"
           ContinueOnError="true" />
     <Copy SourceFiles="$(ProjectDir)METools.addin"
           DestinationFolder="$(RevitAddinsDir)"
           SkipUnchangedFiles="false"
+          OverwriteReadOnlyFiles="true"
           ContinueOnError="true" />
     <Copy SourceFiles="@(EmbeddedResource)"
           DestinationFolder="$(RevitAddinsDir)\Icons"
           SkipUnchangedFiles="false"
+          OverwriteReadOnlyFiles="true"
           ContinueOnError="true" />
     <Message Text="✓ ME-Tools deployed to $(RevitAddinsDir)" Importance="high" />
   </Target>

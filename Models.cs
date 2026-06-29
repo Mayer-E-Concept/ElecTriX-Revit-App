@@ -21,6 +21,7 @@ namespace METools.FamilyPlacer
         public string Label        { get; set; } = ""; // English display label
         public string Kind         { get; set; } = ""; // "length" | "int" | "double" | "yesno"
         public string DefaultValue { get; set; } = ""; // display string (mm for length)
+        public bool   Inline       { get; set; } = false; // handled inline (Niveau -> height field); not shown in popup
     }
     public class PlacerTemplate
     {

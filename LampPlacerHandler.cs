@@ -27,20 +27,49 @@ namespace METools.LampPlacer
     public class LampPlacerHandler : IExternalEventHandler
     {
         public LampRequest    Request  { get; set; } = new LampRequest();
-        public Action<string> OnStatus { get; set; }
-        public Action<int>    OnPlaced { get; set; }
+        public Action<string> OnStatus  { get; set; }
+        public Action<int>    OnPlaced  { get; set; }
+        public Action<bool>   OnWaiting { get; set; }  // true=waiting for input, false=done
         public Func<double, double?> OnPromptSpacing { get; set; }  // mm in -> mm out (null = cancel)
+        public Func<double, double?> OnPromptWallOffset { get; set; } // mm in -> mm out (null = cancel)
+        private double? _wallOffsetFt;                                // set for wall-mounted lamps off a floor reference
+        public Func<string> OnPromptPreset { get; set; }              // returns preset name | "" (use current family) | null (cancel)
 
         public void Execute(UIApplication app)
         {
             var uidoc = app.ActiveUIDocument;
             var doc   = uidoc.Document;
 
+            // For placement actions, confirm the reference (ceiling) level matches the active storey.
+            _wallOffsetFt = null;
+            bool isPlacement = Request.Action == LampAction.PlaceSingle
+                            || Request.Action == LampAction.PlaceMulti
+                            || Request.Action == LampAction.PlaceLine
+                            || Request.Action == LampAction.PlaceGrid;
+            if (isPlacement)
+            {
+                var dec = METools.LevelGuard.CheckLampReference(
+                    uidoc, doc, Request.Config?.FallbackLevelId ?? ElementId.InvalidElementId);
+                if (dec == METools.LampLevelDecision.Cancel)
+                { OnStatus?.Invoke("Cancelled (level check)."); return; }
+
+                // Kept a floor level as the reference -> wall-mounted lamps: ask the offset from host.
+                if (dec == METools.LampLevelDecision.ProceedFloorRef)
+                {
+                    double? mm = OnPromptWallOffset?.Invoke(1800.0);
+                    if (mm == null) { OnStatus?.Invoke("Cancelled (offset)."); return; }
+                    _wallOffsetFt = ToFeet(mm.Value);
+                }
+            }
+
             if (Request.Action == LampAction.Redistribute)
             { Redistribute(uidoc, doc); return; }
 
             if (Request.Action == LampAction.RefreshRoom)
             { RefreshRoom(uidoc, doc); return; }
+
+            if (Request.Action == LampAction.UpdatePreset)
+            { UpdatePreset(uidoc, doc); return; }
 
             if (Request.Action == LampAction.PlaceLine)
             { PlaceAlongLine(uidoc, doc); return; }
@@ -57,7 +86,7 @@ namespace METools.LampPlacer
                 if (Request.Action == LampAction.PlaceMulti)
                 {
                     var refs = uidoc.Selection.PickObjects(ObjectType.Element,
-                        new RoomFilter(), "Click rooms — ESC when done");
+                        new RoomFilter(), "Click the room(s) to fill, then press ESC");
                     rooms = refs.Select(r => doc.GetElement(r) as Room).Where(r => r != null).ToList();
                 }
                 else
@@ -72,6 +101,16 @@ namespace METools.LampPlacer
 
             if (!rooms.Any()) { OnStatus?.Invoke("No rooms selected."); return; }
 
+            // Place in Room (single): offer the saved room presets.
+            if (Request.Action == LampAction.PlaceSingle && rooms.Count == 1 && LampPresetStore.All().Count > 0)
+            {
+                string chosen = OnPromptPreset?.Invoke();
+                if (chosen == null) { OnStatus?.Invoke("Cancelled."); return; }
+                if (!string.IsNullOrEmpty(chosen))
+                { PlacePreset(uidoc, doc, rooms[0], LampPresetStore.Get(chosen)); return; }
+                // empty -> fall through to the selected single family
+            }
+
             var cfg = Request.Config;
             double wallFt   = ToFeet(cfg.WallMargin);
             double offsetFt = ToFeet(cfg.UKDOffset);
@@ -84,7 +123,11 @@ namespace METools.LampPlacer
             {
                 var    bb     = room.get_BoundingBox(null);
                 double floorZ = room.Level?.Elevation ?? 0;
-                double ukdZ   = ((fallbackLvl != null)
+                double ukdZ;
+                if (fallbackLvl != null && _wallOffsetFt.HasValue)
+                    ukdZ = fallbackLvl.Elevation + _wallOffsetFt.Value;   // wall lamp: offset above the floor
+                else
+                    ukdZ = ((fallbackLvl != null)
                                     ? fallbackLvl.Elevation
                                     : (bb != null ? bb.Max.Z : GetUKD(room)))
                                 - offsetFt;
@@ -102,7 +145,7 @@ namespace METools.LampPlacer
                     plan.Add(new Planned { Pt = pt, Angle = angle, Lvl = level, Rm = room, Ukd = ukdZ });
                 }
             }
-            RunPlacement(doc, sym, cfg, plan, "Place in Room");
+            RunPlacement(uidoc, doc, sym, cfg, plan, "Place in Room");
         }
 
         // ── Grid calculation ─────────────────────────────────────────────────
@@ -139,8 +182,176 @@ namespace METools.LampPlacer
             rows = Math.Max(1, (int)Math.Round((double)nTotal / cols));
         }
 
+        // Grid split targeting an exact lamp count (used for preset entries).
+        private void CalcGridForCount(LampConfig cfg, int count, double roomW, double roomD,
+                                      out int rows, out int cols)
+        {
+            int nTotal = Math.Max(1, count);
+            double wallFt = ToFeet(cfg.WallMargin);
+            double margW  = Math.Min(wallFt, roomW * 0.25);
+            double margD  = Math.Min(wallFt, roomD * 0.25);
+            double availW = Math.Max(roomW * 0.5, roomW - 2.0 * margW);
+            double availD = Math.Max(roomD * 0.5, roomD - 2.0 * margD);
+            double ratio  = Math.Max(roomW, roomD) / Math.Min(roomW, roomD);
+            if (ratio > 2.5)
+            {
+                if (roomW >= roomD) { rows = 1; cols = nTotal; }
+                else                { cols = 1; rows = nTotal; }
+                return;
+            }
+            double aspect = availW / availD;
+            cols = Math.Max(1, (int)Math.Round(Math.Sqrt(nTotal * aspect)));
+            rows = Math.Max(1, (int)Math.Round((double)nTotal / cols));
+        }
+
+        private ElementId ResolveSymbolId(Document doc, string family, string type)
+        {
+            try
+            {
+                var q = new FilteredElementCollector(doc).OfClass(typeof(FamilySymbol)).Cast<FamilySymbol>()
+                            .Where(sm => (sm.Family != null ? sm.Family.Name : "") == family).ToList();
+                FamilySymbol sym = string.IsNullOrEmpty(type)
+                    ? q.FirstOrDefault()
+                    : (q.FirstOrDefault(sm => (sm.Name ?? "") == type) ?? q.FirstOrDefault());
+                return sym != null ? sym.Id : ElementId.InvalidElementId;
+            }
+            catch { return ElementId.InvalidElementId; }
+        }
+
+        // Places a room preset: each entry's family is spread independently by its count,
+        // then the room is renamed to the preset's name.
+        private void PlacePreset(UIDocument uidoc, Document doc, Room room, LampPreset preset)
+        {
+            if (preset == null || preset.Entries == null || preset.Entries.Count == 0)
+            { OnStatus?.Invoke("Empty preset."); return; }
+
+            var cfg = Request.Config;
+            double wallFt   = ToFeet(cfg.WallMargin);
+            double offsetFt = ToFeet(cfg.UKDOffset);
+            Level fallbackLvl = ResolveFallbackLevel(doc, cfg);
+
+            var bb = room.get_BoundingBox(null);
+            if (bb == null) { OnStatus?.Invoke("Room has no bounding box."); return; }
+            double floorZ = room.Level?.Elevation ?? 0;
+            double ukdZ = (fallbackLvl != null && _wallOffsetFt.HasValue)
+                ? fallbackLvl.Elevation + _wallOffsetFt.Value
+                : ((fallbackLvl != null) ? fallbackLvl.Elevation : bb.Max.Z) - offsetFt;
+            var level = fallbackLvl ?? GetNearestLevel(doc, ukdZ);
+            double roomW = bb.Max.X - bb.Min.X, roomD = bb.Max.Y - bb.Min.Y;
+            double angle = CalcAngle(cfg.Rotation, roomW, roomD);
+
+            var plan = new List<Planned>();
+            foreach (var entry in preset.Entries)
+            {
+                var esym = doc.GetElement(ResolveSymbolId(doc, entry.FamilyName, entry.TypeName)) as FamilySymbol;
+                if (esym == null) continue;
+                int count = Math.Max(1, entry.Count);
+                int rows, cols; CalcGridForCount(cfg, count, roomW, roomD, out rows, out cols);
+                var pts = CalcPoints(bb, wallFt, rows, cols, ukdZ);
+                int added = 0;
+                foreach (var pt in pts)
+                {
+                    if (added >= count) break;
+                    if (!IsInRoom(room, new XYZ(pt.X, pt.Y, floorZ + 0.5))) continue;
+                    plan.Add(new Planned { Pt = pt, Angle = angle, Lvl = level, Rm = room, Ukd = ukdZ, Sym = esym });
+                    added++;
+                }
+                if (added == 0)   // grid fell outside an odd-shaped room -> drop one at the centre
+                {
+                    var c = new XYZ((bb.Min.X + bb.Max.X) / 2.0, (bb.Min.Y + bb.Max.Y) / 2.0, ukdZ);
+                    plan.Add(new Planned { Pt = c, Angle = angle, Lvl = level, Rm = room, Ukd = ukdZ, Sym = esym });
+                }
+            }
+
+            if (plan.Count == 0) { OnStatus?.Invoke("Nothing to place for this preset."); return; }
+
+            int placed = RunPlacement(uidoc, doc, null, cfg, plan, "Preset: " + preset.Name);
+
+            if (placed > 0)
+                using (var tx = new Transaction(doc, "ME-Tools: Rename Room"))
+                {
+                    tx.Start();
+                    try
+                    {
+                        var np = room.get_Parameter(BuiltInParameter.ROOM_NAME);
+                        if (np != null && !np.IsReadOnly) np.Set(preset.Name);
+                    }
+                    catch { }
+                    tx.Commit();
+                }
+        }
+
 
         // ── Refresh Room: delete existing lamps in room + re-place ───────────
+        // Re-applies a (possibly edited) preset to a room that already has it:
+        // deletes the existing fixtures inside the room, then places the preset fresh.
+        private void UpdatePreset(UIDocument uidoc, Document doc)
+        {
+            var preset = LampPresetStore.Get(Request.PresetName);
+            if (preset == null || preset.Entries == null || preset.Entries.Count == 0)
+            { OnStatus?.Invoke("Preset is empty or not found."); return; }
+
+            Room room = null;
+            try
+            {
+                var r = uidoc.Selection.PickObject(
+                    Autodesk.Revit.UI.Selection.ObjectType.Element,
+                    new RoomFilter(), "Click the room to update with preset '" + preset.Name + "'");
+                room = doc.GetElement(r) as Room;
+            }
+            catch (OperationCanceledException) { OnStatus?.Invoke("Cancelled."); return; }
+            catch (Exception ex)               { OnStatus?.Invoke("Error: " + ex.Message); return; }
+            if (room == null) { OnStatus?.Invoke("No room selected."); return; }
+
+            double floorZ = room.Level?.Elevation ?? 0;
+
+            // Find existing fixtures inside the room (lighting + fire alarm) to clear out.
+            var cats = new[] {
+                BuiltInCategory.OST_LightingFixtures,
+                BuiltInCategory.OST_LightingDevices,
+                BuiltInCategory.OST_FireAlarmDevices
+            };
+            var toDelete = new List<ElementId>();
+            foreach (var cat in cats)
+            {
+                var instances = new FilteredElementCollector(doc)
+                    .OfClass(typeof(FamilyInstance)).OfCategory(cat).Cast<FamilyInstance>();
+                foreach (var fi in instances)
+                {
+                    XYZ testPt = null;
+                    if (fi.Location is LocationPoint lp)
+                        testPt = new XYZ(lp.Point.X, lp.Point.Y, floorZ + 0.5);
+                    else if (fi.HostFace != null)
+                    {
+                        try
+                        {
+                            var bb2 = fi.get_BoundingBox(null);
+                            if (bb2 != null)
+                            {
+                                var ctr = (bb2.Min + bb2.Max) / 2.0;
+                                testPt = new XYZ(ctr.X, ctr.Y, floorZ + 0.5);
+                            }
+                        }
+                        catch { }
+                    }
+                    if (testPt == null) continue;
+                    try { if (room.IsPointInRoom(testPt)) toDelete.Add(fi.Id); } catch { }
+                }
+            }
+
+            if (toDelete.Count > 0)
+                using (var tx = new Transaction(doc, "ME-Tools: Clear Room For Preset Update"))
+                {
+                    tx.Start();
+                    foreach (var id in toDelete) try { doc.Delete(id); } catch { }
+                    tx.Commit();
+                }
+
+            // Place the preset fresh (its own transactions handle activation/placement/rename).
+            PlacePreset(uidoc, doc, room, preset);
+            OnStatus?.Invoke("Updated room with preset '" + preset.Name + "'.");
+        }
+
         private void RefreshRoom(UIDocument uidoc, Document doc)
         {
             // 1. User wählt einen Raum
@@ -212,7 +423,11 @@ namespace METools.LampPlacer
             // top is only a fallback (it collapses when volume computation is off).
             var    bb       = room.get_BoundingBox(null);
             if (bb == null) { OnStatus?.Invoke("Room has no bounding box."); return; }
-            double ukdZ     = ((fallbackLvl != null)
+            double ukdZ;
+            if (fallbackLvl != null && _wallOffsetFt.HasValue)
+                ukdZ = fallbackLvl.Elevation + _wallOffsetFt.Value;   // wall lamp: offset above the floor
+            else
+                ukdZ = ((fallbackLvl != null)
                                   ? fallbackLvl.Elevation
                                   : (bb != null ? bb.Max.Z : GetUKD(room)))
                               - offsetFt;
@@ -245,8 +460,7 @@ namespace METools.LampPlacer
                     catch { continue; }
                     if (inst == null) continue;
                     doc.Regenerate();
-                    if (Math.Abs(angle) > 0.001)
-                        try { ElementTransformUtils.RotateElement(doc, inst.Id,
+                    try { ElementTransformUtils.RotateElement(doc, inst.Id,
                             Line.CreateBound(pt, pt + XYZ.BasisZ), angle); } catch { }
                     if (level != null)
                         try { var p = inst.get_Parameter(BuiltInParameter.INSTANCE_SCHEDULE_ONLY_LEVEL_PARAM);
@@ -262,7 +476,11 @@ namespace METools.LampPlacer
 
 
         private enum PlaceDecision { PlaceAll, SkipNear, Cancel }
-        private struct Planned { public XYZ Pt; public double Angle; public Level Lvl; public Room Rm; public double Ukd; }
+        private struct Planned { public XYZ Pt; public double Angle; public Level Lvl; public Room Rm; public double Ukd; public FamilySymbol Sym; }
+
+        // Set by PlaceAlongLine so PlaceDimensions can use the actual guide line endpoints
+        // rather than the room bounding box. Null = use room/spread.
+        private XYZ _guideLineStart, _guideLineEnd;
 
         // -- Existing lighting-fixture locations (XY) for overlap detection --
         private List<XYZ> ExistingFixtureXY(Document doc)
@@ -317,9 +535,16 @@ namespace METools.LampPlacer
         }
 
         // -- Shared finalize: confirm -> single undo group -> place -> CSV log --
-        private int RunPlacement(Document doc, FamilySymbol sym, LampConfig cfg, List<Planned> plan, string op)
+        private int RunPlacement(UIDocument uidoc, Document doc, FamilySymbol sym, LampConfig cfg, List<Planned> plan, string op)
         {
             if (plan == null || plan.Count == 0) { OnStatus?.Invoke("Nothing to place."); return 0; }
+
+            // Capture guide line endpoints for this run's PlaceDimensions, then clear
+            // so they don't bleed into the next area/grid/preset placement.
+            var guideStart = _guideLineStart;
+            var guideEnd   = _guideLineEnd;
+            _guideLineStart = null;
+            _guideLineEnd   = null;
 
             var    existing  = ExistingFixtureXY(doc);
             double tolFt     = ToFeet(cfg.OverlapThreshold);
@@ -336,18 +561,22 @@ namespace METools.LampPlacer
                 using (var tx = new Transaction(doc, "ME-Tools: " + op))
                 {
                     tx.Start();
-                    if (!sym.IsActive) { sym.Activate(); doc.Regenerate(); }
+                    if (sym != null && !sym.IsActive) { sym.Activate(); doc.Regenerate(); }
                     foreach (var pl in plan)
                     {
                         if (skipNear && NearAny(pl.Pt, existing, tolFt)) continue;
+                        var s = pl.Sym ?? sym;
+                        if (s == null) continue;
+                        if (!s.IsActive) { s.Activate(); doc.Regenerate(); }
                         FamilyInstance inst = null;
-                        try { inst = PlaceLampInstance(doc, sym, pl.Pt, pl.Lvl, pl.Rm, pl.Ukd); }
+                        try { inst = PlaceLampInstance(doc, s, pl.Pt, pl.Lvl, pl.Rm, pl.Ukd); }
                         catch { continue; }
                         if (inst == null) continue;
                         doc.Regenerate();
-                        if (Math.Abs(pl.Angle) > 0.001)
-                            try { ElementTransformUtils.RotateElement(doc, inst.Id,
-                                Line.CreateBound(pl.Pt, pl.Pt + XYZ.BasisZ), pl.Angle); } catch { }
+                        // Always rotate: Deg0 = -PI/4 corrects the family's native 45-degree
+                        // tilt to horizontal. Skipping when angle==0 would leave the 45-deg tilt.
+                        try { ElementTransformUtils.RotateElement(doc, inst.Id,
+                            Line.CreateBound(pl.Pt, pl.Pt + XYZ.BasisZ), pl.Angle); } catch { }
                         if (pl.Lvl != null)
                             try { var p = inst.get_Parameter(BuiltInParameter.INSTANCE_SCHEDULE_ONLY_LEVEL_PARAM);
                                 if (p != null && !p.IsReadOnly) p.Set(pl.Lvl.Id); } catch { }
@@ -361,9 +590,388 @@ namespace METools.LampPlacer
             string log = ExportLog(doc, op, placedIds);
             string msg = "Done: " + placedIds.Count + " lamps placed (" + op + ").";
             if (!string.IsNullOrEmpty(log)) msg += " Log saved to Documents/METools.";
+
+            // Dimensions based on selected mode
+            if (placedIds.Count > 0)
+            {
+                if (cfg.Dimensions == DimensionMode.Auto)
+                    PlaceDimensions(doc, placedIds, plan, guideStart, guideEnd);
+                else if (cfg.Dimensions == DimensionMode.Custom)
+                    PlaceCustomDimensions(uidoc, doc);  // uidoc now available
+                // DimensionMode.None: skip
+            }
+
             OnStatus?.Invoke(msg);
             OnPlaced?.Invoke(placedIds.Count);
             return placedIds.Count;
+        }
+
+        // ── Custom dimension placement ──────────────────────────────────────
+        // User picks pt1 (lamp/element), then pt2 (anywhere on a wall face).
+        // The tool draws a dimension measuring the PERPENDICULAR distance from
+        // pt1 to the wall line through pt2. It does this by:
+        // 1) Finding the wall's run direction via nearby room boundary segments
+        //    (which mirror the walls in the linked Architektur file).
+        // 2) Projecting pt1 onto the wall line → perpendicular foot pt2_proj.
+        // 3) Dimensioning pt1 → pt2_proj (true shortest distance to wall).
+        // This gives correct distances even when the user clicks a corner.
+        private void PlaceCustomDimensions(UIDocument uidoc, Document doc)
+        {
+            var view = doc.ActiveView as ViewPlan;
+            if (view == null) { OnStatus?.Invoke("Custom dims: open a floor plan view first."); return; }
+
+            var dimType = new FilteredElementCollector(doc)
+                .OfClass(typeof(DimensionType)).Cast<DimensionType>()
+                .FirstOrDefault(dt => dt.StyleType == DimensionStyleType.Linear);
+            if (dimType == null) { OnStatus?.Invoke("Custom dims: no linear dimension type found."); return; }
+
+            // Collect wall centerline segments from the linked Architectural model.
+            // Walls are not in the active MEP document, so we query all RevitLinkInstances
+            // for their Wall elements. Each wall's LocationCurve gives us the centerline
+            // which we use to identify wall direction and position.
+            // Falls back to room boundary segments if no linked walls are found.
+            var boundarySegments = new List<(XYZ Start, XYZ End)>();
+            try
+            {
+                // Try linked files first
+                bool foundLinkedWalls = false;
+                foreach (var link in new FilteredElementCollector(doc)
+                    .OfClass(typeof(RevitLinkInstance)).Cast<RevitLinkInstance>())
+                {
+                    try
+                    {
+                        var linkDoc = link.GetLinkDocument();
+                        if (linkDoc == null) continue;
+                        var transform = link.GetTotalTransform();
+                        foreach (var wall in new FilteredElementCollector(linkDoc)
+                            .OfClass(typeof(Wall)).Cast<Wall>())
+                        {
+                            try
+                            {
+                                if (wall.Location is LocationCurve lc && lc.Curve != null)
+                                {
+                                    var c = lc.Curve;
+                                    // Transform from linked doc coordinates to host coordinates
+                                    var ptA = transform.OfPoint(c.GetEndPoint(0));
+                                    var ptB = transform.OfPoint(c.GetEndPoint(1));
+                                    boundarySegments.Add((ptA, ptB));
+                                    foundLinkedWalls = true;
+                                }
+                            }
+                            catch { }
+                        }
+                    }
+                    catch { }
+                }
+
+                // Fallback: room boundary segments from active doc
+                if (!foundLinkedWalls)
+                {
+                    var opts = new SpatialElementBoundaryOptions
+                        { SpatialElementBoundaryLocation = SpatialElementBoundaryLocation.Finish };
+                    foreach (var room in new FilteredElementCollector(doc)
+                        .OfCategory(BuiltInCategory.OST_Rooms).WhereElementIsNotElementType()
+                        .Cast<Room>().Where(r => r.Area > 0))
+                    {
+                        foreach (var loop in room.GetBoundarySegments(opts))
+                            foreach (var seg in loop)
+                            {
+                                try
+                                {
+                                    var c = seg.GetCurve();
+                                    if (c != null)
+                                        boundarySegments.Add((c.GetEndPoint(0), c.GetEndPoint(1)));
+                                }
+                                catch { }
+                            }
+                    }
+                }
+            }
+            catch { }
+
+            OnStatus?.Invoke($"Custom dim ready. {boundarySegments.Count} wall segments loaded. Pick FIRST point (ESC to finish).");
+
+            double z    = view.GenLevel?.Elevation ?? 0;
+            int    made = 0;
+
+            while (true)
+            {
+                XYZ pt1 = null, pt2raw = null;
+                try
+                {
+                    OnStatus?.Invoke($"Custom dim {made + 1}: pick FIRST point — lamp or element (ESC to finish).");
+                    pt1 = uidoc.Selection.PickPoint(
+                        Autodesk.Revit.UI.Selection.ObjectSnapTypes.Midpoints |
+                        Autodesk.Revit.UI.Selection.ObjectSnapTypes.Endpoints |
+                        Autodesk.Revit.UI.Selection.ObjectSnapTypes.Centers,
+                        "Pick lamp / element center (ESC to finish)");
+                }
+                catch { break; }
+
+                try
+                {
+                    OnStatus?.Invoke($"Custom dim {made + 1}: pick SECOND point — click anywhere on the wall.");
+                    pt2raw = uidoc.Selection.PickPoint(
+                        Autodesk.Revit.UI.Selection.ObjectSnapTypes.Nearest |
+                        Autodesk.Revit.UI.Selection.ObjectSnapTypes.Midpoints |
+                        Autodesk.Revit.UI.Selection.ObjectSnapTypes.Endpoints,
+                        "Click anywhere on the wall face");
+                }
+                catch { break; }
+
+                if (pt1 == null || pt2raw == null) break;
+
+                // Find the wall the user clicked on: the boundary segment where pt2raw
+                // is closest to lying ON the segment line (smallest perpendicular distance
+                // from pt2raw to the segment's infinite line). Then project pt1
+                // perpendicularly onto that wall line.
+                XYZ wallDir = null;
+                XYZ wallOrigin = null;
+                XYZ pt2     = pt2raw;
+                double bestSegDist = double.MaxValue;
+
+                foreach (var (segA, segB) in boundarySegments)
+                {
+                    var segVec = (segB - segA);
+                    double segLen = segVec.GetLength();
+                    if (segLen < 1e-6) continue;
+                    var segDirN = segVec.Normalize();
+
+                    // Distance from pt2raw to the infinite line of this segment
+                    var toP2 = pt2raw - segA;
+                    double projLen = toP2.DotProduct(segDirN);
+                    var foot = segA + segDirN.Multiply(projLen);
+                    double distToLine = (pt2raw - foot).GetLength();
+
+                    // Only consider this segment if pt2raw is actually near its line
+                    // (within 800mm) — this identifies which wall face was clicked.
+                    // Use a generous tolerance since room boundary = wall centerline,
+                    // and users typically click on the wall face (offset from centerline).
+                    if (distToLine < bestSegDist && distToLine < ToFeet(800))
+                    {
+                        bestSegDist = distToLine;
+                        wallDir    = segDirN;
+                        wallOrigin = segA;
+                    }
+                }
+
+                if (wallDir != null)
+                {
+                    // Wall normal = direction perpendicular to wall (in plan)
+                    // This is the direction the dimension should measure
+                    var wallNorm = new XYZ(-wallDir.Y, wallDir.X, 0).Normalize();
+
+                    // Signed distance from pt1 to the wall line, measured along wall normal
+                    double dNorm = (wallOrigin - pt1).DotProduct(wallNorm);
+
+                    // pt2 = pt1 shifted along wall normal by that distance → lands on wall line
+                    pt2 = new XYZ(pt1.X + wallNorm.X * dNorm,
+                                  pt1.Y + wallNorm.Y * dNorm,
+                                  pt1.Z);
+                    double distMm = UnitUtils.ConvertFromInternalUnits(Math.Abs((wallOrigin - pt1).DotProduct(wallNorm)), UnitTypeId.Millimeters);
+                    OnStatus?.Invoke($"Wall found ({bestSegDist*304.8:0}mm from click). Perpendicular distance: {distMm:0}mm");
+                }
+                else
+                {
+                    // Fallback: no boundary segment found near click.
+                    // Snap dimension direction to the dominant axis (X or Y).
+                    var rough = (pt2raw - pt1);
+                    if (rough.GetLength() < 1e-6) { OnStatus?.Invoke("Points coincident — try again."); continue; }
+                    if (Math.Abs(rough.X) >= Math.Abs(rough.Y))
+                    {
+                        // Mostly horizontal vector → horizontal dimension (measure X distance)
+                        pt2 = new XYZ(pt2raw.X, pt1.Y, pt1.Z);
+                        OnStatus?.Invoke("No wall found near click — using horizontal fallback.");
+                    }
+                    else
+                    {
+                        // Mostly vertical vector → vertical dimension (measure Y distance)
+                        pt2 = new XYZ(pt1.X, pt2raw.Y, pt1.Z);
+                        OnStatus?.Invoke("No wall found near click — using vertical fallback.");
+                    }
+                }
+
+                double dist = (pt2 - pt1).GetLength();
+                if (dist < 1e-6) { OnStatus?.Invoke("Points are coincident — try again."); continue; }
+
+                try
+                {
+                    using (var tx = new Transaction(doc, "ME-Tools: Custom Dimension"))
+                    {
+                        tx.Start();
+                        double tick   = ToFeet(200);
+                        var    dir    = (pt2 - pt1).Normalize();
+                        // Perpendicular direction for tick marks (90° from dimension direction)
+                        var    perp   = new XYZ(-dir.Y, dir.X, 0).Normalize();
+                        double offset = ToFeet(400);  // how far to offset the dim line
+
+                        var dl1 = doc.Create.NewDetailCurve(view, Line.CreateBound(
+                            new XYZ(pt1.X, pt1.Y, z) + perp.Multiply(offset - tick),
+                            new XYZ(pt1.X, pt1.Y, z) + perp.Multiply(offset + tick)));
+                        var dl2 = doc.Create.NewDetailCurve(view, Line.CreateBound(
+                            new XYZ(pt2.X, pt2.Y, z) + perp.Multiply(offset - tick),
+                            new XYZ(pt2.X, pt2.Y, z) + perp.Multiply(offset + tick)));
+
+                        var arr = new ReferenceArray();
+                        arr.Append(dl1.GeometryCurve.Reference);
+                        arr.Append(dl2.GeometryCurve.Reference);
+
+                        var dimLine = Line.CreateBound(
+                            new XYZ(pt1.X, pt1.Y, z) + perp.Multiply(offset),
+                            new XYZ(pt2.X, pt2.Y, z) + perp.Multiply(offset));
+
+                        doc.Create.NewDimension(view, dimLine, arr, dimType);
+                        tx.Commit();
+                        made++;
+                    }
+                }
+                catch (Exception ex) { OnStatus?.Invoke("Dim failed: " + ex.Message); }
+            }
+
+            OnStatus?.Invoke($"Custom dimensions: {made} created.");
+        }
+
+        // ── Dimension placement ──────────────────────────────────────────────
+        // Creates a chain dimension: wallEnd ─ lamp ─ lamp ─ ... ─ lamp ─ wallEnd
+        // in a single multi-segment Revit dimension string.
+        // For Line mode: chain follows the actual guide line direction + endpoints.
+        // For Area/Grid mode: chain follows the dominant lamp-spread axis + room BB.
+        private void PlaceDimensions(Document doc, List<ElementId> lampIds, List<Planned> plan,
+                                     XYZ guideStart, XYZ guideEnd)
+        {
+            var view = doc.ActiveView as ViewPlan;
+            if (view == null) return;
+
+            var dimType = new FilteredElementCollector(doc)
+                .OfClass(typeof(DimensionType)).Cast<DimensionType>()
+                .FirstOrDefault(dt => dt.StyleType == DimensionStyleType.Linear);
+            if (dimType == null) return;
+
+            // Collect placed lamp XY positions
+            var lampPts = new List<XYZ>();
+            Room room = null;
+            for (int i = 0; i < lampIds.Count && i < plan.Count; i++)
+            {
+                var fi = doc.GetElement(lampIds[i]) as FamilyInstance;
+                if (fi == null || !(fi.Location is LocationPoint lp)) continue;
+                lampPts.Add(lp.Point);
+                if (room == null) room = plan[i].Rm;
+            }
+            if (lampPts.Count == 0) return;
+
+            double z = view.GenLevel?.Elevation ?? lampPts[0].Z;
+
+            // ── Determine chain direction and endpoints ─────────────────────
+            XYZ chainDir, chainStart, chainEnd;
+
+            if (guideStart != null && guideEnd != null)
+            {
+                // Line mode: use the actual guide line
+                var raw = guideEnd - guideStart;
+                chainDir   = raw.GetLength() > 1e-6 ? raw.Normalize() : XYZ.BasisX;
+                chainStart = guideStart;
+                chainEnd   = guideEnd;
+            }
+            else
+            {
+                // Area/Grid mode: dominant spread axis
+                double spanX = lampPts.Max(p => p.X) - lampPts.Min(p => p.X);
+                double spanY = lampPts.Max(p => p.Y) - lampPts.Min(p => p.Y);
+                chainDir = spanX >= spanY ? XYZ.BasisX : XYZ.BasisY;
+
+                // Chain endpoints from room bounding box
+                var bb = room?.get_BoundingBox(null);
+                if (chainDir.X > 0.5)   // X axis
+                {
+                    double midY = lampPts.Average(p => p.Y);
+                    double x0 = bb?.Min.X ?? lampPts.Min(p => p.X) - ToFeet(500);
+                    double x1 = bb?.Max.X ?? lampPts.Max(p => p.X) + ToFeet(500);
+                    chainStart = new XYZ(x0, midY, z);
+                    chainEnd   = new XYZ(x1, midY, z);
+                }
+                else                    // Y axis
+                {
+                    double midX = lampPts.Average(p => p.X);
+                    double y0 = bb?.Min.Y ?? lampPts.Min(p => p.Y) - ToFeet(500);
+                    double y1 = bb?.Max.Y ?? lampPts.Max(p => p.Y) + ToFeet(500);
+                    chainStart = new XYZ(midX, y0, z);
+                    chainEnd   = new XYZ(midX, y1, z);
+                }
+            }
+
+            // ── Sort lamps along the chain ──────────────────────────────────
+            var ordered = lampPts
+                .OrderBy(p => (p - chainStart).DotProduct(chainDir))
+                .ToList();
+
+            // ── Perpendicular offset for the dimension line ─────────────────
+            var perpDir = new XYZ(-chainDir.Y, chainDir.X, 0);
+            if (perpDir.GetLength() < 1e-6) perpDir = XYZ.BasisY;
+            perpDir = perpDir.Normalize();
+            double perpOff = ToFeet(700);   // offset from lamp row
+            double tick    = ToFeet(300);   // tick half-length
+
+            // ── Build station list: chainStart, each lamp, chainEnd ─────────
+            // Stations are absolute XYZ points on the chain line
+            var stations = new List<XYZ>();
+            stations.Add(new XYZ(chainStart.X, chainStart.Y, z));
+            foreach (var p in ordered)
+            {
+                // Project lamp onto chain line through chainStart
+                double d = (p - chainStart).DotProduct(chainDir);
+                stations.Add(chainStart + chainDir.Multiply(d));
+            }
+            stations.Add(new XYZ(chainEnd.X, chainEnd.Y, z));
+
+            // Offset all stations perpendicular for the dim line
+            var dimPts = stations.Select(st => st + perpDir.Multiply(-perpOff)).ToList();
+
+            int made = 0, failed = 0;
+            using (var tx = new Transaction(doc, "ME-Tools: Lamp Dimensions"))
+            {
+                tx.Start();
+                try
+                {
+                    var refs = new List<Reference>();
+                    foreach (var dp in dimPts)
+                    {
+                        try
+                        {
+                            // Tick perpendicular to chain at each station
+                            var p1 = dp + perpDir.Multiply(-tick);
+                            var p2 = dp + perpDir.Multiply( tick);
+                            if ((p2 - p1).GetLength() < 1e-6) { refs.Add(null); continue; }
+                            var dl = doc.Create.NewDetailCurve(view, Line.CreateBound(p1, p2));
+                            refs.Add(dl.GeometryCurve.Reference);
+                        }
+                        catch { refs.Add(null); }
+                    }
+
+                    var arr = new ReferenceArray();
+                    foreach (var r in refs) if (r != null) arr.Append(r);
+
+                    if (arr.Size >= 2)
+                    {
+                        var dStart = dimPts.First();
+                        var dEnd   = dimPts.Last();
+                        // Ensure the line is not degenerate
+                        if ((dEnd - dStart).GetLength() > 1e-6)
+                        {
+                            try
+                            {
+                                doc.Create.NewDimension(view,
+                                    Line.CreateBound(dStart, dEnd), arr, dimType);
+                                made++;
+                            }
+                            catch { failed++; }
+                        }
+                    }
+                }
+                catch { failed++; }
+                tx.Commit();
+            }
+
+            OnStatus?.Invoke($"Dimensions: {made} created (static — re-run after moving lamps).");
         }
 
         // -- Write a CSV log of the placed lamps to Documents/METools. Returns the path. --
@@ -423,7 +1031,7 @@ namespace METools.LampPlacer
             try
             {
                 for (int i = 0; i < 4; i++)
-                    corners.Add(uidoc.Selection.PickPoint("Click corner " + (i + 1) + " of 4 (area for the grid)"));
+                    corners.Add(uidoc.Selection.PickPoint("Click corner " + (i + 1) + " of 4 (in order) - defines the grid area"));
             }
             catch (OperationCanceledException) { OnStatus?.Invoke("Cancelled."); return; }
             catch (Exception ex) { OnStatus?.Invoke("Error: " + ex.Message); return; }
@@ -468,7 +1076,7 @@ namespace METools.LampPlacer
                     { try { return rm.IsPointInRoom(new XYZ(q.X, q.Y, roomTestZ)); } catch { return false; } });
 
                     double ukdZ; Level level;
-                    if (fallbackLvl != null) { ukdZ = fallbackElev - offsetFt; level = fallbackLvl; }
+                    if (fallbackLvl != null) { ukdZ = _wallOffsetFt.HasValue ? fallbackElev + _wallOffsetFt.Value : fallbackElev - offsetFt; level = fallbackLvl; }
                     else if (room != null)
                     {
                         var bb = room.get_BoundingBox(null);
@@ -480,7 +1088,7 @@ namespace METools.LampPlacer
                     plan.Add(new Planned { Pt = new XYZ(q.X, q.Y, ukdZ), Angle = angle, Lvl = level, Rm = room, Ukd = ukdZ });
                 }
             }
-            RunPlacement(doc, sym, cfg, plan, "Place Grid");
+            RunPlacement(uidoc, doc, sym, cfg, plan, "Place Grid");
         }
 
         // -- Place lamps along guide lines drawn with Revit's Detail Line tool --
@@ -491,11 +1099,13 @@ namespace METools.LampPlacer
             if (sym == null) { OnStatus?.Invoke("Family not found."); return; }
 
             // 1. Select the guide line(s) drawn with Revit's Detail Line tool
+            OnWaiting?.Invoke(true);   // tell the window we are waiting for selection
             IList<Reference> refs;
             try { refs = uidoc.Selection.PickObjects(ObjectType.Element, new LineFilter(),
-                    "Select the guide line(s) - ESC when done"); }
-            catch (OperationCanceledException) { OnStatus?.Invoke("Cancelled."); return; }
-            catch (Exception ex) { OnStatus?.Invoke("Error: " + ex.Message); return; }
+                    "Click the guide line(s) you drew, then click Finish (green check) at the top"); }
+            catch (OperationCanceledException) { OnWaiting?.Invoke(false); OnStatus?.Invoke("Cancelled."); return; }
+            catch (Exception ex)               { OnWaiting?.Invoke(false); OnStatus?.Invoke("Error: " + ex.Message); return; }
+            OnWaiting?.Invoke(false);  // selection done
 
             var guideIds  = new List<ElementId>();
             var polylines = new List<List<XYZ>>();
@@ -538,7 +1148,7 @@ namespace METools.LampPlacer
             else // BySpacing: click first lamp, prompt distance, click as many as wanted (= count)
             {
                 XYZ firstPick;
-                try { firstPick = uidoc.Selection.PickPoint("Click the position of the FIRST lamp"); }
+                try { firstPick = uidoc.Selection.PickPoint("Click where the FIRST lamp should go on the line"); }
                 catch (OperationCanceledException) { firstPick = null; }
                 catch (Exception) { firstPick = null; }
 
@@ -565,7 +1175,7 @@ namespace METools.LampPlacer
                         int count = 1;
                         while (true)
                         {
-                            try { uidoc.Selection.PickPoint("Click to add a lamp (ESC when done) - spacing is applied automatically"); }
+                            try { uidoc.Selection.PickPoint("Click to add another lamp at this spacing - press ESC when finished"); }
                             catch (OperationCanceledException) { break; }
                             catch (Exception) { break; }
                             count++;
@@ -587,7 +1197,7 @@ namespace METools.LampPlacer
                 { try { return r.IsPointInRoom(new XYZ(pt2d.X, pt2d.Y, roomTestZ)); } catch { return false; } });
 
                 double ukdZ; Level level;
-                if (fallbackLvl != null) { ukdZ = fallbackElev - offsetFt; level = fallbackLvl; }
+                if (fallbackLvl != null) { ukdZ = _wallOffsetFt.HasValue ? fallbackElev + _wallOffsetFt.Value : fallbackElev - offsetFt; level = fallbackLvl; }
                 else if (room != null)
                 {
                     var bb = room.get_BoundingBox(null);
@@ -596,12 +1206,27 @@ namespace METools.LampPlacer
                 }
                 else { continue; }
 
-                double rotAngle = cfg.LineRotation == LineRotation.Perpendicular
-                    ? tangent + Math.PI / 2.0 : tangent;
+                // Rotation: use CalcAngle (respects the selected rotation mode / Project North)
+                // as the lamp's orientation. For "Perpendicular to line" we add 90deg to the
+                // base angle so the lamp faces across the guide line instead of along it.
+                // We do NOT use the raw tangent as the rotation — that would rotate every lamp
+                // to face the guide line direction, ignoring the chosen orientation.
+                double baseAngle = CalcAngle(cfg.Rotation, 1, 1);
+                double rotAngle  = cfg.LineRotation == LineRotation.Perpendicular
+                    ? baseAngle + Math.PI / 2.0 : baseAngle;
                 plan.Add(new Planned { Pt = new XYZ(pt2d.X, pt2d.Y, ukdZ), Angle = rotAngle, Lvl = level, Rm = room, Ukd = ukdZ });
             }
 
-            int placed = RunPlacement(doc, sym, cfg, plan, "Place Along Line");
+            // Store guide line endpoints for PlaceDimensions
+            if (polylines.Count > 0)
+            {
+                double tan0, tanN;
+                _guideLineStart = PointAtArcLength(polylines[0], 0, out tan0);
+                _guideLineEnd   = PointAtArcLength(polylines[0], PolylineLength(polylines[0]), out tanN);
+            }
+            else { _guideLineStart = null; _guideLineEnd = null; }
+
+            int placed = RunPlacement(uidoc, doc, sym, cfg, plan, "Place Along Line");
 
             // 6. Offer to delete the selected guide lines (only if placement was not cancelled)
             if (placed >= 0 && guideIds.Count > 0)
@@ -867,12 +1492,16 @@ namespace METools.LampPlacer
 
         private double CalcAngle(RotationMode mode, double roomW, double roomD)
         {
+            // The "D outlet for lighting" family has a native 45-degree tilt in plan.
+            // Deg0 corrects this to horizontal with -PI/4 (-45 deg).
+            // Deg90 = horizontal rotated 90 deg = -PI/4 + PI/2 = +PI/4.
+            // Auto picks the axis that aligns with the longer room dimension.
             switch (mode)
             {
-                case RotationMode.Deg90: return Math.PI / 2.0;
-                case RotationMode.Deg0:  return 0;
-                default: // Auto: rotate 90° if room is portrait
-                    return roomD > roomW ? Math.PI / 2.0 : 0;
+                case RotationMode.Deg90: return Math.PI / 2.0;  // X-shape rotated 90
+                case RotationMode.Deg0:  return 0.0;             // native = X shape (default)
+                default: // Auto: align to long room axis
+                    return roomD > roomW ? Math.PI / 2.0 : 0.0;
             }
         }
 

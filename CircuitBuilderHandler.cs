@@ -33,40 +33,40 @@ namespace METools.FamilyPlacer
         public string BuildSummary()
         {
             var sb = new StringBuilder();
-            if (Abgebrochen) sb.AppendLine("Abgebrochen.\n");
+            if (Abgebrochen) sb.AppendLine("Cancelled.\n");
             sb.AppendLine("Scan:");
-            sb.AppendLine($"  • Räume in Config:          {RaeumeGescannt}");
-            sb.AppendLine($"  • Bauteile gefunden:        {BauteileGefunden}");
-            sb.AppendLine($"  • Bereits auf Stromkreis:   {BauteileBereitsAufKreis}");
-            sb.AppendLine($"  • Ohne Raumzuordnung:       {BauteileOhneRaum}");
-            sb.AppendLine($"  • Ohne Config-Eintrag:      {BauteileOhneKonfig}");
+            sb.AppendLine($"  • Rooms in config:          {RaeumeGescannt}");
+            sb.AppendLine($"  • Elements found:           {BauteileGefunden}");
+            sb.AppendLine($"  • Already on circuit:       {BauteileBereitsAufKreis}");
+            sb.AppendLine($"  • No room assignment:       {BauteileOhneRaum}");
+            sb.AppendLine($"  • No config entry:          {BauteileOhneKonfig}");
             sb.AppendLine();
-            sb.AppendLine("Ergebnis:");
-            sb.AppendLine($"  ✓ Neue Normal-Kreise:       {KreiseNormal}");
-            sb.AppendLine($"  ✓ Neue Sonder-Kreise:       {KreiseSonder}");
-            sb.AppendLine($"  ✓ Bestehende aktualisiert:  {BestehendeKreiseUpdated}");
-            sb.AppendLine($"  ✓ Bauteile zugewiesen:      {BauteileZugewiesen}");
-            sb.AppendLine($"  ✓ Scheme-Parameter gesetzt: {SchemeParamsGesetzt}");
-            sb.AppendLine($"  ✓ Load Name gesetzt:        {LoadNameGesetzt}");
+            sb.AppendLine("Results:");
+            sb.AppendLine($"  ✓ New standard circuits:    {KreiseNormal}");
+            sb.AppendLine($"  ✓ New special circuits:     {KreiseSonder}");
+            sb.AppendLine($"  ✓ Existing updated:         {BestehendeKreiseUpdated}");
+            sb.AppendLine($"  ✓ Elements assigned:        {BauteileZugewiesen}");
+            sb.AppendLine($"  ✓ Scheme params set:        {SchemeParamsGesetzt}");
+            sb.AppendLine($"  ✓ Load name set:            {LoadNameGesetzt}");
             if (PanelsNamingSchemeGesetzt > 0)
-                sb.AppendLine($"  ✓ Panel-Naming angepasst:   {PanelsNamingSchemeGesetzt}");
+                sb.AppendLine($"  ✓ Panel naming adjusted:    {PanelsNamingSchemeGesetzt}");
 
             if (Warnungen.Count > 0)
             {
                 sb.AppendLine();
-                sb.AppendLine("Warnungen:");
+                sb.AppendLine("Warnings:");
                 var grouped = Warnungen.GroupBy(w => w).Select(g => new { Msg = g.Key, Count = g.Count() });
                 foreach (var g in grouped.Take(10))
                     sb.AppendLine(g.Count > 1 ? $"  – ({g.Count}×) {g.Msg}" : "  – " + g.Msg);
-                if (grouped.Count() > 10) sb.AppendLine($"  … und {grouped.Count() - 10} weitere");
+                if (grouped.Count() > 10) sb.AppendLine($"  … and {grouped.Count() - 10} more");
             }
 
             if (Fehler.Count > 0)
             {
                 sb.AppendLine();
-                sb.AppendLine("Fehler (erste 10):");
+                sb.AppendLine("Errors (first 10):");
                 foreach (var f in Fehler.Take(10)) sb.AppendLine("  ✗ " + f);
-                if (Fehler.Count > 10) sb.AppendLine($"  … und {Fehler.Count - 10} weitere");
+                if (Fehler.Count > 10) sb.AppendLine($"  … and {Fehler.Count - 10} more");
             }
             return sb.ToString();
         }

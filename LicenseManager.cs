@@ -7,6 +7,8 @@
 // the body with real validation once the licensing backend is ready.
 // -----------------------------------------------------------------
 using System;
+using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Security.Cryptography;
 using System.Text;
@@ -55,7 +57,12 @@ namespace METools
         /// </summary>
         public static bool IsLicensed()
         {
-            try { return File.Exists(KeyFile) && File.ReadAllText(KeyFile).Trim().Length > 0; }
+            try
+            {
+                if (!File.Exists(KeyFile)) return false;
+                var code = (File.ReadAllText(KeyFile) ?? "").Trim();
+                return VerifyCode(code, out _, out _);
+            }
             catch { return false; }
         }
 
@@ -125,15 +132,110 @@ namespace METools
         public static LicenseType Activate(string code)
         {
             if (string.IsNullOrWhiteSpace(code)) return LicenseType.None;
+            if (!VerifyCode(code, out LicenseType type, out _)) return LicenseType.None;
 
-            // TODO: replace with real validation. Example seam:
-            //
-            //   var granted = MyLicenseServer.Verify(code, GetMachineId());
-            //   if (granted == LicenseType.None) return LicenseType.None;
-            //   PersistKey(code, granted);
-            //   return granted;
+            // Valid: persist the code so it survives restarts. IsLicensed()
+            // re-verifies it on every check (machine + signature + expiry).
+            try
+            {
+                Directory.CreateDirectory(DataDir);
+                File.WriteAllText(KeyFile, code.Trim());
+            }
+            catch { return LicenseType.None; }
 
-            return LicenseType.None;
+            return type;
+        }
+
+        // --- Offline signed-code validation (ECDSA P-256 / SHA-256) ---
+        // The app holds ONLY the public key below, which can verify a code but
+        // cannot create one. Codes are minted by the KeyGenerator tool, which
+        // holds the matching private key (kept off all distributed binaries).
+        // Paste the public key printed by the KeyGenerator on first run here:
+        private const string PublicKeyB64 = "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEfBHkyEUG5YanO0U5o9HAPbQhFwGWi1zwx8Yo83Xny4hErUrSDipnNTcorMaYQUh/18ptEJffYJadMZmullQjMA==";
+
+        // Payload signed by the generator: "MACHINEID|TYPE|EXPIRY"
+        //   TYPE   : P = permanent, Y = 1 year, E = 30-day extension
+        //   EXPIRY : yyyyMMdd, or "0" for permanent
+        // Code on the wire: Base32(payload) + "." + Base32(signature)  (case-insensitive)
+        private static bool VerifyCode(string code, out LicenseType type, out DateTime expiry)
+        {
+            type   = LicenseType.None;
+            expiry = DateTime.MinValue;
+            try
+            {
+                if (string.IsNullOrWhiteSpace(code)) return false;
+                if (PublicKeyB64 == "PASTE_PUBLIC_KEY_HERE") return false; // not configured yet
+
+                string clean = code.Trim().ToUpperInvariant();
+                int dot = clean.IndexOf('.');
+                if (dot <= 0 || dot >= clean.Length - 1) return false;
+
+                byte[] payloadBytes = Base32Decode(clean.Substring(0, dot));
+                byte[] signature    = Base32Decode(clean.Substring(dot + 1));
+                if (payloadBytes.Length == 0 || signature.Length == 0) return false;
+
+                string payload = Encoding.UTF8.GetString(payloadBytes);
+                var parts = payload.Split('|');
+                if (parts.Length != 3) return false;
+
+                string mid = parts[0], t = parts[1], exp = parts[2];
+
+                // Bind to this machine.
+                if (!string.Equals(mid, GetMachineId(), StringComparison.OrdinalIgnoreCase)) return false;
+
+                // Verify the signature with the embedded public key.
+                using (var ecdsa = ECDsa.Create())
+                {
+                    ecdsa.ImportSubjectPublicKeyInfo(Convert.FromBase64String(PublicKeyB64), out _);
+                    bool ok = ecdsa.VerifyData(payloadBytes, signature,
+                        HashAlgorithmName.SHA256,
+                        DSASignatureFormat.IeeeP1363FixedFieldConcatenation);
+                    if (!ok) return false;
+                }
+
+                switch (t)
+                {
+                    case "P": type = LicenseType.Permanent; break;
+                    case "Y": type = LicenseType.Year1;     break;
+                    case "E": type = LicenseType.Extend30;  break;
+                    default:  return false;
+                }
+
+                if (exp == "0")
+                {
+                    expiry = DateTime.MaxValue;
+                }
+                else
+                {
+                    if (!DateTime.TryParseExact(exp, "yyyyMMdd",
+                            CultureInfo.InvariantCulture, DateTimeStyles.None, out expiry))
+                        return false;
+                    if (expiry < DateTime.Today) return false; // expired
+                }
+
+                return true;
+            }
+            catch { return false; }
+        }
+
+        private static byte[] Base32Decode(string s)
+        {
+            const string A = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+            int bits = 0, val = 0;
+            var bytes = new List<byte>();
+            foreach (char c in s)
+            {
+                int idx = A.IndexOf(c);
+                if (idx < 0) continue; // skip separators / whitespace
+                val = (val << 5) | idx;
+                bits += 5;
+                if (bits >= 8)
+                {
+                    bytes.Add((byte)((val >> (bits - 8)) & 0xFF));
+                    bits -= 8;
+                }
+            }
+            return bytes.ToArray();
         }
 
         // ── Key persistence seam used by SettingsWindow ───────────────────

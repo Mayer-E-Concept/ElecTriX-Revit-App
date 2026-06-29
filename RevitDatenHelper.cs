@@ -140,18 +140,18 @@ namespace METools.FamilyPlacer
                               || r.Name.Equals("Room", StringComparison.OrdinalIgnoreCase));
 
             if (d.GesamtPlatziert == 0)
-                d.KurzText = "Keine Räume oder MEP-Spaces im Modell";
+                d.KurzText = "No rooms or MEP spaces in the model";
             else if (d.AnzahlRaeume > 0 && d.AnzahlMEPSpaces > 0)
-                d.KurzText = $"{d.AnzahlRaeume} Räume + {d.AnzahlMEPSpaces} MEP-Spaces";
+                d.KurzText = $"{d.AnzahlRaeume} rooms + {d.AnzahlMEPSpaces} MEP spaces";
             else if (d.AnzahlRaeume > 0)
-                d.KurzText = $"{d.AnzahlRaeume} Räume gefunden";
+                d.KurzText = $"{d.AnzahlRaeume} rooms found";
             else
-                d.KurzText = $"{d.AnzahlMEPSpaces} MEP-Spaces gefunden";
+                d.KurzText = $"{d.AnzahlMEPSpaces} MEP spaces found";
 
             if (d.UnplatzierteRaum > 0)
-                d.KurzText += $" ({d.UnplatzierteRaum} unplatziert ignoriert)";
+                d.KurzText += $" ({d.UnplatzierteRaum} unplaced ignored)";
 
-            d.DetailText = $"Räume: {d.AnzahlRaeume}, MEP-Spaces: {d.AnzahlMEPSpaces}";
+            d.DetailText = $"Rooms: {d.AnzahlRaeume}, MEP spaces: {d.AnzahlMEPSpaces}";
             return d;
         }
 

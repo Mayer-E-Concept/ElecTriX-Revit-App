@@ -31,6 +31,10 @@ namespace METools.FamilyPlacer
                 .Where(s => !string.IsNullOrEmpty(s.FamilyName)).ToList();
             if (!slots.Any()) { OnStatus?.Invoke("No families configured."); return; }
 
+            // Confirm the user is on the level they think they are.
+            if (!METools.LevelGuard.ConfirmPlacementLevel(uidoc, doc, Request.LevelId))
+            { OnStatus?.Invoke("Cancelled (level check)."); return; }
+
             // Get first symbol — must already be active (activated at window open)
             var firstSymId = FamilyLoader.FindSymbolId(AllFamilies, slots[0].FamilyName, slots[0].TypeName);
             if (firstSymId == ElementId.InvalidElementId) { OnStatus?.Invoke("First family not found."); return; }
@@ -46,24 +50,48 @@ namespace METools.FamilyPlacer
 
             // Capture placed instances
             var captured = new List<FamilyInstance>();
+
+            // Both modes use the interactive placement (SPACEBAR rotate, face/host picking).
+            // Single mode auto-ends the loop with ESC right after the first instance is placed.
+            bool single = Request.Action == HandlerAction.PlaceSingle;
+            IntPtr revitHwnd = IntPtr.Zero;
+            try { revitHwnd = uidoc.Application.MainWindowHandle; } catch { }
+            bool escSent = false;
+
             void OnChanged(object s, Autodesk.Revit.DB.Events.DocumentChangedEventArgs e)
             {
                 foreach (var id in e.GetAddedElementIds())
                     if (doc.GetElement(id) is FamilyInstance fi && fi.Symbol?.Id == firstSymId)
                         captured.Add(fi);
+                if (single && !escSent && captured.Count >= 1) { escSent = true; SendEsc(revitHwnd); }
             }
 
             doc.Application.DocumentChanged += OnChanged;
             try
             {
-                OnStatus?.Invoke("SPACEBAR = rotate · ESC = done");
+                OnStatus?.Invoke(single
+                    ? "SPACEBAR rotates - click a face/point to place one"
+                    : "Click positions - SPACEBAR rotates - ESC when done");
                 uidoc.PromptForFamilyInstancePlacement(firstSym);
             }
             catch (OperationCanceledException) { }
-            catch (Exception ex) { OnStatus?.Invoke($"Error: {ex.Message}"); }
+            catch (Exception ex) { OnStatus?.Invoke("Error: " + ex.Message); }
             finally { doc.Application.DocumentChanged -= OnChanged; }
 
             if (!captured.Any()) { OnStatus?.Invoke("Cancelled."); return; }
+
+            // Single mode safety: if ESC arrived late, keep only the first placement.
+            if (single && captured.Count > 1)
+            {
+                using (var tx = new Transaction(doc, "ME-Tools: Trim"))
+                {
+                    tx.Start();
+                    for (int i = 1; i < captured.Count; i++)
+                        try { doc.Delete(captured[i].Id); } catch { }
+                    tx.Commit();
+                }
+                captured = captured.Take(1).ToList();
+            }
 
             // Place remaining slots + set parameters
             int total = 0;
@@ -182,6 +210,23 @@ namespace METools.FamilyPlacer
             OnPlaced?.Invoke(total);
         }
 
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        private static extern bool PostMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
+
+        // Sends ESC to Revit to end PromptForFamilyInstancePlacement after the first drop (single mode).
+        private static void SendEsc(IntPtr hWnd)
+        {
+            if (hWnd == IntPtr.Zero) return;
+            const uint WM_KEYDOWN = 0x0100, WM_KEYUP = 0x0101;
+            const int  VK_ESCAPE  = 0x1B;
+            try
+            {
+                PostMessage(hWnd, WM_KEYDOWN, (IntPtr)VK_ESCAPE, IntPtr.Zero);
+                PostMessage(hWnd, WM_KEYUP,   (IntPtr)VK_ESCAPE, IntPtr.Zero);
+            }
+            catch { }
+        }
+
         // ── Helpers ───────────────────────────────────────────────────────────
         private void SetNiveau(FamilyInstance inst, double valueMm)
         {
@@ -208,16 +253,11 @@ namespace METools.FamilyPlacer
         private void SetParamInt(FamilyInstance inst, int val, string name)
         { try { inst.LookupParameter(name)?.Set(val); } catch { } }
 
-        // Routes the per-slot offsets to the family axes according to the arrangement.
-        // Side by Side (Horizontal): Off X -> 2DX, Off Y -> 2DY.
-        // Stacked (Vertical): transposed, so the same offsets spread vertically.
+        // Off X -> 2DX, Off Y -> 2DY (direct mapping; matches the UI labels in both arrangements).
         private void ApplyOffset(FamilyInstance inst, FamilySlot slot)
         {
-            bool sideBySide = Request.Orientation == "Horizontal";
-            int x = sideBySide ? slot.OffsetX : slot.OffsetY;
-            int y = sideBySide ? slot.OffsetY : slot.OffsetX;
-            SetParamInt(inst, x, "2DX_Versatzfaktor");
-            SetParamInt(inst, y, "2DY_Versatzfaktor");
+            SetParamInt(inst, slot.OffsetX, "2DX_Versatzfaktor");
+            SetParamInt(inst, slot.OffsetY, "2DY_Versatzfaktor");
         }
 
         private void ApplyOverrides(FamilyInstance inst, FamilySlot slot)

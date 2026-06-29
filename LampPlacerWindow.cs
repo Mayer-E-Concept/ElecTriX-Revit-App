@@ -30,18 +30,23 @@ namespace METools.LampPlacer
         LampConfig _cfg = new LampConfig();
 
         ComboBox   _famCmb, _typCmb, _lvlCmb, _lineStyleCmb;
+        ComboBox   _presetCmb;
+        StackPanel _presetSp, _presetEntriesHost;
+        TextBox    _presetNameTb;
+        System.Collections.Generic.List<PresetRow> _presetRows;
         Button     _btnArea, _btnGrid, _btnLine;
         Button     _mainBtn, _multiBtn;
         StackPanel _areaSp, _gridSp, _lineSp;
-        Button     _btnAuto, _btn0, _btn90;
+
         Button     _btnFace, _btnWP;
         TextBlock  _placeDetectTb;
         Button     _btnLineSpacing, _btnLineCount;
         Button     _btnLineAlong, _btnLinePerp;
         StackPanel _lineSpacingRow, _lineCountRow;
-        TextBox    _sqmTb, _wallTb, _offsetTb, _rowsTb, _colsTb, _overlapTb;
+        TextBox    _sqmTb, _rowsTb, _colsTb;
+        Button     _btnDimNone, _btnDimAuto, _btnDimCustom;
         TextBox    _lineSpacingTb, _lineCountTb;
-        TextBlock  _infoTb, _lvlHelpTb;
+        TextBlock  _infoTb, _lvlHelpTb, _guideTb;
 
         // Alle theming-relevanten Elemente
         ScrollViewer _scroll;
@@ -59,11 +64,15 @@ namespace METools.LampPlacer
             _levels         = levels          ?? new List<LevelInfo>();
             _defaultLevelId = defaultLevelId  ?? ElementId.InvalidElementId;
 
-            h.OnStatus = m => Dispatcher.Invoke(() => StatusLeft.Text = m);
-            h.OnPlaced = n => Dispatcher.Invoke(() => StatusLeft.Text = $"Done: {n} lamps placed.");
-            h.OnPromptSpacing = def => ShowSpacingDialog(def);
+            h.OnStatus  = m => Dispatcher.Invoke(() => StatusLeft.Text = m);
+            h.OnPlaced  = n => Dispatcher.Invoke(() => { StatusLeft.Text = $"Done: {n} lamps placed."; SetWaiting(false); });
+            h.OnWaiting = w => Dispatcher.Invoke(() => SetWaiting(w));
+            h.OnPromptSpacing    = def => ShowSpacingDialog(def);
+            h.OnPromptWallOffset = def => ShowOffsetDialog(def);
+            h.OnPromptPreset     = ()  => ShowPresetChooser();
 
-            InitWindow("Lamp Placer", 440);
+            S.SetLanguage(SettingsStore.Language ?? "en");
+            InitWindow(S.Get("lamp.title"), 440);
             Build();
         }
 
@@ -71,7 +80,7 @@ namespace METools.LampPlacer
         {
             // Status Bar
             int famCount = _fams.Select(f => f.FamilyName).Distinct().Count();
-            BuildStatusBar($"{famCount} lighting families");
+            BuildStatusBar($"{famCount} " + S.Get("lamp.families_count"));
 
             // Body
             _scroll = new ScrollViewer
@@ -91,40 +100,34 @@ namespace METools.LampPlacer
             _scroll.Content = _body;
 
             // FAMILY
-            _body.Children.Add(Sec("Lighting Family"));
+            _body.Children.Add(Sec(S.Get("lamp.lighting_family")));
             _famCmb = METools.MeToolsWindowBase.StyledCombo(28, 12); _famCmb.Margin = new Thickness(0, 0, 0, 6);
-            _famCmb.Items.Add(new ComboBoxItem { Content = "-- Select Family --", Tag = "" });
-            var seen = new System.Collections.Generic.HashSet<string>();
-            foreach (var f in _fams.OrderBy(x => x.FamilyName))
-                if (seen.Add(f.FamilyName))
-                    _famCmb.Items.Add(new ComboBoxItem { Content = f.FamilyName, Tag = f.FamilyName });
-            _famCmb.SelectedIndex      = 0;
-            _famCmb.SelectionChanged  += FamChanged;
+            RebuildFamilyCombo();   // mode-aware + grouped (Lighting / Fire Alarm), wires FamChanged
             _body.Children.Add(_famCmb);
 
             _typCmb = METools.MeToolsWindowBase.StyledCombo(28, 12); _typCmb.Margin = new Thickness(0, 0, 0, 14);
             _body.Children.Add(_typCmb);
 
             // PLACEMENT (face vs work plane)
-            _body.Children.Add(Sec("Placement"));
+            _body.Children.Add(Sec(S.Get("lamp.placement")));
             var placeRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 4) };
-            _btnFace = ToggleBtn("Place on Face",       false, () => SetSurface(PlacementSurface.Face));
-            _btnWP   = ToggleBtn("Place on Work Plane", true,  () => SetSurface(PlacementSurface.WorkPlane));
+            _btnFace = ToggleBtn(S.Get("lamp.place_on_face"),       false, () => SetSurface(PlacementSurface.Face));
+            _btnWP   = ToggleBtn(S.Get("lamp.place_on_wp"), true,  () => SetSurface(PlacementSurface.WorkPlane));
             _btnFace.MinWidth = 120; _btnWP.MinWidth = 150;
             _btnFace.Margin = new Thickness(0, 0, 5, 0);
             placeRow.Children.Add(_btnFace); placeRow.Children.Add(_btnWP);
             _body.Children.Add(placeRow);
-            _placeDetectTb = new TextBlock { Text = "Select a family to detect hosting.", FontSize = 10,
+            _placeDetectTb = new TextBlock { Text = S.Get("lamp.detect_hosting"), FontSize = 10,
                 Foreground = MeToolsTheme.BrMuted, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 14) };
             _body.Children.Add(_placeDetectTb);
             UpdatePlacementDetection();
 
             // DISTRIBUTION MODE
-            _body.Children.Add(Sec("Distribution Mode"));
+            _body.Children.Add(Sec(S.Get("lamp.distribution")));
             var modeRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 10) };
-            _btnArea = ToggleBtn("Area-based",  true,  () => SetDist(DistributionMode.AreaBased));
-            _btnGrid = ToggleBtn("Manual Grid", false, () => SetDist(DistributionMode.ManualGrid));
-            _btnLine = ToggleBtn("Line",        false, () => SetDist(DistributionMode.Line));
+            _btnArea = ToggleBtn(S.Get("lamp.area_based"),  true,  () => SetDist(DistributionMode.AreaBased));
+            _btnGrid = ToggleBtn(S.Get("lamp.manual_grid"), false, () => SetDist(DistributionMode.ManualGrid));
+            _btnLine = ToggleBtn(S.Get("lamp.line"),        false, () => SetDist(DistributionMode.Line));
             _btnArea.Margin = new Thickness(0, 0, 5, 0);
             _btnGrid.Margin = new Thickness(0, 0, 5, 0);
             modeRow.Children.Add(_btnArea);
@@ -137,7 +140,7 @@ namespace METools.LampPlacer
             var ar = new StackPanel { Orientation = Orientation.Horizontal };
             ar.Children.Add(new TextBlock
             {
-                Text = "m² per lamp:", FontSize = 11,
+                Text = S.Get("lamp.sqm_per_lamp"), FontSize = 11,
                 Foreground = MeToolsTheme.BrText,
                 VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 0)
             });
@@ -152,6 +155,9 @@ namespace METools.LampPlacer
             ar.Children.Add(_infoTb);
             _areaSp.Children.Add(ar);
             _body.Children.Add(_areaSp);
+
+            _presetSp = BuildPresetSection();
+            _body.Children.Add(_presetSp);
 
             // Grid panel
             _gridSp = new StackPanel { Visibility = Visibility.Collapsed, Margin = new Thickness(0, 0, 0, 8) };
@@ -170,8 +176,8 @@ namespace METools.LampPlacer
 
             // Line: spacing / count toggle
             var lineModeRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 6) };
-            _btnLineSpacing = ToggleBtn("By spacing", true,  () => SetLineMode(LineMode.BySpacing));
-            _btnLineCount   = ToggleBtn("By count",   false, () => SetLineMode(LineMode.ByCount));
+            _btnLineSpacing = ToggleBtn(S.Get("lamp.by_spacing"), true,  () => SetLineMode(LineMode.BySpacing));
+            _btnLineCount   = ToggleBtn(S.Get("lamp.by_count"),   false, () => SetLineMode(LineMode.ByCount));
             _btnLineSpacing.Margin = new Thickness(0, 0, 5, 0);
             lineModeRow.Children.Add(_btnLineSpacing);
             lineModeRow.Children.Add(_btnLineCount);
@@ -199,8 +205,8 @@ namespace METools.LampPlacer
                 Margin = new Thickness(0, 4, 0, 4)
             });
             var lineRotRow = new StackPanel { Orientation = Orientation.Horizontal };
-            _btnLineAlong = ToggleBtn("↔ Along line",    true,  () => SetLineRot(LineRotation.AlongLine));
-            _btnLinePerp  = ToggleBtn("⟂ Perpendicular", false, () => SetLineRot(LineRotation.Perpendicular));
+            _btnLineAlong = ToggleBtn(S.Get("lamp.along_line"),    true,  () => SetLineRot(LineRotation.AlongLine));
+            _btnLinePerp  = ToggleBtn(S.Get("lamp.perpendicular"), false, () => SetLineRot(LineRotation.Perpendicular));
             _btnLineAlong.Margin = new Thickness(0, 0, 5, 0);
             lineRotRow.Children.Add(_btnLineAlong);
             lineRotRow.Children.Add(_btnLinePerp);
@@ -215,42 +221,23 @@ namespace METools.LampPlacer
 
             _body.Children.Add(_lineSp);
 
-            // WALL MARGIN
-            _body.Children.Add(Sec("Wall Margin"));
-            var wm = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 14) };
-            wm.Children.Add(new TextBlock { Text = "Min. distance from wall (mm):", FontSize = 11, Foreground = MeToolsTheme.BrText, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 0) });
-            _wallTb = Num("1500"); _wallTb.Width = 80;
-            wm.Children.Add(_wallTb);
-            _body.Children.Add(wm);
-
-            var ov = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 14) };
-            ov.Children.Add(new TextBlock { Text = "Min. gap to existing fixture (mm):", FontSize = 11, Foreground = MeToolsTheme.BrText, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 0) });
-            _overlapTb = Num("300"); _overlapTb.Width = 80;
-            ov.Children.Add(_overlapTb);
-            _body.Children.Add(ov);
-
-            // ROTATION (Area / Grid)
-            _body.Children.Add(Sec("Rotation"));
-            var rr = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 14) };
-            _btnAuto = ToggleBtn("Auto", true,  () => SetRot(RotationMode.Auto));
-            _btn0    = ToggleBtn("0°",   false, () => SetRot(RotationMode.Deg0));
-            _btn90   = ToggleBtn("90°",  false, () => SetRot(RotationMode.Deg90));
-            _btnAuto.MinWidth = 60; _btn0.MinWidth = 50; _btn90.MinWidth = 50;
-            _btnAuto.Margin = new Thickness(0, 0, 4, 0); _btn0.Margin = new Thickness(0, 0, 4, 0);
-            rr.Children.Add(_btnAuto); rr.Children.Add(_btn0); rr.Children.Add(_btn90);
-            _body.Children.Add(rr);
-
-            // HEIGHT
-            _body.Children.Add(Sec("Height (UKD)"));
-            var hh = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 14) };
-            hh.Children.Add(new TextBlock { Text = "Offset below UKD (mm):", FontSize = 11, Foreground = MeToolsTheme.BrText, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 0) });
-            _offsetTb = Num("0"); _offsetTb.Width = 70;
-            hh.Children.Add(_offsetTb);
-            hh.Children.Add(new TextBlock { Text = "  (0 = directly at UKD)", FontSize = 10, Foreground = MeToolsTheme.BrMuted, VerticalAlignment = VerticalAlignment.Center });
-            _body.Children.Add(hh);
+            // DIMENSIONS
+            _body.Children.Add(Sec(S.Get("lamp.dimensions")));
+            var dimRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 14) };
+            _btnDimNone   = ToggleBtn(S.Get("none"),   false, () => SetDimMode(DimensionMode.None));
+            _btnDimAuto   = ToggleBtn(S.Get("auto"),   true,  () => SetDimMode(DimensionMode.Auto));
+            _btnDimCustom = ToggleBtn(S.Get("custom"), false, () => SetDimMode(DimensionMode.Custom));
+            _btnDimNone.MinWidth   = 55; _btnDimNone.Margin   = new Thickness(0, 0, 4, 0);
+            _btnDimAuto.MinWidth   = 55; _btnDimAuto.Margin   = new Thickness(0, 0, 4, 0);
+            _btnDimCustom.MinWidth = 65;
+            _btnDimCustom.ToolTip  = "After placing, pick pairs of reference points to draw dimensions manually";
+            dimRow.Children.Add(_btnDimNone);
+            dimRow.Children.Add(_btnDimAuto);
+            dimRow.Children.Add(_btnDimCustom);
+            _body.Children.Add(dimRow);
 
             // REFERENCE LEVEL
-            _body.Children.Add(Sec("Reference Level"));
+            _body.Children.Add(Sec(S.Get("lamp.reference_level")));
             _lvlCmb = METools.MeToolsWindowBase.StyledCombo(28, 12);
             _lvlCmb.Margin = new Thickness(0, 0, 0, 4);
             int defaultIdx = -1;
@@ -280,7 +267,7 @@ namespace METools.LampPlacer
 
             _lvlHelpTb = new TextBlock
             {
-                Text       = "Used as a reliable fallback when no slab face is found at the UKD.",
+                Text       = S.Get("lamp.fallback_hint"),
                 FontSize   = 10,
                 FontStyle  = FontStyles.Italic,
                 Foreground = MeToolsTheme.BrMuted,
@@ -290,27 +277,29 @@ namespace METools.LampPlacer
             _body.Children.Add(_lvlHelpTb);
 
             // Info Box
-            _body.Children.Add(InfoBox("Lamps distributed symmetrically from room center · Room boundaries checked · Height = room UKD"));
+            _body.Children.Add(InfoBox(S.Get("lamp.area_info")));
+
+            // Mode-aware step guide
+            _guideTb = new TextBlock
+            {
+                FontSize     = 11,
+                Foreground   = MeToolsTheme.BrMuted,
+                TextWrapping = TextWrapping.Wrap,
+                Margin       = new Thickness(2, 8, 2, 10),
+            };
+            _body.Children.Add(_guideTb);
+            UpdateGuide();
 
             // BUTTONS - main action is mode-dependent; Multiple Rooms shows for Area-based only
             var btnRow = new Grid { Margin = new Thickness(0, 0, 0, 6) };
             btnRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             btnRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(5) });
             btnRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1.3, GridUnitType.Star) });
-            _mainBtn  = ActionBtn("\u25B6  Place in Room",  false, DoMainAction);
-            _multiBtn = ActionBtn("\u2295  Multiple Rooms", true,  () => DoPlace(LampAction.PlaceMulti));
+            _mainBtn  = ActionBtn("\u25B6  " + S.Get("lamp.place_in_room"),  false, DoMainAction);
+            _multiBtn = ActionBtn("\u2295  " + S.Get("lamp.multiple_rooms"), true,  () => DoPlace(LampAction.PlaceMulti));
             Grid.SetColumn(_mainBtn, 0); Grid.SetColumn(_multiBtn, 2);
             btnRow.Children.Add(_mainBtn); btnRow.Children.Add(_multiBtn);
             _body.Children.Add(btnRow);
-
-            var rb = ActionBtn("↺  Redistribute Selected Lamps", true, () => DoPlace(LampAction.Redistribute));
-            rb.Margin = new Thickness(0, 4, 0, 0);
-            _body.Children.Add(rb);
-
-            var rfBtn = ActionBtn("⟳  Refresh Room", true, () => DoPlace(LampAction.RefreshRoom));
-            rfBtn.Margin   = new Thickness(0, 4, 0, 0);
-            rfBtn.ToolTip  = "Delete existing lamps of this family in the selected room and re-place with current settings.";
-            _body.Children.Add(rfBtn);
 
             UpdateInfo();
         }
@@ -323,7 +312,7 @@ namespace METools.LampPlacer
             if (_scroll != null) _scroll.Background = MeToolsTheme.BrBg;
             if (_body   != null) _body.Background   = MeToolsTheme.BrBg;
 
-            foreach (var tb in new[] { _sqmTb, _wallTb, _offsetTb, _rowsTb, _colsTb, _lineSpacingTb, _lineCountTb, _overlapTb })
+            foreach (var tb in new[] { _sqmTb, _rowsTb, _colsTb, _lineSpacingTb, _lineCountTb })
             {
                 if (tb == null) continue;
                 tb.Background  = MeToolsTheme.BrInput;
@@ -338,10 +327,74 @@ namespace METools.LampPlacer
             if (_infoTb    != null) _infoTb.Foreground    = MeToolsTheme.BrMuted;
             if (_lvlHelpTb != null) _lvlHelpTb.Foreground = MeToolsTheme.BrMuted;
             SetDist(_cfg.Distribution);
-            SetRot(_cfg.Rotation);
+            _cfg.Rotation   = RotationMode.Deg0;   // fixed: always use horizontal
+            // _cfg.Dimensions already set via SetDimMode toggle
             SetLineMode(_cfg.LineMode);
             SetLineRot(_cfg.LineRotation);
             UpdatePlacementDetection();
+        }
+
+        // Rebuilds the family dropdown: grouped into Lighting / Fire Alarm headers, and Fire Alarm
+        // families are listed only in Area-based mode. Preserves the current selection when possible.
+        void RebuildFamilyCombo()
+        {
+            if (_famCmb == null) return;
+            _famCmb.SelectionChanged -= FamChanged;
+
+            string current = _cfg.FamilyName;
+            bool   area    = _cfg.Distribution == DistributionMode.AreaBased;
+            bool   selValid = false;
+
+            _famCmb.Items.Clear();
+            _famCmb.Items.Add(new ComboBoxItem { Content = S.Get("lamp.select_family_dropdown"), Tag = "" });
+
+            void AddGroup(string header, System.Collections.Generic.IEnumerable<string> fams)
+            {
+                var list = fams.ToList();
+                if (list.Count == 0) return;
+                _famCmb.Items.Add(new ComboBoxItem
+                {
+                    Content    = header,
+                    Tag        = null,
+                    IsEnabled  = false,
+                    FontWeight = FontWeights.Bold,
+                    Foreground = MeToolsTheme.BrMuted,
+                });
+                foreach (var fam in list)
+                {
+                    _famCmb.Items.Add(new ComboBoxItem { Content = "    " + fam, Tag = fam });
+                    if (fam == current) selValid = true;
+                }
+            }
+
+            AddGroup("Lighting", _fams.Where(f => f.Group != "Fire Alarm")
+                                      .Select(f => f.FamilyName).Distinct()
+                                      .OrderBy(x => x, System.StringComparer.OrdinalIgnoreCase));
+            if (area)
+                AddGroup("Fire Alarm", _fams.Where(f => f.Group == "Fire Alarm")
+                                            .Select(f => f.FamilyName).Distinct()
+                                            .OrderBy(x => x, System.StringComparer.OrdinalIgnoreCase));
+
+            if (selValid)
+            {
+                foreach (var it in _famCmb.Items)
+                    if (it is ComboBoxItem ci && (ci.Tag as string) == current) { _famCmb.SelectedItem = ci; break; }
+            }
+            else
+            {
+                _famCmb.SelectedIndex = 0;
+                _cfg.FamilyName = "";
+                _cfg.TypeName   = "";
+                if (_typCmb != null)
+                {
+                    _typCmb.SelectionChanged -= TypChanged;
+                    _typCmb.Items.Clear();
+                    _typCmb.SelectionChanged += TypChanged;
+                }
+                UpdatePlacementDetection();
+            }
+
+            _famCmb.SelectionChanged += FamChanged;
         }
 
         void FamChanged(object s, SelectionChangedEventArgs e)
@@ -382,23 +435,278 @@ namespace METools.LampPlacer
 
             if (_placeDetectTb != null)
                 _placeDetectTb.Text = pt == FamilyPlacementType.Invalid
-                    ? "Select a family to detect hosting."
-                    : $"Detected: {pt}" + (faceBased ? " - face placement available." : " - work plane / level only.");
+                    ? S.Get("lamp.detect_hosting")
+                    : $"Detected: {pt}" + (faceBased ? S.Get("lamp.face_available") : S.Get("lamp.wp_only"));
+        }
+
+        // ===== Room Presets (Area-based only) ====================================
+        private class PresetRow
+        {
+            public ComboBox  FamilyCmb;
+            public ComboBox  TypeCmb;
+            public TextBox   CountTb;
+            public Grid      Root;
+        }
+
+        Button MiniBtn(string text, bool primary, System.Action onClick)
+        {
+            var b = new Button
+            {
+                Content         = text,
+                Height          = 26,
+                FontSize        = 11,
+                Padding         = new Thickness(10, 0, 10, 0),
+                Background      = primary ? MeToolsTheme.BrPetrol : MeToolsTheme.BrInput,
+                Foreground      = primary ? System.Windows.Media.Brushes.White : MeToolsTheme.BrText,
+                BorderBrush     = MeToolsTheme.BrBorder,
+                BorderThickness = new Thickness(1),
+            };
+            b.Click += (s, e) => onClick();
+            return b;
+        }
+
+        static void SelectComboByTag(ComboBox cmb, string tag)
+        {
+            foreach (var it in cmb.Items)
+                if (it is ComboBoxItem ci && (ci.Tag as string) == tag) { cmb.SelectedItem = ci; return; }
+        }
+
+        void PopulateGroupedFamilies(ComboBox cmb)
+        {
+            cmb.Items.Clear();
+            cmb.Items.Add(new ComboBoxItem { Content = "-- Select --", Tag = "" });
+            void AddGroup(string header, System.Collections.Generic.IEnumerable<string> fams)
+            {
+                var list = fams.ToList();
+                if (list.Count == 0) return;
+                cmb.Items.Add(new ComboBoxItem
+                {
+                    Content = header, Tag = null, IsEnabled = false,
+                    FontWeight = FontWeights.Bold, Foreground = MeToolsTheme.BrMuted,
+                });
+                foreach (var fam in list) cmb.Items.Add(new ComboBoxItem { Content = "    " + fam, Tag = fam });
+            }
+            AddGroup("Lighting", _fams.Where(f => f.Group != "Fire Alarm")
+                                      .Select(f => f.FamilyName).Distinct()
+                                      .OrderBy(x => x, System.StringComparer.OrdinalIgnoreCase));
+            AddGroup("Fire Alarm", _fams.Where(f => f.Group == "Fire Alarm")
+                                        .Select(f => f.FamilyName).Distinct()
+                                        .OrderBy(x => x, System.StringComparer.OrdinalIgnoreCase));
+        }
+
+        PresetRow BuildPresetRow(LampPresetEntry data)
+        {
+            var row = new PresetRow();
+            var g = new Grid { Margin = new Thickness(0, 2, 0, 2) };
+            foreach (var wdt in new[] { -1.0, 6.0, 110.0, 6.0, 50.0, 6.0, 26.0 })
+                g.ColumnDefinitions.Add(new ColumnDefinition
+                { Width = wdt < 0 ? new GridLength(1, GridUnitType.Star) : new GridLength(wdt) });
+
+            var famCmb  = METools.MeToolsWindowBase.StyledCombo(26, 11);
+            var typCmb  = METools.MeToolsWindowBase.StyledCombo(26, 11);
+            var countTb = Num((data != null ? data.Count : 1).ToString());
+            countTb.Width = 50; countTb.TextAlignment = TextAlignment.Center;
+            var rm = MiniBtn("x", false, () => { _presetEntriesHost.Children.Remove(g); _presetRows.Remove(row); });
+
+            PopulateGroupedFamilies(famCmb);
+
+            void RefreshTypes()
+            {
+                typCmb.Items.Clear();
+                var fam = (famCmb.SelectedItem as ComboBoxItem)?.Tag as string ?? "";
+                foreach (var t in _fams.Where(f => f.FamilyName == fam).OrderBy(f => f.TypeName))
+                    typCmb.Items.Add(t.TypeName);
+                if (typCmb.Items.Count > 0) typCmb.SelectedIndex = 0;
+            }
+            famCmb.SelectionChanged += (s, e) => RefreshTypes();
+
+            if (data != null && !string.IsNullOrEmpty(data.FamilyName))
+            {
+                SelectComboByTag(famCmb, data.FamilyName);   // triggers RefreshTypes
+                if (!string.IsNullOrEmpty(data.TypeName))
+                    foreach (var it in typCmb.Items)
+                        if ((it as string) == data.TypeName) { typCmb.SelectedItem = it; break; }
+            }
+
+            Grid.SetColumn(famCmb, 0);
+            Grid.SetColumn(typCmb, 2);
+            Grid.SetColumn(countTb, 4);
+            Grid.SetColumn(rm, 6);
+            g.Children.Add(famCmb); g.Children.Add(typCmb); g.Children.Add(countTb); g.Children.Add(rm);
+
+            row.FamilyCmb = famCmb; row.TypeCmb = typCmb; row.CountTb = countTb; row.Root = g;
+            return row;
+        }
+
+        StackPanel BuildPresetSection()
+        {
+            _presetRows = new System.Collections.Generic.List<PresetRow>();
+            var sp = new StackPanel();
+            sp.Children.Add(Sec(S.Get("lamp.room_presets")));
+
+            var top = new Grid { Margin = new Thickness(0, 0, 0, 6) };
+            top.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            top.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(6) });
+            top.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            _presetCmb = METools.MeToolsWindowBase.StyledCombo(28, 12);
+            Grid.SetColumn(_presetCmb, 0);
+            var newBtn = MiniBtn(S.Get("lamp.new_preset"), false, OnNewPreset);
+            Grid.SetColumn(newBtn, 2);
+            top.Children.Add(_presetCmb); top.Children.Add(newBtn);
+            sp.Children.Add(top);
+
+            sp.Children.Add(new TextBlock { Text = S.Get("lamp.preset_name"), FontSize = 11,
+                Foreground = MeToolsTheme.BrMuted, Margin = new Thickness(2, 0, 0, 2) });
+            _presetNameTb = new TextBox
+            {
+                Height = 28, FontSize = 12,
+                Background = MeToolsTheme.BrInput, Foreground = MeToolsTheme.BrInputFg,
+                BorderBrush = MeToolsTheme.BrBorder, BorderThickness = new Thickness(1),
+                CaretBrush = MeToolsTheme.BrText, Padding = new Thickness(6, 0, 6, 0),
+                VerticalContentAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 0, 8),
+            };
+            sp.Children.Add(_presetNameTb);
+
+            sp.Children.Add(new TextBlock { Text = S.Get("lamp.families"), FontSize = 11,
+                Foreground = MeToolsTheme.BrMuted, Margin = new Thickness(2, 0, 0, 2) });
+            _presetEntriesHost = new StackPanel();
+            sp.Children.Add(_presetEntriesHost);
+
+            var addBtn = MiniBtn(S.Get("lamp.add_family"), false, () =>
+            { var r = BuildPresetRow(null); _presetRows.Add(r); _presetEntriesHost.Children.Add(r.Root); });
+            addBtn.Margin = new Thickness(0, 4, 0, 8);
+            addBtn.HorizontalAlignment = HorizontalAlignment.Left;
+            sp.Children.Add(addBtn);
+
+            var bottom = new StackPanel { Orientation = Orientation.Horizontal };
+            var saveBtn = MiniBtn(S.Get("lamp.save_preset"), true, SavePreset); saveBtn.Margin = new Thickness(0, 0, 6, 0);
+            var updBtn  = MiniBtn(S.Get("lamp.update_room"), false, UpdateRoom); updBtn.Margin = new Thickness(0, 0, 6, 0);
+            var delBtn  = MiniBtn(S.Get("delete"), false, DeletePreset);
+            bottom.Children.Add(saveBtn); bottom.Children.Add(updBtn); bottom.Children.Add(delBtn);
+            sp.Children.Add(bottom);
+
+            RebuildPresetCombo();
+            NewPreset();
+            return sp;
+        }
+
+        void RebuildPresetCombo(string selectName = null)
+        {
+            if (_presetCmb == null) return;
+            _presetCmb.SelectionChanged -= PresetChanged;
+            _presetCmb.Items.Clear();
+            _presetCmb.Items.Add(new ComboBoxItem { Content = "-- New preset --", Tag = "" });
+            foreach (var p in LampPresetStore.All())
+                _presetCmb.Items.Add(new ComboBoxItem { Content = p.Name, Tag = p.Name });
+            if (!string.IsNullOrEmpty(selectName)) SelectComboByTag(_presetCmb, selectName);
+            else _presetCmb.SelectedIndex = 0;
+            _presetCmb.SelectionChanged += PresetChanged;
+        }
+
+        void PresetChanged(object s, SelectionChangedEventArgs e)
+        {
+            var name = (_presetCmb.SelectedItem as ComboBoxItem)?.Tag as string ?? "";
+            if (string.IsNullOrEmpty(name)) NewPreset();
+            else LoadPreset(name);
+        }
+
+        void LoadPreset(string name)
+        {
+            var p = LampPresetStore.Get(name);
+            _presetNameTb.Text = p?.Name ?? name;
+            _presetEntriesHost.Children.Clear();
+            _presetRows.Clear();
+            if (p != null)
+                foreach (var en in p.Entries)
+                { var r = BuildPresetRow(en); _presetRows.Add(r); _presetEntriesHost.Children.Add(r.Root); }
+            if (_presetRows.Count == 0)
+            { var r = BuildPresetRow(null); _presetRows.Add(r); _presetEntriesHost.Children.Add(r.Root); }
+        }
+
+        void NewPreset()
+        {
+            if (_presetNameTb != null) _presetNameTb.Text = "";
+            if (_presetEntriesHost == null) return;
+            _presetEntriesHost.Children.Clear();
+            _presetRows.Clear();
+            var r = BuildPresetRow(null); _presetRows.Add(r); _presetEntriesHost.Children.Add(r.Root);
+        }
+
+        void OnNewPreset()
+        {
+            _presetCmb.SelectionChanged -= PresetChanged;
+            _presetCmb.SelectedIndex = 0;
+            _presetCmb.SelectionChanged += PresetChanged;
+            NewPreset();
+        }
+
+        // Builds a LampPreset from the current editor rows; returns null (and sets a
+        // status message) if the name is empty or there are no families.
+        LampPreset BuildPresetFromRows()
+        {
+            var name = _presetNameTb.Text?.Trim() ?? "";
+            if (name.Length == 0) { StatusLeft.Text = "Enter a preset name first."; return null; }
+            var preset = new LampPreset { Name = name };
+            foreach (var r in _presetRows)
+            {
+                var fam = (r.FamilyCmb.SelectedItem as ComboBoxItem)?.Tag as string ?? "";
+                if (string.IsNullOrEmpty(fam)) continue;
+                var typ = r.TypeCmb.SelectedItem as string ?? "";
+                int cnt = int.TryParse(r.CountTb.Text, out int c) ? System.Math.Max(1, c) : 1;
+                preset.Entries.Add(new LampPresetEntry { FamilyName = fam, TypeName = typ, Count = cnt });
+            }
+            if (preset.Entries.Count == 0) { StatusLeft.Text = "Add at least one family to the preset."; return null; }
+            return preset;
+        }
+
+        void SavePreset()
+        {
+            var preset = BuildPresetFromRows();
+            if (preset == null) return;
+            LampPresetStore.Save(preset);
+            RebuildPresetCombo(preset.Name);
+            StatusLeft.Text = "Saved preset: " + preset.Name;
+        }
+
+        // Saves the (edited) preset, then asks the user to pick the room that already
+        // has it placed; the handler clears that room and re-applies the preset live.
+        void UpdateRoom()
+        {
+            var preset = BuildPresetFromRows();
+            if (preset == null) return;
+            LampPresetStore.Save(preset);
+            RebuildPresetCombo(preset.Name);
+            SyncConfig();
+            _h.Request = new LampRequest { Action = LampAction.UpdatePreset, Config = _cfg, PresetName = preset.Name };
+            StatusLeft.Text = "Click the room to update with preset '" + preset.Name + "'...";
+            _evt.Raise();
+        }
+
+        void DeletePreset()
+        {
+            var name = (_presetCmb.SelectedItem as ComboBoxItem)?.Tag as string ?? "";
+            if (string.IsNullOrEmpty(name)) { StatusLeft.Text = ("Select a saved preset to delete."); return; }
+            LampPresetStore.Delete(name);
+            RebuildPresetCombo();
+            NewPreset();
+            StatusLeft.Text = ("Deleted preset: " + name);
         }
 
         void SetDist(DistributionMode m)
         {
             _cfg.Distribution = m;
+            RebuildFamilyCombo();   // Fire Alarm families only show in Area-based mode
             UpdateToggle(_btnArea, m == DistributionMode.AreaBased);
             UpdateToggle(_btnGrid, m == DistributionMode.ManualGrid);
             UpdateToggle(_btnLine, m == DistributionMode.Line);
             if (_areaSp != null) _areaSp.Visibility = m == DistributionMode.AreaBased ? Visibility.Visible : Visibility.Collapsed;
+            if (_presetSp != null) _presetSp.Visibility = m == DistributionMode.AreaBased ? Visibility.Visible : Visibility.Collapsed;
             if (_gridSp != null) _gridSp.Visibility = m == DistributionMode.ManualGrid ? Visibility.Visible : Visibility.Collapsed;
             if (_lineSp != null) _lineSp.Visibility = m == DistributionMode.Line       ? Visibility.Visible : Visibility.Collapsed;
             if (_mainBtn != null)
                 _mainBtn.Content = m == DistributionMode.Line      ? "\uD83D\uDCCF  Place Along Line"
                                  : m == DistributionMode.ManualGrid ? "\u25A6  Place Grid"
-                                 :                                    "\u25B6  Place in Room";
+                                 :                                    "\u25B6  " + S.Get("lamp.place_in_room");
             if (_multiBtn != null)
             {
                 bool showMulti = m == DistributionMode.AreaBased;
@@ -406,6 +714,7 @@ namespace METools.LampPlacer
                 if (_mainBtn != null) Grid.SetColumnSpan(_mainBtn, showMulti ? 1 : 3);
             }
             UpdateInfo();
+            UpdateGuide();
         }
 
         void SetLineMode(LineMode m)
@@ -416,6 +725,27 @@ namespace METools.LampPlacer
             if (_lineSpacingRow != null) _lineSpacingRow.Visibility = m == LineMode.BySpacing ? Visibility.Visible : Visibility.Collapsed;
             if (_lineCountRow   != null) _lineCountRow.Visibility   = m == LineMode.ByCount   ? Visibility.Visible : Visibility.Collapsed;
             UpdateInfo();
+            UpdateGuide();
+        }
+
+        // Short, mode-specific how-to shown above the action buttons.
+        void UpdateGuide()
+        {
+            if (_guideTb == null) return;
+            string t;
+            switch (_cfg.Distribution)
+            {
+                case DistributionMode.ManualGrid:
+                    t = S.Get("lamp.help_grid");
+                    break;
+                case DistributionMode.Line:
+                    t = S.Get("lamp.help_line");
+                    break;
+                default:
+                    t = S.Get("lamp.help_area");
+                    break;
+            }
+            _guideTb.Text = t;
         }
 
         void SetLineRot(LineRotation r)
@@ -425,13 +755,7 @@ namespace METools.LampPlacer
             UpdateToggle(_btnLinePerp,  r == LineRotation.Perpendicular);
         }
 
-        void SetRot(RotationMode r)
-        {
-            _cfg.Rotation = r;
-            UpdateToggle(_btnAuto, r == RotationMode.Auto);
-            UpdateToggle(_btn0,    r == RotationMode.Deg0);
-            UpdateToggle(_btn90,   r == RotationMode.Deg90);
-        }
+
 
         new void UpdateToggle(Button b, bool active)
         {
@@ -447,7 +771,7 @@ namespace METools.LampPlacer
             if (_cfg.Distribution == DistributionMode.AreaBased)
             {
                 double sqm = double.TryParse(_sqmTb?.Text, out double v) ? v : 12;
-                _infoTb.Text = $"→ auto grid based on room area ÷ {sqm} m²/lamp";
+                _infoTb.Text = S.Get("lamp.auto_grid").Replace("{0}", sqm.ToString());
             }
             else if (_cfg.Distribution == DistributionMode.ManualGrid)
             {
@@ -508,6 +832,94 @@ namespace METools.LampPlacer
             return result;
         }
 
+        // Prompt for a wall-mounted lamp's offset from host (mm). Null = cancel.
+        public double? ShowOffsetDialog(double defaultMm)
+        {
+            double? result = null;
+            var dlg = new Window
+            {
+                Title = "Offset from host",
+                Width = 320, SizeToContent = SizeToContent.Height,
+                ResizeMode = ResizeMode.NoResize, WindowStyle = WindowStyle.ToolWindow,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                Background = MeToolsTheme.BrSurface, Owner = this
+            };
+            var sp = new StackPanel { Margin = new Thickness(16) };
+            sp.Children.Add(new TextBlock { Text = "Wall-mounted lamp - offset from host (mm):",
+                Foreground = MeToolsTheme.BrText, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 8) });
+            var tb = Num(((int)Math.Round(defaultMm)).ToString()); tb.Width = 120;
+            sp.Children.Add(tb);
+            var row = new StackPanel { Orientation = Orientation.Horizontal,
+                HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 14, 0, 0) };
+            var ok = new Button { Content = "OK", Width = 72, Margin = new Thickness(0, 0, 6, 0),
+                IsDefault = true, Background = MeToolsTheme.BrPetrol, Foreground = Brushes.White,
+                BorderBrush = MeToolsTheme.BrPetrol, Padding = new Thickness(0, 4, 0, 4) };
+            var cancel = new Button { Content = "Cancel", Width = 72, IsCancel = true,
+                Background = MeToolsTheme.BrInput, Foreground = MeToolsTheme.BrText,
+                BorderBrush = MeToolsTheme.BrBorder, Padding = new Thickness(0, 4, 0, 4) };
+            ok.Click += (s, e) =>
+            {
+                if (double.TryParse(tb.Text, out double v)) { result = v; dlg.DialogResult = true; }
+                else { tb.Focus(); tb.SelectAll(); }
+            };
+            row.Children.Add(ok); row.Children.Add(cancel);
+            sp.Children.Add(row);
+            dlg.Content = sp;
+            dlg.Loaded += (s, e) => { tb.Focus(); tb.SelectAll(); };
+            dlg.ShowDialog();
+            return result;
+        }
+
+        // Modal preset chooser. Returns chosen preset name, "" = no preset / use selected family, null = cancel.
+        public string ShowPresetChooser()
+        {
+            var presets = LampPresetStore.All();
+            if (presets.Count == 0) return "";    // no presets saved yet -> use selected family
+
+            string result = null;
+            var dlg = new Window
+            {
+                Title  = "Choose room preset",
+                Width  = 340, SizeToContent = SizeToContent.Height,
+                ResizeMode = ResizeMode.NoResize, WindowStyle = WindowStyle.ToolWindow,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                Background = MeToolsTheme.BrSurface, Owner = this,
+            };
+            var sp = new StackPanel { Margin = new Thickness(16) };
+            sp.Children.Add(new TextBlock
+            {
+                Text = "Select a preset to apply, or choose \"No preset\" to place the selected family only.",
+                Foreground = MeToolsTheme.BrText, TextWrapping = TextWrapping.Wrap,
+                Margin = new Thickness(0, 0, 0, 10),
+            });
+            var cmb = METools.MeToolsWindowBase.StyledCombo(28, 12);
+            cmb.Items.Add(new ComboBoxItem { Content = "-- No preset (use selected family) --", Tag = "" });
+            foreach (var p in presets)
+                cmb.Items.Add(new ComboBoxItem { Content = p.Name, Tag = p.Name });
+            cmb.SelectedIndex = presets.Count > 0 ? 1 : 0;
+            sp.Children.Add(cmb);
+            var row = new StackPanel { Orientation = Orientation.Horizontal,
+                HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 14, 0, 0) };
+            var placeBtn = new Button
+            {
+                Content = "Place", Width = 80, IsDefault = true, Margin = new Thickness(0, 0, 6, 0),
+                Background = MeToolsTheme.BrPetrol, Foreground = Brushes.White,
+                BorderBrush = MeToolsTheme.BrPetrol, Padding = new Thickness(0, 4, 0, 4),
+            };
+            var cancelBtn = new Button
+            {
+                Content = "Cancel", Width = 80, IsCancel = true,
+                Background = MeToolsTheme.BrInput, Foreground = MeToolsTheme.BrText,
+                BorderBrush = MeToolsTheme.BrBorder, Padding = new Thickness(0, 4, 0, 4),
+            };
+            placeBtn.Click += (s, e) => { result = (cmb.SelectedItem as ComboBoxItem)?.Tag as string ?? ""; dlg.DialogResult = true; };
+            row.Children.Add(placeBtn); row.Children.Add(cancelBtn);
+            sp.Children.Add(row);
+            dlg.Content = sp;
+            dlg.ShowDialog();
+            return result;   // null if cancelled
+        }
+
         void DoMainAction()
         {
             if (_cfg.Distribution == DistributionMode.Line)            DoPlace(LampAction.PlaceLine);
@@ -515,11 +927,11 @@ namespace METools.LampPlacer
             else                                                       DoPlace(LampAction.PlaceSingle);
         }
 
-        void DoPlace(LampAction action)
+        void SyncConfig()
         {
-            _cfg.WallMargin  = double.TryParse(_wallTb.Text,        out double w)  ? w  : 1500;
-            _cfg.OverlapThreshold = double.TryParse(_overlapTb.Text, out double og) ? og : 300;
-            _cfg.UKDOffset   = double.TryParse(_offsetTb.Text,      out double o)  ? o  : 0;
+            _cfg.WallMargin      = 500;   // fixed: half a module from wall
+            _cfg.OverlapThreshold = 300;   // fixed: min gap to existing fixture
+            _cfg.UKDOffset   = 0;   // fixed at zero (directly at UKD)
             _cfg.SqmPerLamp  = double.TryParse(_sqmTb?.Text,        out double s)  ? s  : 12;
             _cfg.ManualRows  = int.TryParse(_rowsTb?.Text,          out int r)     ? r  : 2;
             _cfg.ManualCols  = int.TryParse(_colsTb?.Text,          out int c)     ? c  : 2;
@@ -530,6 +942,40 @@ namespace METools.LampPlacer
             // Reference level (fallback) aktuell aus der Combo
             _cfg.FallbackLevelId = (_lvlCmb?.SelectedItem as ComboBoxItem)?.Tag as ElementId
                                     ?? ElementId.InvalidElementId;
+        }
+
+        void SetDimMode(DimensionMode m)
+        {
+            _cfg.Dimensions = m;
+            UpdateToggle(_btnDimNone,   m == DimensionMode.None);
+            UpdateToggle(_btnDimAuto,   m == DimensionMode.Auto);
+            UpdateToggle(_btnDimCustom, m == DimensionMode.Custom);
+        }
+
+        void SetWaiting(bool waiting)
+        {
+            if (_mainBtn == null) return;
+            if (waiting)
+            {
+                _mainBtn.Content   = "... Waiting for guide line selection";
+                _mainBtn.IsEnabled = false;
+                if (StatusLeft != null) StatusLeft.Text = "Select guide line(s) in Revit, then click Finish (green check).";
+            }
+            else
+            {
+                _mainBtn.IsEnabled = true;
+                if (_cfg.Distribution == DistributionMode.Line)
+                    _mainBtn.Content = "Place Along Line";
+                else if (_cfg.Distribution == DistributionMode.ManualGrid)
+                    _mainBtn.Content = "Place Grid";
+                else
+                    _mainBtn.Content = S.Get("lamp.place_in_room");
+            }
+        }
+
+        void DoPlace(LampAction action)
+        {
+            SyncConfig();
 
             ElementId symId = ElementId.InvalidElementId;
             if (action != LampAction.Redistribute)

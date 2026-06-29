@@ -63,6 +63,7 @@ namespace METools.LampPlacer
             {
                 BuiltInCategory.OST_LightingFixtures,
                 BuiltInCategory.OST_LightingDevices,
+                BuiltInCategory.OST_FireAlarmDevices,
             };
 
             foreach (var cat in cats)
@@ -74,6 +75,7 @@ namespace METools.LampPlacer
                         .OfCategory(cat)
                         .Cast<FamilySymbol>();
 
+                    string group = cat == BuiltInCategory.OST_FireAlarmDevices ? "Fire Alarm" : "Lighting";
                     foreach (var sym in symbols)
                         result.Add(new LampFamilyInfo
                         {
@@ -81,6 +83,7 @@ namespace METools.LampPlacer
                             TypeName   = sym.Name ?? "Default",
                             SymbolId   = sym.Id,
                             Placement  = sym.Family?.FamilyPlacementType ?? FamilyPlacementType.Invalid,
+                            Group      = group,
                         });
                 }
                 catch { }
