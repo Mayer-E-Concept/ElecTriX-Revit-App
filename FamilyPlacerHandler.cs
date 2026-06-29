@@ -156,9 +156,17 @@ namespace METools.FamilyPlacer
                     {
                         var slot  = slots[i];
                         var symId = FamilyLoader.FindSymbolId(AllFamilies, slot.FamilyName, slot.TypeName);
-                        if (symId == ElementId.InvalidElementId) continue;
+                        if (symId == ElementId.InvalidElementId)
+                        {
+                            OnStatus?.Invoke($"Slot {i+1}: family '{slot.FamilyName}' not found -- skipped.");
+                            continue;
+                        }
                         var sym = doc.GetElement(symId) as FamilySymbol;
                         if (sym == null) continue;
+
+                        // Activate symbol if needed (inside the transaction is fine)
+                        if (!sym.IsActive)
+                            try { sym.Activate(); doc.Regenerate(); } catch { }
 
                         XYZ placePt = Request.Orientation == "Horizontal"
                             ? pt + walkDir * UnitUtils.ConvertToInternalUnits(i * frameWidthMm, UnitTypeId.Millimeters)

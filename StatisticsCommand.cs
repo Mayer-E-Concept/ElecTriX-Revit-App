@@ -12,10 +12,11 @@ namespace METools
     // One counted category row.
     public class StatRow
     {
-        public string Section;     // grouping, e.g. "Electrical"
-        public string Label;       // display name
-        public int    Count;       // element count
-        public bool   Highlight;   // shown as a big tile at the top
+        public string Section;
+        public string Label;
+        public int    Count;
+        public bool   Highlight;
+        public double LengthM;  // total metres for Cable & Containment rows (0 = use Count)
 
         public StatRow(string section, string label, int count, bool highlight = false)
         {
@@ -23,6 +24,14 @@ namespace METools
             Label     = label;
             Count     = count;
             Highlight = highlight;
+        }
+
+        // Constructor for length-based rows
+        public StatRow(string section, string label, double lengthM)
+        {
+            Section = section;
+            Label   = label;
+            LengthM = lengthM;
         }
     }
 
@@ -37,6 +46,28 @@ namespace METools
                     .OfCategory(cat)
                     .WhereElementIsNotElementType()
                     .GetElementCount();
+            }
+            catch { return 0; }
+        }
+
+        // Sum CURVE_ELEM_LENGTH in metres for a category (run lengths only, no fittings)
+        private static double SumLengthM(Document doc, BuiltInCategory cat)
+        {
+            try
+            {
+                double totalFt = 0;
+                foreach (var el in new FilteredElementCollector(doc)
+                    .OfCategory(cat).WhereElementIsNotElementType().ToElements())
+                {
+                    try
+                    {
+                        var p = el.get_Parameter(BuiltInParameter.CURVE_ELEM_LENGTH);
+                        if (p != null && p.HasValue && p.StorageType == StorageType.Double)
+                            totalFt += p.AsDouble();
+                    }
+                    catch { }
+                }
+                return UnitUtils.ConvertFromInternalUnits(totalFt, UnitTypeId.Meters);
             }
             catch { return 0; }
         }
@@ -138,10 +169,10 @@ namespace METools
             r.Add(new StatRow("Electrical", "Nurse Call Devices",          Cnt(doc, BuiltInCategory.OST_NurseCallDevices)));
             r.Add(new StatRow("Electrical", "Telephone Devices",           Cnt(doc, BuiltInCategory.OST_TelephoneDevices)));
 
-            // Cable & containment
-            r.Add(new StatRow("Cable & Containment", "Cable Trays",         Cnt(doc, BuiltInCategory.OST_CableTray)));
+            // Cable & containment -- trays and conduits show total length in metres
+            r.Add(new StatRow("Cable & Containment", "Cable Trays",         SumLengthM(doc, BuiltInCategory.OST_CableTray)));
             r.Add(new StatRow("Cable & Containment", "Cable Tray Fittings", Cnt(doc, BuiltInCategory.OST_CableTrayFitting)));
-            r.Add(new StatRow("Cable & Containment", "Conduits",            Cnt(doc, BuiltInCategory.OST_Conduit)));
+            r.Add(new StatRow("Cable & Containment", "Conduits",            SumLengthM(doc, BuiltInCategory.OST_Conduit)));
             r.Add(new StatRow("Cable & Containment", "Conduit Fittings",    Cnt(doc, BuiltInCategory.OST_ConduitFitting)));
             r.Add(new StatRow("Cable & Containment", "Wires",               Cnt(doc, BuiltInCategory.OST_Wire)));
 

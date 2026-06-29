@@ -10,6 +10,7 @@ namespace METools
 {
     public class FixLevelWindow : MeToolsWindowBase
     {
+        protected override string AppKey => "FixLevel";
         private readonly ExternalEvent   _ev;
         private readonly FixLevelHandler _h;
         private readonly string          _activeLevel;

@@ -205,12 +205,12 @@ namespace METools.FamilyPlacer
             hdr.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(4) });    // 5 gap
             hdr.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(40) });   // 6 off X
             hdr.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(3) });    // 7 gap
-            hdr.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(40) });   // 8 off Y
+            hdr.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(75) });   // 8 off Y + Y=Frame
             hdr.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(6) });    // 9 gap
             hdr.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(28) });   // 10 gear
             hdr.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(4) });    // 11 gap
             hdr.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(28) });   // 12 del
-            AddHdr(hdr, "Family", 2); AddHdr(hdr, "Niveau", 4); AddHdr(hdr, "Off X", 6); AddHdr(hdr, "Off Y", 8);
+            AddHdr(hdr, "Family", 2); AddHdr(hdr, "Niveau", 4); AddHdr(hdr, "Off X", 6); AddHdr(hdr, "Off Y / Y=Frame", 8);
             body.Children.Add(hdr);
 
             _slotPanel = new StackPanel { Margin = new Thickness(0, 0, 0, 6) };
@@ -268,8 +268,104 @@ namespace METools.FamilyPlacer
         }
 
         // ─────────────────────────────────────────────────────────────────────
-        // SLOT MANAGEMENT
+        // DRAG REORDER
         // ─────────────────────────────────────────────────────────────────────
+        private SlotRow              _dragRow;
+        private System.Windows.Point _dragStart;
+        private bool                 _dragging;
+        private Border    _dragPlaceholder;
+
+        private void StartDrag(SlotRow row, MouseButtonEventArgs e)
+        {
+            _dragRow   = row;
+            _dragStart = e.GetPosition(_slotPanel);
+            _dragging  = false;
+
+            _slotPanel.MouseMove  += OnDragMove;
+            _slotPanel.MouseLeave += OnDragEnd;
+            Mouse.Capture(row.Handle);
+            row.Handle.MouseLeftButtonUp += OnDragDrop;
+        }
+
+        private void OnDragMove(object sender, MouseEventArgs e)
+        {
+            if (_dragRow == null) return;
+            var pos = e.GetPosition(_slotPanel);
+
+            // Highlight target slot based on Y position
+            int targetIdx = GetDropIndex(pos.Y);
+            int currentIdx = _rows.IndexOf(_dragRow);
+            if (targetIdx == currentIdx) return;
+
+            _dragging = true;
+            // Visual: dim dragged row
+            _dragRow.Container.Opacity = 0.5;
+
+            // Highlight target slot
+            for (int i = 0; i < _rows.Count; i++)
+                _rows[i].Container.BorderBrush = i == targetIdx
+                    ? MeToolsTheme.BrPetrol
+                    : MeToolsTheme.BrBorder;
+        }
+
+        private void OnDragDrop(object sender, MouseButtonEventArgs e)
+        {
+            OnDragEnd(null, null);
+            if (_dragRow == null) return;
+
+            var pos = e.GetPosition(_slotPanel);
+            int targetIdx  = GetDropIndex(pos.Y);
+            int currentIdx = _rows.IndexOf(_dragRow);
+
+            if (targetIdx != currentIdx && targetIdx >= 0 && targetIdx < _rows.Count)
+            {
+                _rows.Remove(_dragRow);
+                _rows.Insert(targetIdx, _dragRow);
+
+                _slotPanel.Children.Clear();
+                foreach (var r in _rows) _slotPanel.Children.Add(r.Container);
+
+                // Recalculate indices and offsets
+                for (int i = 0; i < _rows.Count; i++)
+                {
+                    _rows[i].SetIndex(i + 1);
+                    _rows[i].SetOffsetY(i);
+                }
+                RecalculateOffsetY();
+                UpdateCount();
+            }
+
+            _dragRow = null;
+        }
+
+        private void OnDragEnd(object sender, EventArgs e)
+        {
+            _slotPanel.MouseMove  -= OnDragMove;
+            _slotPanel.MouseLeave -= OnDragEnd;
+
+            if (_dragRow != null)
+            {
+                _dragRow.Handle.MouseLeftButtonUp -= OnDragDrop;
+                _dragRow.Container.Opacity = 1.0;
+                _dragRow = null;
+            }
+            Mouse.Capture(null);
+
+            // Reset border highlights
+            foreach (var r in _rows) r.Container.BorderBrush = MeToolsTheme.BrBorder;
+        }
+
+        private int GetDropIndex(double y)
+        {
+            double cumY = 0;
+            for (int i = 0; i < _rows.Count; i++)
+            {
+                double h = _rows[i].Container.ActualHeight + 4; // 4 = margin
+                if (y < cumY + h * 0.5) return i;
+                cumY += h;
+            }
+            return _rows.Count - 1;
+        }
         private void AddInitialSlot() => AddSlot();
 
         private void AddSlot(FamilySlot data = null)
@@ -278,6 +374,11 @@ namespace METools.FamilyPlacer
             row.OnRemove       = () => RemoveSlot(row);
             row.OnChanged      = UpdateCount;
             row.OnHeightChanged = () => RecalculateOffsetY();
+
+            // Wire drag-reorder: hold and drag the ⠿ handle to move slot up/down
+            row.Container.Tag = row;
+            row.Handle.PreviewMouseLeftButtonDown += (s, e) => StartDrag(row, e);
+
             _rows.Add(row);
             _slotPanel.Children.Add(row.Container);
 
@@ -286,17 +387,21 @@ namespace METools.FamilyPlacer
             {
                 int newIndex = _rows.Count - 1; // 0-based position of the new slot
 
-                // 2D offset (OffsetX): always = position index (0, 1, 2, ...)
-                row.SetOffsetX(newIndex);
+                // 2D stacking offset (OffsetY = 2DY_Versatzfaktor):
+                // Each new slot gets the next index so they stack vertically in plan view
+                row.SetOffsetY(newIndex);
 
-                // 3D offset (OffsetY): collision detection
-                // Count how many existing slots (excluding this one) share the same Height
+                // 3D vertical offset (3DZ_Niveau_Versatzfaktor via ParamOverrides):
+                // When a new slot has the same Height as existing slots, add offset in 3D
+                // so they don't physically collide in the model.
+                // First at this height = 0, second = -1, third = -2, ...
                 double newHeight = row.Slot.Height;
                 int collisions = _rows
                     .Take(_rows.Count - 1) // all slots before this one
                     .Count(r => Math.Abs(r.Slot.Height - newHeight) < 0.5);
-                // First at this height = 0, second = -1, third = -2, ...
-                row.SetOffsetY(-collisions);
+
+                if (collisions > 0)
+                    row.Slot.ParamOverrides["3DZ_Niveau_Versatzfaktor"] = (-collisions).ToString();
             }
 
             UpdateCount();
@@ -310,7 +415,7 @@ namespace METools.FamilyPlacer
             for (int i = 0; i < _rows.Count; i++)
             {
                 _rows[i].SetIndex(i + 1);
-                _rows[i].SetOffsetX(i); // 2D offset = position index
+                _rows[i].SetOffsetY(i); // 2D stacking offset = position index
             }
             RecalculateOffsetY();
             UpdateCount();
@@ -322,19 +427,23 @@ namespace METools.FamilyPlacer
             _statusCount.Text = $"{valid} famil{(valid != 1 ? "ies" : "y")} configured";
         }
 
-        // Recalculate OffsetY for all slots based on height collisions.
+        // Recalculate 3DZ_Niveau_Versatzfaktor for all slots based on height collisions.
         // Called when any slot's height changes.
-        // Groups slots by height, then assigns OffsetY: 0, -1, -2, ... within each group.
+        // Groups slots by height, assigns 3DZ: 0, -1, -2, ... within each group.
         private void RecalculateOffsetY()
         {
-            // Track how many slots at each height we've seen so far
             var heightCount = new Dictionary<double, int>();
             foreach (var row in _rows)
             {
                 double h = Math.Round(row.Slot.Height, 0);
                 if (!heightCount.ContainsKey(h)) heightCount[h] = 0;
                 int count = heightCount[h];
-                row.SetOffsetY(-count);
+
+                if (count == 0)
+                    row.Slot.ParamOverrides.Remove("3DZ_Niveau_Versatzfaktor");
+                else
+                    row.Slot.ParamOverrides["3DZ_Niveau_Versatzfaktor"] = (-count).ToString();
+
                 heightCount[h]++;
             }
         }
@@ -702,7 +811,8 @@ namespace METools.FamilyPlacer
     {
         public Action OnRemove;
         public Action OnChanged;
-        public Action OnHeightChanged; // fired when height changes -- window recalculates OffsetY
+        public Action OnHeightChanged;
+        public TextBlock Handle { get; private set; } // the ⠿ drag handle
 
         public Border    Container { get; }
         public FamilySlot Slot    { get; } = new FamilySlot();
@@ -787,21 +897,21 @@ namespace METools.FamilyPlacer
             g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(4) });    // 5 gap
             g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(40) });   // 6 off X
             g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(3) });    // 7 gap
-            g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(40) });   // 8 off Y
+            g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(75) });   // 8 off Y + Y=Frame (wider)
             g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(6) });    // 9 gap
             g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(28) });   // 10 gear
             g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(4) });    // 11 gap
             g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(28) });   // 12 del
 
             // Drag handle
-            var handle = new TextBlock
+            Handle = new TextBlock
             {
                 Text = "\u283F", FontSize = 13,
                 Foreground = new SolidColorBrush(Color.FromRgb(0xa8, 0xb4, 0xbb)),
                 VerticalAlignment = VerticalAlignment.Center,
                 Cursor = Cursors.SizeNS,
             };
-            Grid.SetColumn(handle, 0); g.Children.Add(handle);
+            Grid.SetColumn(Handle, 0); g.Children.Add(Handle);
 
             // Index badge
             _idxBadge = new TextBlock
@@ -939,18 +1049,23 @@ namespace METools.FamilyPlacer
             _offYTxt.TextChanged += OffsetYChanged;
             oySp.Children.Add(_offYTxt);
 
-            // Y = Frame checkbox -- moved out of gear popup, shown inline below Off Y
-            bool yFrameDef = false;
-            bool yFrameCur = Slot.ParamOverrides.TryGetValue("Y_Versatz_gleich_Rahmen", out var yFrameOv) ? yFrameOv == "1" : yFrameDef;
+            // Y = Frame checkbox -- default ON (ticked), full text visible
+            bool yFrameDef = true; // default: Y offset follows frame
+            bool yFrameCur = Slot.ParamOverrides.TryGetValue("Y_Versatz_gleich_Rahmen", out var yFrameOv)
+                ? yFrameOv == "1"
+                : yFrameDef;
             var yFrameCb = new CheckBox
             {
-                Content   = "=Frame",
+                Content   = "Y=Frame",
                 IsChecked = yFrameCur,
                 FontSize  = 9,
-                Foreground = METools.MeToolsTheme.BrMuted,
+                Foreground = METools.MeToolsTheme.BrPetrol,
                 Margin    = new Thickness(0, 2, 0, 0),
-                ToolTip   = "Y Offset = Frame (Y_Versatz_gleich_Rahmen)",
+                ToolTip   = "Y Offset = Frame (Y_Versatz_gleich_Rahmen): aligns element to the frame edge",
             };
+            // Set the default in ParamOverrides if not already set
+            if (!Slot.ParamOverrides.ContainsKey("Y_Versatz_gleich_Rahmen") && yFrameDef)
+                Slot.ParamOverrides["Y_Versatz_gleich_Rahmen"] = "1";
             yFrameCb.Checked   += (s, e) => { Slot.ParamOverrides["Y_Versatz_gleich_Rahmen"] = "1"; UpdateGearDot(); OnChanged?.Invoke(); };
             yFrameCb.Unchecked += (s, e) => { Slot.ParamOverrides.Remove("Y_Versatz_gleich_Rahmen"); UpdateGearDot(); OnChanged?.Invoke(); };
             oySp.Children.Add(yFrameCb);

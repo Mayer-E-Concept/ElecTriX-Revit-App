@@ -138,10 +138,17 @@ namespace METools
 
             foreach (var sec in _sections.Where(s => s != "Per floor"))
             {
-                var rows = _rows.Where(x => x.Section == sec && x.Count > 0).ToList();
+                bool isCable = sec == "Cable & Containment";
+                var rows = _rows.Where(x => x.Section == sec && (isCable ? (x.LengthM > 0 || x.Count > 0) : x.Count > 0)).ToList();
                 if (rows.Count == 0) continue;
                 _body.Children.Add(SectionHeader(TrSection(sec)));
-                foreach (var row in rows) _body.Children.Add(StatLine(TrLabel(row.Label), row.Count));
+                foreach (var row in rows)
+                {
+                    if (isCable && row.LengthM > 0)
+                        _body.Children.Add(StatLineLength(TrLabel(row.Label), row.LengthM));
+                    else
+                        _body.Children.Add(StatLine(TrLabel(row.Label), row.Count));
+                }
             }
 
             // Buttons
@@ -224,20 +231,29 @@ namespace METools
             var g = new Grid { Margin = new Thickness(0, 2, 0, 2) };
             g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            var l = new TextBlock
-            {
-                Text = label, FontSize = 12, Foreground = MeToolsTheme.BrText,
-                VerticalAlignment = VerticalAlignment.Center,
-            };
+            var l = new TextBlock { Text = label, FontSize = 12, Foreground = MeToolsTheme.BrText, VerticalAlignment = VerticalAlignment.Center };
+            var c = new TextBlock { Text = count.ToString(), FontSize = 12, FontWeight = FontWeights.Bold, Foreground = MeToolsTheme.BrText, VerticalAlignment = VerticalAlignment.Center };
+            Grid.SetColumn(l, 0); Grid.SetColumn(c, 1);
+            g.Children.Add(l); g.Children.Add(c);
+            return g;
+        }
+
+        // For Cable & Containment: show total length in meters instead of count
+        private Grid StatLineLength(string label, double lengthM)
+        {
+            var g = new Grid { Margin = new Thickness(0, 2, 0, 2) };
+            g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            var l = new TextBlock { Text = label, FontSize = 12, Foreground = MeToolsTheme.BrText, VerticalAlignment = VerticalAlignment.Center };
+            // Format: e.g. "123.4 m"
             var c = new TextBlock
             {
-                Text = count.ToString(), FontSize = 12, FontWeight = FontWeights.Bold,
-                Foreground = MeToolsTheme.BrText, VerticalAlignment = VerticalAlignment.Center,
+                Text = $"{lengthM:F1} m",
+                FontSize = 12, FontWeight = FontWeights.Bold,
+                Foreground = MeToolsTheme.BrPetrol, VerticalAlignment = VerticalAlignment.Center,
             };
-            Grid.SetColumn(l, 0);
-            Grid.SetColumn(c, 1);
-            g.Children.Add(l);
-            g.Children.Add(c);
+            Grid.SetColumn(l, 0); Grid.SetColumn(c, 1);
+            g.Children.Add(l); g.Children.Add(c);
             return g;
         }
 
@@ -272,9 +288,15 @@ namespace METools
                     "statistics_" + safe + "_" + DateTime.Now.ToString("yyyyMMdd_HHmmss") + ".csv");
 
                 var sb = new StringBuilder();
-                sb.AppendLine("Section,Category,Count");
-                foreach (var row in _rows.Where(x => x.Section != "Highlights" && x.Count > 0))
-                    sb.AppendLine(Csv(row.Section) + "," + Csv(row.Label) + "," + row.Count);
+                sb.AppendLine("Section,Category,Value,Unit");
+                foreach (var row in _rows.Where(x => x.Section != "Highlights" && (x.Count > 0 || x.LengthM > 0)))
+                {
+                    string val  = row.Section == "Cable & Containment" && row.LengthM > 0
+                        ? row.LengthM.ToString("F1", System.Globalization.CultureInfo.InvariantCulture)
+                        : row.Count.ToString();
+                    string unit = row.Section == "Cable & Containment" && row.LengthM > 0 ? "m" : "count";
+                    sb.AppendLine(Csv(row.Section) + "," + Csv(row.Label) + "," + val + "," + unit);
+                }
 
                 File.WriteAllText(path, sb.ToString(), new UTF8Encoding(true));
                 StatusLeft.Text = "Exported: Documents\\METools\\" + System.IO.Path.GetFileName(path);

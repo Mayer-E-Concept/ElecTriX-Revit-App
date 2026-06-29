@@ -51,7 +51,6 @@ namespace METools
 
         // ── Worksets controls ─────────────────────────────────────────────
         private ListBox _lbWorksets;
-        private ListBox _lbProjectWorksets;
         private TextBox _tbNewWorkset;
 
         private static string WorksetsConfigPath =>
@@ -61,13 +60,7 @@ namespace METools
 
         public SettingsWindow()
         {
-            S.SetLanguage(SettingsStore.Language ?? "en");
-            InitWindow(S.Get("settings.title"), width: 500, isDialog: false);
-            // Fix to explicit height so it doesn't grow off-screen on tall tabs (Worksets)
-            Height        = 680;
-            MaxHeight     = 820;
-            MinHeight     = 480;
-            SizeToContent = System.Windows.SizeToContent.Manual;
+            InitWindow("Settings", width: 500, isDialog: false);
             BuildStatusBar(LicenseManager.StatusText, AppVersion);
             BuildContent();
         }
@@ -78,19 +71,7 @@ namespace METools
         private void BuildContent()
         {
             _contentRoot = new StackPanel();
-
-            // Wrap everything below the tab bar in a scroll viewer so tall
-            // tabs (Worksets) don't push the window off-screen.
-            var scroll = new ScrollViewer
-            {
-                VerticalScrollBarVisibility   = ScrollBarVisibility.Auto,
-                HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
-            };
-            scroll.Content = _contentRoot;
-            var _swGrid = new System.Windows.Controls.Grid();
-            _swGrid.Children.Add(scroll);
-            _swGrid.Children.Add(Watermark());
-            RootDock.Children.Add(_swGrid);
+            RootDock.Children.Add(_contentRoot);
             PopulateContent();
         }
 
@@ -132,11 +113,11 @@ namespace METools
             for (int i = 0; i < 5; i++)
                 bar.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
-            _tabAppearance = MakeTabBtn(S.Get("settings.tab.appearance"), 0);
-            _tabLanguage   = MakeTabBtn(S.Get("settings.tab.language"), 1);
-            _tabLicense    = MakeTabBtn(S.Get("settings.tab.license"), 2);
-            _tabWorksets   = MakeTabBtn(S.Get("settings.tab.worksets"), 3);
-            _tabHeights    = MakeTabBtn(S.Get("settings.tab.heights"), 4);
+            _tabAppearance = MakeTabBtn("Appearance", 0);
+            _tabLanguage   = MakeTabBtn("Language",   1);
+            _tabLicense    = MakeTabBtn("License",    2);
+            _tabWorksets   = MakeTabBtn("Worksets",   3);
+            _tabHeights    = MakeTabBtn("Heights",    4);
 
             Grid.SetColumn(_tabAppearance, 0);
             Grid.SetColumn(_tabLanguage,   1);
@@ -184,7 +165,7 @@ namespace METools
             StyleTabBtn(_tabWorksets,   idx == 3);
             StyleTabBtn(_tabHeights,    idx == 4);
 
-            if (idx == 3) { LoadWorksetsIntoList(); LoadProjectWorksets(); }
+            if (idx == 3) LoadWorksetsIntoList();
             if (idx == 4) LoadHeightsIntoList();
         }
 
@@ -200,12 +181,12 @@ namespace METools
         private StackPanel BuildAppearancePanel()
         {
             var p = new StackPanel();
-            p.Children.Add(Sec(S.Get("settings.appearance.theme_label")));
-            p.Children.Add(InfoBox(S.Get("settings.appearance.theme_hint")));
+            p.Children.Add(Sec("Theme"));
+            p.Children.Add(InfoBox("Switch between dark and light mode for all ME-Tools windows simultaneously."));
 
             var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 4, 0, 20) };
-            _btnDark  = ToggleBtn(S.Get("settings.appearance.dark"),  MeToolsTheme.Current == MeTheme.Dark,  () => ApplyTheme(MeTheme.Dark));
-            _btnLight = ToggleBtn(S.Get("settings.appearance.light"), MeToolsTheme.Current == MeTheme.Light, () => ApplyTheme(MeTheme.Light));
+            _btnDark  = ToggleBtn("Dark Mode",  MeToolsTheme.Current == MeTheme.Dark,  () => ApplyTheme(MeTheme.Dark));
+            _btnLight = ToggleBtn("Light Mode", MeToolsTheme.Current == MeTheme.Light, () => ApplyTheme(MeTheme.Light));
             _btnDark.Width  = 150;
             _btnLight.Width = 150;
             _btnLight.Margin = new Thickness(10, 0, 0, 0);
@@ -228,27 +209,19 @@ namespace METools
         private StackPanel BuildLanguagePanel()
         {
             var p = new StackPanel { Visibility = Visibility.Collapsed };
-            p.Children.Add(Sec(S.Get("settings.language.title")));
-            p.Children.Add(InfoBox("Select the display language for all ME-Tools windows."));
+            p.Children.Add(Sec("Language / Sprache"));
+            p.Children.Add(InfoBox("Set the display language for ME-Tools.\nFull localisation will be implemented in a future update."));
 
             var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 4, 0, 20), VerticalAlignment = VerticalAlignment.Center };
-            row.Children.Add(new TextBlock { Text = S.Get("settings.language.label"), FontSize = 12, Foreground = MeToolsTheme.BrText, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 12, 0) });
+            row.Children.Add(new TextBlock { Text = "Language:", FontSize = 12, Foreground = MeToolsTheme.BrText, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 12, 0) });
             _cbLanguage = StyledCombo(30, 12); _cbLanguage.Width = 180;
-            _cbLanguage.Items.Add("English");
-            _cbLanguage.Items.Add("Deutsch");
-            _cbLanguage.Items.Add("Romanian");
-            var savedLang = SettingsStore.Language ?? "en";
-            _cbLanguage.SelectedItem = savedLang == "de" ? "Deutsch" : savedLang == "ro" ? "Romanian" : "English";
+            _cbLanguage.Items.Add("English"); _cbLanguage.Items.Add("Deutsch");
+            _cbLanguage.SelectedItem = SettingsStore.Language == "de" ? "Deutsch" : "English";
             _cbLanguage.SelectionChanged += (s, e) =>
-            {
-                var sel = _cbLanguage.SelectedItem?.ToString();
-                string code = sel == "Deutsch" ? "de" : sel == "Romanian" ? "ro" : "en";
-                SettingsStore.Language = code;
-                S.SetLanguage(code);
-            };
+                SettingsStore.Language = _cbLanguage.SelectedItem?.ToString() == "Deutsch" ? "de" : "en";
             row.Children.Add(_cbLanguage);
             p.Children.Add(row);
-            p.Children.Add(new TextBlock { Text = S.Get("settings.language.restart"), FontSize = 10, Foreground = MeToolsTheme.BrMuted, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 8) });
+            p.Children.Add(new TextBlock { Text = "Language change takes effect after restarting Revit.", FontSize = 10, Foreground = MeToolsTheme.BrMuted, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 8) });
             return p;
         }
 
@@ -256,10 +229,10 @@ namespace METools
         private StackPanel BuildLicensePanel()
         {
             var p = new StackPanel { Visibility = Visibility.Collapsed };
-            p.Children.Add(Sec(S.Get("settings.license.title")));
+            p.Children.Add(Sec("License Status"));
             p.Children.Add(BuildStatusBadge());
             p.Children.Add(new Border { Height = 16 });
-            p.Children.Add(Sec(S.Get("settings.license.key")));
+            p.Children.Add(Sec("Activation Key"));
             p.Children.Add(new TextBlock { Text = "Enter your license key (format: METL-XXXX-XXXX-XXXX):", FontSize = 11, Foreground = MeToolsTheme.BrMuted, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 8) });
 
             var keyRow = new Grid { Margin = new Thickness(0, 0, 0, 10) };
@@ -276,19 +249,62 @@ namespace METools
                 VerticalContentAlignment = VerticalAlignment.Center, CharacterCasing = CharacterCasing.Upper,
             };
             _tbKey.TextChanged += (s, e) => UpdateActivateButton();
-            _btnActivate = FooterBtn(S.Get("settings.license.activate"), primary: true, onClick: OnActivate);
+            _btnActivate = FooterBtn("Activate", primary: true, onClick: OnActivate);
             _btnActivate.Height = 34; _btnActivate.Padding = new Thickness(16, 0, 16, 0);
             Grid.SetColumn(_tbKey, 0); Grid.SetColumn(_btnActivate, 2);
             keyRow.Children.Add(_tbKey); keyRow.Children.Add(_btnActivate);
             p.Children.Add(keyRow);
 
-            _btnDeactivate = FooterBtn(S.Get("settings.license.remove"), primary: false, onClick: OnDeactivate);
+            _btnDeactivate = FooterBtn("Remove Key", primary: false, onClick: OnDeactivate);
             _btnDeactivate.Margin = new Thickness(0, 0, 0, 16);
             _btnDeactivate.Visibility = LicenseManager.IsLicensed() ? Visibility.Visible : Visibility.Collapsed;
             p.Children.Add(_btnDeactivate);
 
+            // -- Machine ID section ─────────────────────────────────────────
+            p.Children.Add(new Border { Height = 1, Background = MeToolsTheme.BrBorder, Margin = new Thickness(0, 16, 0, 16) });
+            p.Children.Add(new TextBlock
+            {
+                Text = "MACHINE ID", FontSize = 10, FontWeight = FontWeights.SemiBold,
+                Foreground = MeToolsTheme.BrMuted, Margin = new Thickness(0, 0, 0, 6),
+            });
+            p.Children.Add(new TextBlock
+            {
+                Text = "Send this ID when requesting a license. It is unique to this computer.",
+                FontSize = 10, Foreground = MeToolsTheme.BrMuted, TextWrapping = TextWrapping.Wrap,
+                Margin = new Thickness(0, 0, 0, 8),
+            });
+            var machineIdRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 8) };
+            var machineIdTb = new TextBox
+            {
+                Text            = LicenseManager.GetMachineId(),
+                IsReadOnly      = true,
+                FontFamily      = new FontFamily("Consolas"),
+                FontSize        = 14,
+                FontWeight      = FontWeights.Bold,
+                Background      = MeToolsTheme.BrSurface,
+                Foreground      = MeToolsTheme.BrPetrol,
+                BorderBrush     = MeToolsTheme.BrBorder,
+                BorderThickness = new Thickness(1),
+                Padding         = new Thickness(10, 6, 10, 6),
+                MinWidth        = 180,
+                VerticalContentAlignment = VerticalAlignment.Center,
+            };
+            var copyBtn = FooterBtn("Copy", false, () =>
+            {
+                try
+                {
+                    System.Windows.Clipboard.SetText(machineIdTb.Text);
+                    MessageBox.Show("Machine ID copied to clipboard.", "Copied", MessageBoxButton.OK, MessageBoxImage.Information);
+                }
+                catch { }
+            });
+            copyBtn.Height = 34; copyBtn.Margin = new Thickness(8, 0, 0, 0);
+            machineIdRow.Children.Add(machineIdTb);
+            machineIdRow.Children.Add(copyBtn);
+            p.Children.Add(machineIdRow);
+
             var contactRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 6, 0, 0) };
-            contactRow.Children.Add(new TextBlock { Text = S.Get("settings.license.need"), FontSize = 10, Foreground = MeToolsTheme.BrMuted, VerticalAlignment = VerticalAlignment.Center });
+            contactRow.Children.Add(new TextBlock { Text = "Need a license?  Contact: ", FontSize = 10, Foreground = MeToolsTheme.BrMuted, VerticalAlignment = VerticalAlignment.Center });
             var mailLink = new TextBlock { Text = "office@mayer-econcept.ro", FontSize = 10, Foreground = MeToolsTheme.BrPetrol, Cursor = Cursors.Hand, TextDecorations = TextDecorations.Underline, VerticalAlignment = VerticalAlignment.Center };
             mailLink.MouseLeftButtonDown += (s, e) => { try { System.Diagnostics.Process.Start("mailto:office@mayer-econcept.ro"); } catch { } };
             contactRow.Children.Add(mailLink);
@@ -347,7 +363,7 @@ namespace METools
         private StackPanel BuildWorksetsPanel()
         {
             var p = new StackPanel { Visibility = Visibility.Collapsed };
-            p.Children.Add(Sec(S.Get("settings.worksets.title")));
+            p.Children.Add(Sec("Standard Worksets"));
             p.Children.Add(InfoBox("Define which worksets are created in workshared projects.\nEdit the list and click Save. Changes take effect immediately."));
 
             // List
@@ -382,8 +398,8 @@ namespace METools
 
             // Edit buttons
             var editRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 16) };
-            var btnRemove = FooterBtn(S.Get("settings.worksets.remove"), primary: false, onClick: OnRemoveWorkset);
-            var btnSave   = FooterBtn(S.Get("settings.worksets.save"),       primary: true,  onClick: OnSaveWorksets);
+            var btnRemove = FooterBtn("Remove Selected", primary: false, onClick: OnRemoveWorkset);
+            var btnSave   = FooterBtn("Save List",       primary: true,  onClick: OnSaveWorksets);
             btnRemove.Margin = new Thickness(0, 0, 8, 0);
             editRow.Children.Add(btnRemove); editRow.Children.Add(btnSave);
             p.Children.Add(editRow);
@@ -392,24 +408,9 @@ namespace METools
             p.Children.Add(new Separator { Margin = new Thickness(0, 0, 0, 16), Background = MeToolsTheme.BrBorder });
             p.Children.Add(Sec("Apply to Current Project"));
             p.Children.Add(InfoBox("Creates all worksets from the list above in the active Revit project.\nExisting worksets are skipped automatically. Worksharing must be active."));
-            var btnApply = ActionBtn(S.Get("settings.worksets.create_btn"), true, OnApplyWorksets);
+            var btnApply = ActionBtn("Create Standard Worksets in Project", true, OnApplyWorksets);
             btnApply.Margin = new Thickness(0, 8, 0, 0);
             p.Children.Add(btnApply);
-
-            // ── Project worksets (read-only view of what exists in the model) ──
-            p.Children.Add(new Separator { Margin = new Thickness(0, 16, 0, 16), Background = MeToolsTheme.BrBorder });
-            p.Children.Add(Sec(S.Get("settings.worksets.project")));
-            p.Children.Add(InfoBox(S.Get("settings.worksets.project_hint")));
-
-            _lbProjectWorksets = new ListBox
-            {
-                Height = 140, Margin = new Thickness(0, 8, 0, 0),
-                Background = MeToolsTheme.BrInput, Foreground = MeToolsTheme.BrText,
-                BorderBrush = MeToolsTheme.BrBorder, BorderThickness = new Thickness(1),
-                FontSize = 11, Padding = new Thickness(2),
-                IsEnabled = false,
-            };
-            p.Children.Add(_lbProjectWorksets);
 
             return p;
         }
@@ -432,34 +433,6 @@ namespace METools
                 }
             }
             catch { }
-        }
-
-        private void LoadProjectWorksets()
-        {
-            if (_lbProjectWorksets == null) return;
-            _lbProjectWorksets.Items.Clear();
-            try
-            {
-                var doc = SettingsCommand.CurrentDocument;
-                if (doc == null || !doc.IsWorkshared)
-                {
-                    _lbProjectWorksets.Items.Add("(no workshared project open)");
-                    return;
-                }
-                var worksets = new Autodesk.Revit.DB.FilteredWorksetCollector(doc)
-                    .OfKind(Autodesk.Revit.DB.WorksetKind.UserWorkset)
-                    .ToWorksets()
-                    .OrderBy(w => w.Name)
-                    .ToList();
-                if (worksets.Count == 0)
-                { _lbProjectWorksets.Items.Add("(no user worksets found)"); return; }
-                foreach (var w in worksets)
-                    _lbProjectWorksets.Items.Add(w.Name);
-            }
-            catch (Exception ex)
-            {
-                _lbProjectWorksets.Items.Add("Error: " + ex.Message);
-            }
         }
 
         private void OnAddWorkset()
@@ -555,7 +528,7 @@ namespace METools
             _heightRows.Clear();
 
             var p = new StackPanel { Visibility = Visibility.Collapsed };
-            p.Children.Add(Sec(S.Get("settings.heights.title")));
+            p.Children.Add(Sec("Default Mounting Heights"));
             p.Children.Add(InfoBox(
                 "Per-family default height (Niveau, in mm) used by Family Placer.\n" +
                 "Values are read from each family; edit a value to override it.\n" +
@@ -572,8 +545,8 @@ namespace METools
             p.Children.Add(scroll);
 
             var btnRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 8, 0, 0) };
-            var btnRescan = FooterBtn(S.Get("settings.heights.rescan"), primary: false, onClick: () => { _heightsLoaded = false; LoadHeightsIntoList(); });
-            var btnSave   = FooterBtn(S.Get("settings.heights.save"), primary: true, onClick: OnSaveHeights);
+            var btnRescan = FooterBtn("Rescan", primary: false, onClick: () => { _heightsLoaded = false; LoadHeightsIntoList(); });
+            var btnSave   = FooterBtn("Save Overrides", primary: true, onClick: OnSaveHeights);
             btnRescan.Margin = new Thickness(0, 0, 8, 0);
             btnRow.Children.Add(btnRescan);
             btnRow.Children.Add(btnSave);
