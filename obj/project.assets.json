@@ -13,11 +13,11 @@
   "project": {
     "version": "1.0.0",
     "restore": {
-      "projectUniqueName": "X:\\02_sabloane\\01_Revit\\11_Revit_AddOn\\METools.csproj",
+      "projectUniqueName": "X:\\02_sabloane\\01_Revit\\ElecTriX-Revit-App\\METools.csproj",
       "projectName": "METools",
-      "projectPath": "X:\\02_sabloane\\01_Revit\\11_Revit_AddOn\\METools.csproj",
+      "projectPath": "X:\\02_sabloane\\01_Revit\\ElecTriX-Revit-App\\METools.csproj",
       "packagesPath": "C:\\Users\\StefanPicu\\.nuget\\packages\\",
-      "outputPath": "X:\\02_sabloane\\01_Revit\\11_Revit_AddOn\\obj\\",
+      "outputPath": "X:\\02_sabloane\\01_Revit\\ElecTriX-Revit-App\\obj\\",
       "projectStyle": "PackageReference",
       "configFilePaths": [
         "C:\\Users\\StefanPicu\\AppData\\Roaming\\NuGet\\NuGet.Config"

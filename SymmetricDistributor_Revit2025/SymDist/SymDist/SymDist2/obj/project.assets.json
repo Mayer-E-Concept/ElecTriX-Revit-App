@@ -13,11 +13,11 @@
   "project": {
     "version": "1.0.0",
     "restore": {
-      "projectUniqueName": "X:\\02_sabloane\\01_Revit\\11_Revit_AddOn\\SymmetricDistributor_Revit2025\\SymDist\\SymDist\\SymDist2\\SymmetricDistributor.csproj",
+      "projectUniqueName": "X:\\02_sabloane\\01_Revit\\ElecTriX-Revit-App\\SymmetricDistributor_Revit2025\\SymDist\\SymDist\\SymDist2\\SymmetricDistributor.csproj",
       "projectName": "SymmetricDistributor",
-      "projectPath": "X:\\02_sabloane\\01_Revit\\11_Revit_AddOn\\SymmetricDistributor_Revit2025\\SymDist\\SymDist\\SymDist2\\SymmetricDistributor.csproj",
+      "projectPath": "X:\\02_sabloane\\01_Revit\\ElecTriX-Revit-App\\SymmetricDistributor_Revit2025\\SymDist\\SymDist\\SymDist2\\SymmetricDistributor.csproj",
       "packagesPath": "C:\\Users\\StefanPicu\\.nuget\\packages\\",
-      "outputPath": "X:\\02_sabloane\\01_Revit\\11_Revit_AddOn\\SymmetricDistributor_Revit2025\\SymDist\\SymDist\\SymDist2\\obj\\",
+      "outputPath": "X:\\02_sabloane\\01_Revit\\ElecTriX-Revit-App\\SymmetricDistributor_Revit2025\\SymDist\\SymDist\\SymDist2\\obj\\",
       "projectStyle": "PackageReference",
       "configFilePaths": [
         "C:\\Users\\StefanPicu\\AppData\\Roaming\\NuGet\\NuGet.Config"

@@ -14,6 +14,7 @@ namespace METools.FamilyPlacer
         public double OffsetYMm  { get; set; } = 0.0;
         public double StackGapMm { get; set; } = 8.0;
 
+
         // Secondary label -- Graphics
         public string SubLabelFontName      { get; set; } = "Arial Narrow";
         public double SubLabelFontSizeMm    { get; set; } = 2.0;
