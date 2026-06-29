@@ -8,6 +8,10 @@ obj/
 *.suo
 .vs/
 
+# .exe app file
+installer_output/
+*.exe
+
 # Installer output
 installer_output/
 
