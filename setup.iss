@@ -12,7 +12,7 @@
 #define Publisher   "Mayer E-Concept SRL"
 
 ; --- adjust these absolute paths to your machine if they differ ---------------
-#define ProjectDir  "X:\02_sabloane\01_Revit\11_Revit_AddOn"
+#define ProjectDir "X:\02_sabloane\01_Revit\ElecTriX-Revit-App"
 #define DllPath     ProjectDir + "\bin\Release\net8.0-windows\METools.dll"
 #define AddinPath   ProjectDir + "\METools_2025.addin"
 #define OutDir      ProjectDir + "\installer_output"
@@ -20,7 +20,7 @@
 
 [Setup]
 ; Keep this AppId STABLE across versions so upgrades replace cleanly. Do not change it.
-AppId={{B3F2C9A4-7E61-4D8B-9C0A-2F5E1A6D4B77}
+AppId={{B3F2C9A4-7E61-4D8B-9C0A-2F5E1A6D4B77}}
 AppName={#AppName}
 AppVersion={#AppVersion}
 AppPublisher={#Publisher}

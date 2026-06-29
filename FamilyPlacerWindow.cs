@@ -68,7 +68,6 @@ namespace METools.FamilyPlacer
             _extEvent        = extEvent;
             _handler         = handler;
             _allFamilies     = families;
-            TemplateManager.SeedDefaults();   // seeds factory defaults if user has none
             _templates       = TemplateManager.Load();
             _levels          = levels;
             _selectedLevelId = defaultLevelId;
@@ -80,8 +79,7 @@ namespace METools.FamilyPlacer
             _handler.OnPlaced = n  => Dispatcher.Invoke(UpdateCount);
 
             // Window setup
-            S.SetLanguage(SettingsStore.Language ?? "en");
-            InitWindow(S.Get("placer.title"), 520);
+            InitWindow("Family Placer", 520);
             BuildUI();
             AddInitialSlot();
         }
@@ -98,7 +96,7 @@ namespace METools.FamilyPlacer
 
             // Titelleiste von MeToolsWindowBase
 
-            BuildStatusBar("0 " + S.Get("placer.families_configured"), S.Get("revit_ver"));
+            BuildStatusBar("0 families configured", "Revit 2025");
             _statusCount = StatusLeft;
             _statusTxt   = StatusRight;
 
@@ -140,7 +138,7 @@ namespace METools.FamilyPlacer
             RootDock.Children.Add(scroll);
 
             // Template section
-            body.Children.Add(SectionLabel(S.Get("placer.template")));
+            body.Children.Add(SectionLabel("Template"));
             var tplRow = new Grid { Margin = new Thickness(0, 0, 0, 12) };
             tplRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             tplRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -165,22 +163,22 @@ namespace METools.FamilyPlacer
             body.Children.Add(tplRow);
 
             // Orientation section
-            body.Children.Add(SectionLabel(S.Get("placer.arrangement")));
+            body.Children.Add(SectionLabel("Arrangement"));
             var oriRow = new StackPanel
             {
                 Orientation = Orientation.Horizontal,
                 Margin      = new Thickness(0, 0, 0, 12)
             };
 
-            _btnOri1 = MakeOriBtn(S.Get("placer.stacked"),     "Vertical",    true);
-            _btnOri2 = MakeOriBtn(S.Get("placer.side_by_side"), "Horizontal",  false);
+            _btnOri1 = MakeOriBtn("↕  Stacked",     "Vertical",    true);
+            _btnOri2 = MakeOriBtn("↔  Side by Side", "Horizontal",  false);
             _btnOri1.Margin = new Thickness(0, 0, 5, 0);
             oriRow.Children.Add(_btnOri1);
             oriRow.Children.Add(_btnOri2);
             body.Children.Add(oriRow);
 
             // ── Level — always visible, sets workplane for placement ──────────
-            body.Children.Add(SectionLabel(S.Get("placer.level")));
+            body.Children.Add(SectionLabel("Level"));
             _levelCombo = StyledCombo(30, 12); _levelCombo.Margin = new Thickness(0, 0, 0, 14);
             foreach (var lv in _levels)
                 _levelCombo.Items.Add($"{lv.Name}  ({lv.Elevation:F2} m)");
@@ -212,7 +210,7 @@ namespace METools.FamilyPlacer
             hdr.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(28) });   // 10 gear
             hdr.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(4) });    // 11 gap
             hdr.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(28) });   // 12 del
-            AddHdr(hdr, S.Get("placer.famille"), 2); AddHdr(hdr, S.Get("placer.niveau"), 4); AddHdr(hdr, S.Get("placer.off_x"), 6); AddHdr(hdr, S.Get("placer.off_y"), 8);
+            AddHdr(hdr, "Family", 2); AddHdr(hdr, "Niveau", 4); AddHdr(hdr, "Off X", 6); AddHdr(hdr, "Off Y", 8);
             body.Children.Add(hdr);
 
             _slotPanel = new StackPanel { Margin = new Thickness(0, 0, 0, 6) };
@@ -221,7 +219,7 @@ namespace METools.FamilyPlacer
             // Add slot button
             var btnAdd = new Button
             {
-                Content             = S.Get("placer.add_slot"),
+                Content             = "+ Add Slot",
                 Height              = 30,
                 FontSize            = 12,
                 Background          = Brushes.Transparent,
@@ -247,7 +245,10 @@ namespace METools.FamilyPlacer
             body.Children.Add(new Separator { Margin = new Thickness(0, 0, 0, 10) });
 
             // Info box (same style as Lamp Placer)
-            body.Children.Add(InfoBox(S.Get("placer.help")));
+            body.Children.Add(InfoBox(
+                "Place: position the family (SPACEBAR rotates, click a wall face to host) and click once - it finishes after that one drop. "
+                + "Multi-Place: same, but click several positions and press ESC to finish. "
+                + "Wall detection and free work plane are supported."));
 
             // Place buttons row
             var btnRow = new Grid();
@@ -255,10 +256,10 @@ namespace METools.FamilyPlacer
             btnRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(5) });
             btnRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1.4, GridUnitType.Star) });
 
-            var btnPlace = MakePlaceBtn(S.Get("placer.place"), false, PlaceSingle); btnPlace.Template = RoundBtnTemplate(btnPlace);
+            var btnPlace = MakePlaceBtn("▶  Place", false, PlaceSingle); btnPlace.Template = RoundBtnTemplate(btnPlace);
             Grid.SetColumn(btnPlace, 0);
 
-            var btnMulti = MakePlaceBtn(S.Get("placer.multi_place"), true, PlaceMulti); btnMulti.Template = RoundBtnTemplate(btnMulti);
+            var btnMulti = MakePlaceBtn("⊕  Multi-Place", true, PlaceMulti); btnMulti.Template = RoundBtnTemplate(btnMulti);
             Grid.SetColumn(btnMulti, 2);
 
             btnRow.Children.Add(btnPlace);
@@ -274,10 +275,30 @@ namespace METools.FamilyPlacer
         private void AddSlot(FamilySlot data = null)
         {
             var row = new SlotRow(_allFamilies, data, _rows.Count + 1, RequestFamilyParams, RequestNiveauSample);
-            row.OnRemove  = () => RemoveSlot(row);
-            row.OnChanged = UpdateCount;
+            row.OnRemove       = () => RemoveSlot(row);
+            row.OnChanged      = UpdateCount;
+            row.OnHeightChanged = () => RecalculateOffsetY();
             _rows.Add(row);
             _slotPanel.Children.Add(row.Container);
+
+            // Auto-set offsets only when adding a blank slot (not loading from template)
+            if (data == null)
+            {
+                int newIndex = _rows.Count - 1; // 0-based position of the new slot
+
+                // 2D offset (OffsetX): always = position index (0, 1, 2, ...)
+                row.SetOffsetX(newIndex);
+
+                // 3D offset (OffsetY): collision detection
+                // Count how many existing slots (excluding this one) share the same Height
+                double newHeight = row.Slot.Height;
+                int collisions = _rows
+                    .Take(_rows.Count - 1) // all slots before this one
+                    .Count(r => Math.Abs(r.Slot.Height - newHeight) < 0.5);
+                // First at this height = 0, second = -1, third = -2, ...
+                row.SetOffsetY(-collisions);
+            }
+
             UpdateCount();
         }
 
@@ -285,9 +306,13 @@ namespace METools.FamilyPlacer
         {
             _rows.Remove(row);
             _slotPanel.Children.Remove(row.Container);
-            // Renumber
+            // Renumber and recalculate offsets
             for (int i = 0; i < _rows.Count; i++)
+            {
                 _rows[i].SetIndex(i + 1);
+                _rows[i].SetOffsetX(i); // 2D offset = position index
+            }
+            RecalculateOffsetY();
             UpdateCount();
         }
 
@@ -295,6 +320,23 @@ namespace METools.FamilyPlacer
         {
             int valid = _rows.Count(r => !string.IsNullOrEmpty(r.Slot.FamilyName));
             _statusCount.Text = $"{valid} famil{(valid != 1 ? "ies" : "y")} configured";
+        }
+
+        // Recalculate OffsetY for all slots based on height collisions.
+        // Called when any slot's height changes.
+        // Groups slots by height, then assigns OffsetY: 0, -1, -2, ... within each group.
+        private void RecalculateOffsetY()
+        {
+            // Track how many slots at each height we've seen so far
+            var heightCount = new Dictionary<double, int>();
+            foreach (var row in _rows)
+            {
+                double h = Math.Round(row.Slot.Height, 0);
+                if (!heightCount.ContainsKey(h)) heightCount[h] = 0;
+                int count = heightCount[h];
+                row.SetOffsetY(-count);
+                heightCount[h]++;
+            }
         }
 
         private void RequestFamilyParams(string fam, string type, Action<List<FamilyParamInfo>> cb)
@@ -374,7 +416,7 @@ namespace METools.FamilyPlacer
         private void RefreshTemplateCombo()
         {
             _tplCombo.Items.Clear();
-            _tplCombo.Items.Add(S.Get("placer.select_tpl"));
+            _tplCombo.Items.Add("— Select Template —");
             foreach (var t in _templates)
                 _tplCombo.Items.Add(t.Name);
             _tplCombo.SelectedIndex = 0;
@@ -660,6 +702,7 @@ namespace METools.FamilyPlacer
     {
         public Action OnRemove;
         public Action OnChanged;
+        public Action OnHeightChanged; // fired when height changes -- window recalculates OffsetY
 
         public Border    Container { get; }
         public FamilySlot Slot    { get; } = new FamilySlot();
@@ -706,6 +749,21 @@ namespace METools.FamilyPlacer
         {
             _index = i;
             if (_idxBadge != null) _idxBadge.Text = i.ToString();
+        }
+
+        // Called by FamilyPlacerWindow to update offset values and refresh UI
+        public void SetOffsetX(int val)
+        {
+            Slot.OffsetX = val;
+            if (_offXTxt != null && _offXTxt.Text != val.ToString())
+                _offXTxt.Text = val.ToString();
+        }
+
+        public void SetOffsetY(int val)
+        {
+            Slot.OffsetY = val;
+            if (_offYTxt != null && _offYTxt.Text != val.ToString())
+                _offYTxt.Text = val.ToString();
         }
 
         private Border BuildRow()
@@ -770,7 +828,7 @@ namespace METools.FamilyPlacer
             var famType = new StackPanel { Margin = new Thickness(4, 0, 0, 0) };
 
             _familyCmb = new ComboBox { Height = 24, FontSize = 11, Background = METools.MeToolsTheme.BrInput, Foreground = METools.MeToolsTheme.BrText, BorderBrush = METools.MeToolsTheme.BrBorder, BorderThickness = new Thickness(1) };
-            _familyCmb.Items.Add(new ComboBoxItem { Content = S.Get("placer.no_selection"), Tag = "" });
+            _familyCmb.Items.Add(new ComboBoxItem { Content = "-- No Selection --", Tag = "" });
 
             // Deduplicated: show each FamilyName once per CategoryGroup
             string lastGroup = null;
@@ -880,6 +938,22 @@ namespace METools.FamilyPlacer
             };
             _offYTxt.TextChanged += OffsetYChanged;
             oySp.Children.Add(_offYTxt);
+
+            // Y = Frame checkbox -- moved out of gear popup, shown inline below Off Y
+            bool yFrameDef = false;
+            bool yFrameCur = Slot.ParamOverrides.TryGetValue("Y_Versatz_gleich_Rahmen", out var yFrameOv) ? yFrameOv == "1" : yFrameDef;
+            var yFrameCb = new CheckBox
+            {
+                Content   = "=Frame",
+                IsChecked = yFrameCur,
+                FontSize  = 9,
+                Foreground = METools.MeToolsTheme.BrMuted,
+                Margin    = new Thickness(0, 2, 0, 0),
+                ToolTip   = "Y Offset = Frame (Y_Versatz_gleich_Rahmen)",
+            };
+            yFrameCb.Checked   += (s, e) => { Slot.ParamOverrides["Y_Versatz_gleich_Rahmen"] = "1"; UpdateGearDot(); OnChanged?.Invoke(); };
+            yFrameCb.Unchecked += (s, e) => { Slot.ParamOverrides.Remove("Y_Versatz_gleich_Rahmen"); UpdateGearDot(); OnChanged?.Invoke(); };
+            oySp.Children.Add(yFrameCb);
             Grid.SetColumn(oySp, 8); g.Children.Add(oySp);
 
             // Gear (per-family parameters) + override dot
@@ -956,7 +1030,7 @@ namespace METools.FamilyPlacer
 
             var header = new TextBlock
             {
-                Text       = S.Get("placer.family_params"),
+                Text       = "Family Parameters",
                 FontSize   = 11, FontWeight = FontWeights.Bold,
                 Foreground = MeToolsTheme.BrText,
                 Margin     = new Thickness(0, 0, 0, 6),
@@ -1005,12 +1079,12 @@ namespace METools.FamilyPlacer
             _paramFieldsPanel.Children.Clear();
             if (string.IsNullOrEmpty(Slot.FamilyName))
             {
-                _paramFieldsPanel.Children.Add(InfoLine(S.Get("placer.select_family")));
+                _paramFieldsPanel.Children.Add(InfoLine("Select a family first."));
                 _paramsBuiltKey = null;
                 return;
             }
 
-            _paramFieldsPanel.Children.Add(InfoLine(S.Get("placer.loading")));
+            _paramFieldsPanel.Children.Add(InfoLine("Loading..."));
             _requestParams?.Invoke(Slot.FamilyName, Slot.TypeName, infos =>
             {
                 _paramsBuiltKey = key;
@@ -1023,19 +1097,20 @@ namespace METools.FamilyPlacer
             _paramFieldsPanel.Children.Clear();
             if (infos == null || infos.Count == 0)
             {
-                _paramFieldsPanel.Children.Add(InfoLine(S.Get("placer.no_params")));
+                _paramFieldsPanel.Children.Add(InfoLine("No editable instance parameters."));
                 return;
             }
             int shown = 0;
             foreach (var p in infos)
             {
                 if (p.Inline) continue; // Niveau -> handled by the inline height field
+                if (p.Name == "Y_Versatz_gleich_Rahmen") continue; // handled inline below Off Y
                 if (p.Kind == "yesno") _paramFieldsPanel.Children.Add(BuildBoolField(p));
                 else                   _paramFieldsPanel.Children.Add(BuildNumField(p));
                 shown++;
             }
             if (shown == 0)
-                _paramFieldsPanel.Children.Add(InfoLine(S.Get("placer.no_params")));
+                _paramFieldsPanel.Children.Add(InfoLine("No editable instance parameters."));
             UpdateGearDot();
         }
 
@@ -1185,6 +1260,7 @@ namespace METools.FamilyPlacer
         private void HeightChanged(object s, TextChangedEventArgs e)
         {
             if (double.TryParse(_heightTxt.Text, out double h)) Slot.Height = h;
+            OnHeightChanged?.Invoke();
         }
 
         private void OffsetXChanged(object s, TextChangedEventArgs e)
@@ -1216,7 +1292,7 @@ namespace METools.FamilyPlacer
             var sp = new StackPanel { Margin = new Thickness(14) };
             sp.Children.Add(new TextBlock
             {
-                Text = S.Get("placer.tpl_name"), FontSize = 12,
+                Text = "Template name:", FontSize = 12,
                 Margin = new Thickness(0, 0, 0, 6)
             });
             var tb = new TextBox { Height = 28, FontSize = 12 };
