@@ -51,6 +51,7 @@ namespace METools
 
         // ── Worksets controls ─────────────────────────────────────────────
         private ListBox _lbWorksets;
+        private ListBox _lbCurrentWorksets;
         private TextBox _tbNewWorkset;
 
         private static string WorksetsConfigPath =>
@@ -165,7 +166,7 @@ namespace METools
             StyleTabBtn(_tabWorksets,   idx == 3);
             StyleTabBtn(_tabHeights,    idx == 4);
 
-            if (idx == 3) LoadWorksetsIntoList();
+            if (idx == 3) { LoadWorksetsIntoList(); LoadCurrentProjectWorksets(); }
             if (idx == 4) LoadHeightsIntoList();
         }
 
@@ -412,7 +413,71 @@ namespace METools
             btnApply.Margin = new Thickness(0, 8, 0, 0);
             p.Children.Add(btnApply);
 
+            // -- Current project's actual worksets (read-only, live from the open document) --
+            p.Children.Add(new Separator { Margin = new Thickness(0, 20, 0, 16), Background = MeToolsTheme.BrBorder });
+            var curHdrRow = new Grid { Margin = new Thickness(0, 0, 0, 6) };
+            curHdrRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            curHdrRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            var curHdrLbl = Sec("Worksets in Current Project");
+            Grid.SetColumn(curHdrLbl, 0); curHdrRow.Children.Add(curHdrLbl);
+            var btnRefreshCur = FooterBtn("Refresh", false, LoadCurrentProjectWorksets);
+            btnRefreshCur.Height = 26; btnRefreshCur.Padding = new Thickness(10, 0, 10, 0); btnRefreshCur.FontSize = 11;
+            Grid.SetColumn(btnRefreshCur, 1); curHdrRow.Children.Add(btnRefreshCur);
+            p.Children.Add(curHdrRow);
+
+            p.Children.Add(InfoBox("Shows the worksets that already exist in the currently open Revit project -- including ones not on your standard list. Read-only."));
+
+            _lbCurrentWorksets = new ListBox
+            {
+                Height = 140, Margin = new Thickness(0, 8, 0, 0),
+                Background = MeToolsTheme.BrInput, Foreground = MeToolsTheme.BrText,
+                BorderBrush = MeToolsTheme.BrBorder, BorderThickness = new Thickness(1),
+                FontSize = 12, Padding = new Thickness(2),
+                IsHitTestVisible = true, // allow scrolling; selection has no effect (read-only)
+            };
+            p.Children.Add(_lbCurrentWorksets);
+
             return p;
+        }
+
+        // Reads the ACTUAL worksets that exist in the currently open Revit document
+        // (not the saved standard-list template above). Read-only -- no transaction
+        // needed since this is a pure read of document metadata.
+        private void LoadCurrentProjectWorksets()
+        {
+            if (_lbCurrentWorksets == null) return;
+            _lbCurrentWorksets.Items.Clear();
+
+            var doc = SettingsCommand.CurrentDocument;
+            if (doc == null)
+            {
+                _lbCurrentWorksets.Items.Add("(no active document)");
+                return;
+            }
+            if (!doc.IsWorkshared)
+            {
+                _lbCurrentWorksets.Items.Add("(worksharing is not enabled in this project)");
+                return;
+            }
+
+            try
+            {
+                var worksets = new Autodesk.Revit.DB.FilteredWorksetCollector(doc)
+                    .OfKind(Autodesk.Revit.DB.WorksetKind.UserWorkset)
+                    .ToWorksets()
+                    .OrderBy(w => w.Name, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+
+                if (worksets.Count == 0)
+                    _lbCurrentWorksets.Items.Add("(no user worksets found)");
+                else
+                    foreach (var w in worksets)
+                        _lbCurrentWorksets.Items.Add(w.Name);
+            }
+            catch (Exception ex)
+            {
+                _lbCurrentWorksets.Items.Add("(error reading worksets: " + ex.Message + ")");
+            }
         }
 
         private void LoadWorksetsIntoList()

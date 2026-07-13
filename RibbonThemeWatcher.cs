@@ -95,9 +95,53 @@ namespace METools
             try
             {
                 var theme = Autodesk.Windows.ComponentManager.CurrentTheme;
-                bool isDark = theme.ToString().IndexOf("Dark", StringComparison.OrdinalIgnoreCase) >= 0;
-                LogDiag($"Theme detected: '{theme}' -> isDark={isDark}");
-                return isDark;
+                if (theme == null)
+                {
+                    LogDiag("Theme object is NULL -- defaulting to light icons");
+                    return false;
+                }
+
+                var type = theme.GetType();
+                LogDiag($"Theme runtime type: {type.FullName}");
+
+                // Dump every readable public property/field so we can see what's
+                // actually available (Name, DisplayName, a background Color, etc.)
+                // instead of guessing again.
+                foreach (var prop in type.GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance))
+                {
+                    try
+                    {
+                        var val = prop.GetValue(theme);
+                        LogDiag($"  prop {prop.Name} ({prop.PropertyType.Name}) = {val}");
+                    }
+                    catch (Exception ex) { LogDiag($"  prop {prop.Name}: <error reading: {ex.Message}>"); }
+                }
+                foreach (var fld in type.GetFields(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance))
+                {
+                    try
+                    {
+                        var val = fld.GetValue(theme);
+                        LogDiag($"  field {fld.Name} ({fld.FieldType.Name}) = {val}");
+                    }
+                    catch (Exception ex) { LogDiag($"  field {fld.Name}: <error reading: {ex.Message}>"); }
+                }
+
+                // Best-effort heuristics using whatever we find above. Try a "Name"
+                // or similar string property first; these usually say "Dark"/"Light"
+                // directly even when ToString() itself isn't overridden.
+                foreach (var propName in new[] { "Name", "DisplayName", "ThemeName", "Id" })
+                {
+                    var p = type.GetProperty(propName);
+                    if (p == null) continue;
+                    var val = p.GetValue(theme)?.ToString() ?? "";
+                    if (val.IndexOf("Dark", StringComparison.OrdinalIgnoreCase) >= 0)
+                    { LogDiag($"Matched dark via property '{propName}'='{val}'"); return true; }
+                    if (val.IndexOf("Light", StringComparison.OrdinalIgnoreCase) >= 0)
+                    { LogDiag($"Matched light via property '{propName}'='{val}'"); return false; }
+                }
+
+                LogDiag("No Name/DisplayName/ThemeName/Id match found -- defaulting to light icons. See property dump above.");
+                return false;
             }
             catch (Exception ex)
             {
