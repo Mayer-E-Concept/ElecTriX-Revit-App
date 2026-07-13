@@ -2,6 +2,7 @@
 // Mayer E-Concept SRL
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Media;
 
 using Grid       = System.Windows.Controls.Grid;
@@ -89,7 +90,7 @@ namespace METools
             // Contact info
             body.Children.Add(new Border
             {
-                Background      = new SolidColorBrush(Color.FromRgb(20, 35, 65)),
+                Background      = MeToolsTheme.BrInfoBox,
                 BorderBrush     = MeToolsTheme.BrBorder,
                 BorderThickness = new Thickness(1),
                 CornerRadius    = new CornerRadius(8),
@@ -137,8 +138,11 @@ namespace METools
                 Background        = MeToolsTheme.BrSurface,
                 Foreground        = MeToolsTheme.BrText,
                 BorderBrush       = MeToolsTheme.BrBorder,
+                BorderThickness   = new Thickness(1),
                 FontSize          = 12,
-                VerticalAlignment = VerticalAlignment.Center
+                VerticalAlignment = VerticalAlignment.Center,
+                Cursor            = Cursors.Hand,
+                Template          = RoundedBtnTemplate(),
             };
             copyBtn.Click += (s, e) =>
             {
@@ -193,13 +197,13 @@ namespace METools
         private Border BuildOptionCard(string title, string titleDe, string desc, bool highlight)
         {
             var accent = highlight
-                ? Color.FromRgb(74, 158, 255)
-                : Color.FromRgb(80, 160, 120);
+                ? MeToolsTheme.CAccent
+                : MeToolsTheme.CPetrol;
 
             var card = new Border
             {
-                Background      = new SolidColorBrush(Color.FromRgb(16, 28, 55)),
-                BorderBrush     = new SolidColorBrush(highlight ? accent : Color.FromRgb(30, 50, 90)),
+                Background      = MeToolsTheme.BrSurface,
+                BorderBrush     = new SolidColorBrush(highlight ? accent : MeToolsTheme.CBorder),
                 BorderThickness = new Thickness(highlight ? 2 : 1),
                 CornerRadius    = new CornerRadius(10),
                 Padding         = new Thickness(16, 14, 16, 14)
@@ -233,7 +237,7 @@ namespace METools
                 Text       = title,
                 FontSize   = 14,
                 FontWeight = FontWeights.SemiBold,
-                Foreground = new SolidColorBrush(Color.FromRgb(255, 255, 255)),
+                Foreground = MeToolsTheme.BrText,
                 Margin     = new Thickness(0, 0, 0, 2)
             });
 
@@ -249,7 +253,7 @@ namespace METools
             {
                 Text         = desc,
                 FontSize     = 11,
-                Foreground   = new SolidColorBrush(Color.FromRgb(140, 160, 200)),
+                Foreground   = MeToolsTheme.BrMuted,
                 TextWrapping = TextWrapping.Wrap
             });
 

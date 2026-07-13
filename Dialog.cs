@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Shapes;
 
@@ -42,15 +43,15 @@ namespace METools
             Width = 430; SizeToContent = SizeToContent.Height;
             ResizeMode = ResizeMode.NoResize;
             WindowStartupLocation = WindowStartupLocation.CenterScreen;
-            Background = new SolidColorBrush(Color.FromRgb(245, 245, 245));
+            Background = new SolidColorBrush(Color.FromRgb(240, 245, 245));
 
             var root = new StackPanel { Margin = new Thickness(12) };
             Content = root;
 
             // Banner
-            var bnr = new Border { Background = new SolidColorBrush(Color.FromRgb(232,244,253)), BorderBrush = new SolidColorBrush(Color.FromRgb(168,212,240)), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(4), Padding = new Thickness(10,6,10,6), Margin = new Thickness(0,0,0,8) };
+            var bnr = new Border { Background = new SolidColorBrush(Color.FromRgb(224, 240, 240)), BorderBrush = new SolidColorBrush(Color.FromRgb(150, 210, 205)), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(4), Padding = new Thickness(10,6,10,6), Margin = new Thickness(0,0,0,8) };
             var bnrSp = new StackPanel();
-            var bnrT = new TextBlock { FontWeight = FontWeights.SemiBold, FontSize = 12, Foreground = new SolidColorBrush(Color.FromRgb(24,95,165)) };
+            var bnrT = new TextBlock { FontWeight = FontWeights.SemiBold, FontSize = 12, Foreground = new SolidColorBrush(Color.FromRgb(15, 143, 135)) };
             var bnrD = new TextBlock { FontSize = 11, Foreground = new SolidColorBrush(Color.FromRgb(68,68,68)), Margin = new Thickness(0,2,0,0) };
             if (hasRoom && !string.IsNullOrEmpty(roomName)) { bnrT.Text = "Raum: " + roomName; bnrD.Text = $"B: {roomW:F1} m  ·  T: {roomD:F1} m"; }
             else { bnrT.Text = "Kein Raum erkannt"; bnrD.Text = "Abstände manuell einstellen"; }
@@ -93,8 +94,13 @@ namespace METools
 
             // Buttons
             var br = new StackPanel { Orientation=Orientation.Horizontal, HorizontalAlignment=HorizontalAlignment.Right, Margin=new Thickness(0,6,0,0) };
-            var bCan = new Button { Content="Abbrechen", Height=30, MinWidth=90, Margin=new Thickness(0,0,8,0), FontSize=12 };
-            var bOK  = new Button { Content="Verteilen", Height=30, MinWidth=90, FontSize=12, FontWeight=FontWeights.SemiBold, Background=new SolidColorBrush(Color.FromRgb(24,95,165)), Foreground=Brushes.White, IsDefault=true };
+            var bCan = new Button { Content="Abbrechen", Height=30, MinWidth=90, Margin=new Thickness(0,0,8,0), FontSize=12,
+                Background=MeToolsTheme.BrBtnBg, Foreground=MeToolsTheme.BrText,
+                BorderBrush=MeToolsTheme.BrBtnBorder, BorderThickness=new Thickness(1),
+                Cursor=Cursors.Hand, Template=MeToolsWindowBase.RoundedBtnTemplate() };
+            var bOK  = new Button { Content="Verteilen", Height=30, MinWidth=90, FontSize=12, FontWeight=FontWeights.SemiBold, Background=new SolidColorBrush(Color.FromRgb(15, 143, 135)), Foreground=Brushes.White, IsDefault=true,
+                BorderBrush=new SolidColorBrush(Color.FromRgb(15, 143, 135)), BorderThickness=new Thickness(1),
+                Cursor=Cursors.Hand, Template=MeToolsWindowBase.RoundedBtnTemplate() };
             bCan.Click += (_,__) => { DialogResult=false; Close(); };
             bOK.Click  += (_,__) =>
             {
@@ -145,8 +151,8 @@ namespace METools
             return g;
         }
         private GroupBox Grp(string h, UIElement c) => new GroupBox { Header=h, Content=c, Margin=new Thickness(0,0,0,8), Padding=new Thickness(10,6,10,8), FontSize=12, FontWeight=FontWeights.SemiBold };
-        private Border Bdg(string lbl, TextBlock v) { var sp=new StackPanel{Orientation=Orientation.Horizontal}; sp.Children.Add(new TextBlock{Text=lbl,FontSize=11,Foreground=new SolidColorBrush(Color.FromRgb(68,68,68))}); sp.Children.Add(v); return new Border{Background=new SolidColorBrush(Color.FromRgb(232,244,253)),CornerRadius=new CornerRadius(4),Padding=new Thickness(8,3,8,3),Margin=new Thickness(3,0,3,0),Child=sp}; }
-        private TextBlock Val() => new TextBlock { FontSize=11, Foreground=new SolidColorBrush(Color.FromRgb(24,95,165)), FontWeight=FontWeights.SemiBold };
+        private Border Bdg(string lbl, TextBlock v) { var sp=new StackPanel{Orientation=Orientation.Horizontal}; sp.Children.Add(new TextBlock{Text=lbl,FontSize=11,Foreground=new SolidColorBrush(Color.FromRgb(68,68,68))}); sp.Children.Add(v); return new Border{Background=new SolidColorBrush(Color.FromRgb(224, 240, 240)),CornerRadius=new CornerRadius(4),Padding=new Thickness(8,3,8,3),Margin=new Thickness(3,0,3,0),Child=sp}; }
+        private TextBlock Val() => new TextBlock { FontSize=11, Foreground=new SolidColorBrush(Color.FromRgb(15, 143, 135)), FontWeight=FontWeights.SemiBold };
 
         private int    R   => Math.Max(1,(int)(_sRows?.Value??2));
         private int    C   => Math.Max(1,(int)(_sCols?.Value??3));
@@ -171,7 +177,7 @@ namespace METools
                 if(_hasRoom && _roomW>0 && _roomD>0)
                 {
                     double rw=_roomW*sc, rd=_roomD*sc;
-                    var rect=new Rectangle{Width=Math.Max(rw,4),Height=Math.Max(rd,4),Stroke=new SolidColorBrush(Color.FromArgb(80,24,95,165)),StrokeThickness=1,Fill=new SolidColorBrush(Color.FromArgb(12,24,95,165)),StrokeDashArray=new DoubleCollection(new double[]{4,3})};
+                    var rect=new Rectangle{Width=Math.Max(rw,4),Height=Math.Max(rd,4),Stroke=new SolidColorBrush(Color.FromArgb(80,15, 143, 135)),StrokeThickness=1,Fill=new SolidColorBrush(Color.FromArgb(12,15, 143, 135)),StrokeDashArray=new DoubleCollection(new double[]{4,3})};
                     Canvas.SetLeft(rect,cx-rw/2); Canvas.SetTop(rect,cy-rd/2); _cv.Children.Add(rect);
                 }
                 for(int g2=-200;g2<=200;g2+=20)
@@ -182,11 +188,11 @@ namespace METools
                 foreach(var p in pts)
                 {
                     double px=cx+(p.X-mx2)*sc, py=cy+(p.Y-my2)*sc;
-                    var o=new Ellipse{Width=14,Height=14,Fill=new SolidColorBrush(Color.FromArgb(35,24,95,165)),Stroke=new SolidColorBrush(Color.FromArgb(100,12,68,124)),StrokeThickness=0.8};
+                    var o=new Ellipse{Width=14,Height=14,Fill=new SolidColorBrush(Color.FromArgb(35,15, 143, 135)),Stroke=new SolidColorBrush(Color.FromArgb(100,11, 111, 104)),StrokeThickness=0.8};
                     Canvas.SetLeft(o,px-7); Canvas.SetTop(o,py-7);
-                    var d=new Ellipse{Width=7,Height=7,Fill=new SolidColorBrush(Color.FromRgb(24,95,165))};
+                    var d=new Ellipse{Width=7,Height=7,Fill=new SolidColorBrush(Color.FromRgb(15, 143, 135))};
                     Canvas.SetLeft(d,px-3.5); Canvas.SetTop(d,py-3.5);
-                    var st=new Line{X1=px,Y1=py-3.5,X2=px,Y2=py-9,Stroke=new SolidColorBrush(Color.FromRgb(12,68,124)),StrokeThickness=1.2};
+                    var st=new Line{X1=px,Y1=py-3.5,X2=px,Y2=py-9,Stroke=new SolidColorBrush(Color.FromRgb(11, 111, 104)),StrokeThickness=1.2};
                     _cv.Children.Add(o); _cv.Children.Add(d); _cv.Children.Add(st);
                 }
                 if(_lTotal!=null) _lTotal.Text=pts.Count.ToString();

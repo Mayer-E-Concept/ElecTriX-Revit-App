@@ -99,6 +99,20 @@ namespace METools
             RibbonThemeWatcher.Register(flButton, "icon_fl_fix");
             panel.AddSeparator();
 
+            // -- Level Manager ------------------------------------------------
+            var lmBtn = new PushButtonData(
+                "LevelManager", "Level\nManager", dll,
+                "METools.LevelManager.LevelManagerCommand")
+            {
+                ToolTip         = "See every level in the project laid out like a section, grouped and sorted, and add new ones.",
+                LongDescription = $"Level Manager -- {VENDOR}\n\nShows all project levels stacked top-to-bottom by elevation, like a section.\n\n* Auto-groups levels by shared naming (e.g. UKD / FFB) -- no project-specific setup needed\n* Filter by group and by zone/house tag (e.g. H1, H2)\n* Compact (even spacing) or True Scale (proportional to elevation) display\n* Add a new level by name and elevation directly from the list",
+                Image           = LoadIcon("icon_lm_light_16.png") ?? LoadIcon("icon_fp_light_16.png"),
+                LargeImage      = LoadIcon("icon_lm_light_32.png") ?? LoadIcon("icon_fp_light_32.png"),
+            };
+            var lmButton = panel.AddItem(lmBtn) as PushButton;
+            RibbonThemeWatcher.Register(lmButton, "icon_lm");
+            panel.AddSeparator();
+
             // -- Circuit Tagger ---------------------------------------------
             var ctBtn = new PushButtonData(
                 "CircuitTagger", "Circuit\nTagger", dll,

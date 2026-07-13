@@ -23,6 +23,7 @@ namespace METools
         private Action      _themeHandler;
         private bool        _isDialog;
         private Border      _outerBorder;
+        private Border      _themeAccentLine;
 
         // Revit main window handle (set by commands) -> keeps windows above Revit.
         public static System.IntPtr RevitHandle = System.IntPtr.Zero;
@@ -40,12 +41,12 @@ namespace METools
             var _wa = System.Windows.SystemParameters.WorkArea;
             Left = _wa.Right - Width - 24;
             Top  = _wa.Top + 40;
-            Loaded += (s, e) =>
-            {
-                var wa = System.Windows.SystemParameters.WorkArea;
-                Left = wa.Right - ActualWidth - 24;
-                Top  = wa.Top + System.Math.Max(0, (wa.Height - ActualHeight) / 2);
-            };
+            // Keep the window fully on-screen both when it first opens AND whenever
+            // its rendered size changes afterwards (e.g. switching to a taller tab
+            // like Worksets, which used to grow the window down past the bottom of
+            // the screen because only Loaded repositioned it).
+            Loaded      += (s, e) => KeepInWorkArea();
+            SizeChanged += (s, e) => KeepInWorkArea();
             FontFamily            = new FontFamily("Segoe UI");
             FontSize              = 12;
 
@@ -79,6 +80,8 @@ namespace METools
             {
                 Background = new SolidColorBrush(MeToolsTheme.CPetrolDark);
                 _outerBorder.Background = MeToolsTheme.BrBg;
+                if (_themeAccentLine != null)
+                    _themeAccentLine.Background = MeToolsTheme.BrAccent;
                 if (StatusBarGrid != null)
                     StatusBarGrid.Background = MeToolsTheme.BrStatusBar;
                 OnThemeChanged();
@@ -103,6 +106,29 @@ namespace METools
                 }
                 catch { }
             }
+        }
+
+        // Keeps the window fully inside the current work area: re-anchored to the
+        // right edge horizontally, centered vertically if it fits, pinned to the
+        // top if it doesn't, and never allowed to hang off the bottom or top edge.
+        // Called on Loaded and on every SizeChanged, since SizeToContent means a
+        // tab switch can change ActualHeight well after the window was first shown.
+        private void KeepInWorkArea()
+        {
+            var wa = System.Windows.SystemParameters.WorkArea;
+            double w = ActualWidth  > 0 ? ActualWidth  : Width;
+            double h = ActualHeight;
+
+            double left = System.Math.Max(wa.Left, wa.Right - w - 24);
+
+            double top = (h > 0 && h < wa.Height)
+                ? wa.Top + System.Math.Max(0, (wa.Height - h) / 2)
+                : wa.Top;
+            if (h > 0) top = System.Math.Min(top, System.Math.Max(wa.Top, wa.Bottom - h));
+            top = System.Math.Max(top, wa.Top);
+
+            Left = left;
+            Top  = top;
         }
 
         // ?? Titelleiste (immer gleich für ALLE Fenster) ???????????????????
@@ -197,6 +223,13 @@ namespace METools
 
             DockPanel.SetDock(bar, Dock.Top);
             RootDock.Children.Add(bar);
+
+            // Thin accent underline - a small nod to the circuit-trace lines on
+            // the me-concept.ro site, present on every ME-Tools window.
+            var accentLine = new Border { Height = 2, Background = MeToolsTheme.BrAccent };
+            DockPanel.SetDock(accentLine, Dock.Top);
+            RootDock.Children.Add(accentLine);
+            _themeAccentLine = accentLine;
         }
 
         // ?? Schließen-Logik (für Dialog- und normale Fenster) ?????????????
@@ -354,12 +387,12 @@ namespace METools
             if (cb == null) return;
 
             bool dark   = MeToolsTheme.Current == MeTheme.Dark;
-            string bg   = dark ? "#FF282828" : "#FFFFFFFF";
-            string fg   = dark ? "#FFE8E8E8" : "#FF1E2528";
-            string bdr  = dark ? "#FF444444" : "#FFD0D5D9";
-            string hov  = dark ? "#FF0F3535" : "#FFE0F0F0";
-            string hfg  = dark ? "#FF5DCAA5" : "#FF0D3D3D";
-            string pbg  = dark ? "#FF2A2A2A" : "#FFFFFFFF";
+            string bg   = dark ? "#FF0D2626" : "#FFFFFFFF";
+            string fg   = dark ? "#FFE9F4F3" : "#FF1E2528";
+            string bdr  = dark ? "#FF244A49" : "#FFD0D5D9";
+            string hov  = dark ? "#FF0A3533" : "#FFE0F0F0";
+            string hfg  = dark ? "#FF54DBD3" : "#FF0D3D3D";
+            string pbg  = dark ? "#FF102B2B" : "#FFFFFFFF";
 
             string xaml = $@"
 <Style xmlns=""http://schemas.microsoft.com/winfx/2006/xaml/presentation""
@@ -503,7 +536,7 @@ namespace METools
             {
                 Content = label, Height = 30, MinWidth = 80, FontSize = 12,
                 Background  = active ? MeToolsTheme.BrActiveBg : MeToolsTheme.BrBtnBg,
-                BorderBrush = active ? MeToolsTheme.BrPetrol    : MeToolsTheme.BrBtnBorder,
+                BorderBrush = active ? MeToolsTheme.BrAccent    : MeToolsTheme.BrBtnBorder,
                 BorderThickness = new Thickness(1),
                 Foreground  = active ? MeToolsTheme.BrActiveFg  : MeToolsTheme.BrMuted,
                 Cursor = Cursors.Hand,
@@ -513,7 +546,7 @@ namespace METools
             return b;
         }
 
-        protected static System.Windows.Controls.ControlTemplate RoundedBtnTemplate()
+        public static System.Windows.Controls.ControlTemplate RoundedBtnTemplate()
         {
             var f = new System.Windows.FrameworkElementFactory(typeof(Border));
             f.SetBinding(Border.BackgroundProperty, new System.Windows.Data.Binding("Background")
@@ -538,7 +571,7 @@ namespace METools
         {
             if (b == null) return;
             b.Background  = active ? MeToolsTheme.BrActiveBg : MeToolsTheme.BrBtnBg;
-            b.BorderBrush = active ? MeToolsTheme.BrPetrol    : MeToolsTheme.BrBtnBorder;
+            b.BorderBrush = active ? MeToolsTheme.BrAccent    : MeToolsTheme.BrBtnBorder;
             b.Foreground  = active ? MeToolsTheme.BrActiveFg  : MeToolsTheme.BrMuted;
             if (b.Template == null) b.Template = RoundedBtnTemplate();
         }
@@ -546,13 +579,13 @@ namespace METools
         // Aktions-Button (Place / Multi-Place)
         protected Button ActionBtn(string label, bool outline, Action onClick)
         {
-            var bgNorm = outline ? MeToolsTheme.BrBtnBg       : MeToolsTheme.BrPetrol;
-            var bgHov  = outline ? MeToolsTheme.BrActiveBg    : MeToolsTheme.BrPetrolDark;
-            var fg     = outline ? (MeToolsTheme.Current == MeTheme.Dark ? Brushes.White : MeToolsTheme.BrPetrol) : Brushes.White;
+            var bgNorm = outline ? MeToolsTheme.BrBtnBg       : MeToolsTheme.BrAccent;
+            var bgHov  = outline ? MeToolsTheme.BrActiveBg    : MeToolsTheme.BrAccentHover;
+            var fg     = outline ? (MeToolsTheme.Current == MeTheme.Dark ? Brushes.White : MeToolsTheme.BrPetrol) : MeToolsTheme.BrOnAccent;
             var b = new Button
             {
                 Content = label, Height = 36, FontSize = 13, FontWeight = FontWeights.SemiBold,
-                Background = bgNorm, BorderBrush = MeToolsTheme.BrPetrol,
+                Background = bgNorm, BorderBrush = MeToolsTheme.BrAccent,
                 BorderThickness = new Thickness(1.5), Foreground = fg, Cursor = Cursors.Hand,
             };
             b.Template = RoundedBtnTemplate();
@@ -565,15 +598,15 @@ namespace METools
         // Footer-Button (Abbrechen / Speichern)
         protected Button FooterBtn(string label, bool primary, Action onClick)
         {
-            var bgNorm = primary ? MeToolsTheme.BrPetrol    : MeToolsTheme.BrBtnBg;
-            var bgHov  = primary ? MeToolsTheme.BrPetrolDark : MeToolsTheme.BrActiveBg;
-            var fg     = primary ? Brushes.White              : MeToolsTheme.BrText;
+            var bgNorm = primary ? MeToolsTheme.BrAccent      : MeToolsTheme.BrBtnBg;
+            var bgHov  = primary ? MeToolsTheme.BrAccentHover : MeToolsTheme.BrActiveBg;
+            var fg     = primary ? MeToolsTheme.BrOnAccent    : MeToolsTheme.BrText;
             var b = new Button
             {
                 Content = label, Height = 32, Padding = new Thickness(20, 0, 20, 0),
                 FontSize = 12, FontWeight = primary ? FontWeights.SemiBold : FontWeights.Normal,
                 Background = bgNorm,
-                BorderBrush = primary ? MeToolsTheme.BrPetrol : MeToolsTheme.BrBtnBorder,
+                BorderBrush = primary ? MeToolsTheme.BrAccent : MeToolsTheme.BrBtnBorder,
                 BorderThickness = new Thickness(1), Foreground = fg, Cursor = Cursors.Hand,
             };
             b.MouseEnter += (s, e) => b.Background = bgHov;

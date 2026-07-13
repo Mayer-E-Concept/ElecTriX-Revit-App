@@ -4,6 +4,7 @@ using Autodesk.Revit.UI;
 using System;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Media;
 
 namespace METools
@@ -108,7 +109,10 @@ namespace METools
                 Background = MeToolsTheme.BrSurface, Foreground = MeToolsTheme.BrText,
                 BorderBrush = MeToolsTheme.BrBorder, BorderThickness = new Thickness(1),
                 ToolTip = "Count how many elements would be moved without making any changes",
+                Cursor = Cursors.Hand, Template = RoundedBtnTemplate(),
             };
+            preview.MouseEnter += (s, e) => preview.Background = MeToolsTheme.BrActiveBg;
+            preview.MouseLeave += (s, e) => preview.Background = MeToolsTheme.BrSurface;
             preview.Click += (s, e) => RunFix(dryRun: true);
             btnRow.Children.Add(preview);
 
@@ -117,8 +121,11 @@ namespace METools
                 Content = S.Get("fixlevel.fix_btn"), Height = 34, FontSize = 13, FontWeight = FontWeights.SemiBold,
                 Padding = new Thickness(24, 0, 24, 0),
                 Background = MeToolsTheme.BrPetrol, Foreground = Brushes.White,
-                BorderThickness = new Thickness(0),
+                BorderBrush = MeToolsTheme.BrPetrol, BorderThickness = new Thickness(1),
+                Cursor = Cursors.Hand, Template = RoundedBtnTemplate(),
             };
+            run.MouseEnter += (s, e) => run.Background = MeToolsTheme.BrPetrolDark;
+            run.MouseLeave += (s, e) => run.Background = MeToolsTheme.BrPetrol;
             run.Click += (s, e) => RunFix(dryRun: false);
             btnRow.Children.Add(run);
             _body.Children.Add(btnRow);

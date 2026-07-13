@@ -450,17 +450,23 @@ namespace METools.LampPlacer
 
         Button MiniBtn(string text, bool primary, System.Action onClick)
         {
+            var bgN = primary ? MeToolsTheme.BrPetrol : MeToolsTheme.BrInput;
+            var bgH = primary ? MeToolsTheme.BrPetrolDark : MeToolsTheme.BrActiveBg;
             var b = new Button
             {
                 Content         = text,
                 Height          = 26,
                 FontSize        = 11,
                 Padding         = new Thickness(10, 0, 10, 0),
-                Background      = primary ? MeToolsTheme.BrPetrol : MeToolsTheme.BrInput,
+                Background      = bgN,
                 Foreground      = primary ? System.Windows.Media.Brushes.White : MeToolsTheme.BrText,
                 BorderBrush     = MeToolsTheme.BrBorder,
                 BorderThickness = new Thickness(1),
+                Cursor          = Cursors.Hand,
+                Template        = RoundedBtnTemplate(),
             };
+            b.MouseEnter += (s, e) => b.Background = bgH;
+            b.MouseLeave += (s, e) => b.Background = bgN;
             b.Click += (s, e) => onClick();
             return b;
         }
@@ -815,10 +821,12 @@ namespace METools.LampPlacer
                 HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 14, 0, 0) };
             var ok = new Button { Content = "OK", Width = 72, Margin = new Thickness(0, 0, 6, 0),
                 IsDefault = true, Background = MeToolsTheme.BrPetrol, Foreground = Brushes.White,
-                BorderBrush = MeToolsTheme.BrPetrol, Padding = new Thickness(0, 4, 0, 4) };
+                BorderBrush = MeToolsTheme.BrPetrol, Padding = new Thickness(0, 4, 0, 4),
+                Cursor = Cursors.Hand, Template = RoundedBtnTemplate() };
             var cancel = new Button { Content = "Cancel", Width = 72, IsCancel = true,
                 Background = MeToolsTheme.BrInput, Foreground = MeToolsTheme.BrText,
-                BorderBrush = MeToolsTheme.BrBorder, Padding = new Thickness(0, 4, 0, 4) };
+                BorderBrush = MeToolsTheme.BrBorder, Padding = new Thickness(0, 4, 0, 4),
+                Cursor = Cursors.Hand, Template = RoundedBtnTemplate() };
             ok.Click += (s, e) =>
             {
                 if (double.TryParse(tb.Text, out double v) && v > 0) { result = v; dlg.DialogResult = true; }
@@ -853,10 +861,12 @@ namespace METools.LampPlacer
                 HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 14, 0, 0) };
             var ok = new Button { Content = "OK", Width = 72, Margin = new Thickness(0, 0, 6, 0),
                 IsDefault = true, Background = MeToolsTheme.BrPetrol, Foreground = Brushes.White,
-                BorderBrush = MeToolsTheme.BrPetrol, Padding = new Thickness(0, 4, 0, 4) };
+                BorderBrush = MeToolsTheme.BrPetrol, Padding = new Thickness(0, 4, 0, 4),
+                Cursor = Cursors.Hand, Template = RoundedBtnTemplate() };
             var cancel = new Button { Content = "Cancel", Width = 72, IsCancel = true,
                 Background = MeToolsTheme.BrInput, Foreground = MeToolsTheme.BrText,
-                BorderBrush = MeToolsTheme.BrBorder, Padding = new Thickness(0, 4, 0, 4) };
+                BorderBrush = MeToolsTheme.BrBorder, Padding = new Thickness(0, 4, 0, 4),
+                Cursor = Cursors.Hand, Template = RoundedBtnTemplate() };
             ok.Click += (s, e) =>
             {
                 if (double.TryParse(tb.Text, out double v)) { result = v; dlg.DialogResult = true; }
@@ -905,12 +915,14 @@ namespace METools.LampPlacer
                 Content = "Place", Width = 80, IsDefault = true, Margin = new Thickness(0, 0, 6, 0),
                 Background = MeToolsTheme.BrPetrol, Foreground = Brushes.White,
                 BorderBrush = MeToolsTheme.BrPetrol, Padding = new Thickness(0, 4, 0, 4),
+                Cursor = Cursors.Hand, Template = RoundedBtnTemplate(),
             };
             var cancelBtn = new Button
             {
                 Content = "Cancel", Width = 80, IsCancel = true,
                 Background = MeToolsTheme.BrInput, Foreground = MeToolsTheme.BrText,
                 BorderBrush = MeToolsTheme.BrBorder, Padding = new Thickness(0, 4, 0, 4),
+                Cursor = Cursors.Hand, Template = RoundedBtnTemplate(),
             };
             placeBtn.Click += (s, e) => { result = (cmb.SelectedItem as ComboBoxItem)?.Tag as string ?? ""; dlg.DialogResult = true; };
             row.Children.Add(placeBtn); row.Children.Add(cancelBtn);

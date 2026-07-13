@@ -9,6 +9,7 @@ using System.Text;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
+using System.Windows.Input;
 using System.Windows.Media;
 
 namespace METools
@@ -264,17 +265,23 @@ namespace METools
 
         private Button MiniBtn(string text, bool primary, Action onClick)
         {
+            var bgN = primary ? MeToolsTheme.BrPetrol : MeToolsTheme.BrInput;
+            var bgH = primary ? MeToolsTheme.BrPetrolDark : MeToolsTheme.BrActiveBg;
             var b = new Button
             {
                 Content         = text,
                 Height          = 28,
                 FontSize        = 12,
                 Padding         = new Thickness(14, 0, 14, 0),
-                Background      = primary ? MeToolsTheme.BrPetrol : MeToolsTheme.BrInput,
+                Background      = bgN,
                 Foreground      = primary ? Brushes.White : MeToolsTheme.BrText,
                 BorderBrush     = MeToolsTheme.BrBorder,
                 BorderThickness = new Thickness(1),
+                Cursor          = Cursors.Hand,
+                Template        = RoundedBtnTemplate(),
             };
+            b.MouseEnter += (s, e) => b.Background = bgH;
+            b.MouseLeave += (s, e) => b.Background = bgN;
             b.Click += (s, e) => onClick();
             return b;
         }

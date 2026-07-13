@@ -21,17 +21,19 @@ namespace METools.FamilyPlacer
     public class FamilyPlacerWindow : METools.MeToolsWindowBase
     {
         // ── Colors ────────────────────────────────────────────────────────────
-        private static readonly Color CPetrol     = Color.FromRgb(0x18, 0x5f, 0x5f);
-        private static readonly Color CPetrolDark = Color.FromRgb(0x12, 0x4d, 0x4d); // petrol, slightly darker than accent
-        private static readonly Color CPetrolDim  = Color.FromRgb(0xcc, 0xe5, 0xe5);
-        private static readonly Color CPetrolText = Color.FromRgb(0x14, 0x4d, 0x4d);
-        private static readonly Color CStatusBar  = Color.FromRgb(0x15, 0x58, 0x58);
-        private static readonly Color CBg         = Color.FromRgb(0xf4, 0xf5, 0xf6);
-        private static readonly Color CSurface    = Colors.White;
-        private static readonly Color CBorder     = Color.FromRgb(0xd0, 0xd5, 0xd9);
-        private static readonly Color CText       = Color.FromRgb(0x1e, 0x25, 0x28);
-        private static readonly Color CMuted      = Color.FromRgb(0x6b, 0x78, 0x80);
-        private static readonly Color CDim        = Color.FromRgb(0xa8, 0xb4, 0xbb);
+        // Mirrors MeToolsTheme so this window follows the Light/Dark toggle and
+        // the ME-Concept brand palette, instead of a frozen, always-light copy.
+        private static Color CPetrol     => MeToolsTheme.CPetrol;
+        private static Color CPetrolDark => MeToolsTheme.CPetrolDark;
+        private static Color CPetrolDim  => MeToolsTheme.Current == MeTheme.Dark ? Color.FromRgb(0x16, 0x3A, 0x3A) : Color.FromRgb(0xcc, 0xe5, 0xe5);
+        private static Color CPetrolText => MeToolsTheme.Current == MeTheme.Dark ? MeToolsTheme.CAccent : Color.FromRgb(0x14, 0x4d, 0x4d);
+        private static Color CStatusBar  => MeToolsTheme.CStatusBar;
+        private static Color CBg         => MeToolsTheme.CBg;
+        private static Color CSurface    => MeToolsTheme.CSurface;
+        private static Color CBorder     => MeToolsTheme.CBorder;
+        private static Color CText       => MeToolsTheme.CText;
+        private static Color CMuted      => MeToolsTheme.CMuted;
+        private static Color CDim        => MeToolsTheme.Current == MeTheme.Dark ? Color.FromRgb(0x5A, 0x7E, 0x7C) : Color.FromRgb(0xa8, 0xb4, 0xbb);
 
         // ── State ─────────────────────────────────────────────────────────────
         private readonly ExternalEvent         _extEvent;
@@ -229,6 +231,7 @@ namespace METools.FamilyPlacer
                 Margin              = new Thickness(0, 0, 0, 12),
                 Cursor              = Cursors.Hand,
                 HorizontalAlignment = HorizontalAlignment.Stretch,
+                Template            = RoundedBtnTemplate(),
             };
             btnAdd.Click       += (s, e) => AddSlot();
             btnAdd.MouseEnter  += (s, e) => {
@@ -256,10 +259,10 @@ namespace METools.FamilyPlacer
             btnRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(5) });
             btnRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1.4, GridUnitType.Star) });
 
-            var btnPlace = MakePlaceBtn("▶  Place", false, PlaceSingle); btnPlace.Template = RoundBtnTemplate(btnPlace);
+            var btnPlace = MakePlaceBtn("▶  Place", false, PlaceSingle); btnPlace.Template = RoundedBtnTemplate();
             Grid.SetColumn(btnPlace, 0);
 
-            var btnMulti = MakePlaceBtn("⊕  Multi-Place", true, PlaceMulti); btnMulti.Template = RoundBtnTemplate(btnMulti);
+            var btnMulti = MakePlaceBtn("⊕  Multi-Place", true, PlaceMulti); btnMulti.Template = RoundedBtnTemplate();
             Grid.SetColumn(btnMulti, 2);
 
             btnRow.Children.Add(btnPlace);
@@ -677,7 +680,7 @@ namespace METools.FamilyPlacer
                 BorderThickness = new Thickness(1),
                 Cursor          = Cursors.Hand,
             };
-            btn.Template = RoundBtnTemplate(btn);
+            btn.Template = RoundedBtnTemplate();
             btn.Click    += (s, e) => onClick();
             btn.MouseEnter += (s, e) => { btn.Background = MeToolsTheme.BrActiveBg; btn.BorderBrush = MeToolsTheme.BrPetrol; };
             btn.MouseLeave += (s, e) => { btn.Background = MeToolsTheme.BrBtnBg;    btn.BorderBrush = MeToolsTheme.BrBorder; };
@@ -698,7 +701,7 @@ namespace METools.FamilyPlacer
                 Foreground      = active ? MeToolsTheme.BrActiveFg  : MeToolsTheme.BrMuted,
                 Cursor          = Cursors.Hand,
             };
-            btn.Template = RoundBtnTemplate(btn);
+            btn.Template = RoundedBtnTemplate();
             btn.Click += (s, e) => SetOrientation(mode);
             return btn;
         }
@@ -735,7 +738,7 @@ namespace METools.FamilyPlacer
             btn.Click      += (s, e) => onClick();
             btn.MouseEnter += (s, e) => btn.Background = isOutline
                 ? MeToolsTheme.BrActiveBg
-                : new SolidColorBrush(Color.FromRgb(0x12, 0x4d, 0x4d));
+                : MeToolsTheme.BrPetrolDark;
             btn.MouseLeave += (s, e) => btn.Background = isOutline
                 ? MeToolsTheme.BrBtnBg
                 : MeToolsTheme.BrPetrol;
@@ -770,23 +773,6 @@ namespace METools.FamilyPlacer
             };
             btn.MouseLeftButtonDown += (s, e) => onClick();
             return btn;
-        }
-
-        private static System.Windows.Controls.ControlTemplate RoundBtnTemplate(Button btn)
-        {
-            var factory = new System.Windows.FrameworkElementFactory(typeof(Border));
-            factory.SetBinding(Border.BackgroundProperty,
-                new System.Windows.Data.Binding("Background") { RelativeSource = new System.Windows.Data.RelativeSource(System.Windows.Data.RelativeSourceMode.TemplatedParent) });
-            factory.SetBinding(Border.BorderBrushProperty,
-                new System.Windows.Data.Binding("BorderBrush") { RelativeSource = new System.Windows.Data.RelativeSource(System.Windows.Data.RelativeSourceMode.TemplatedParent) });
-            factory.SetBinding(Border.BorderThicknessProperty,
-                new System.Windows.Data.Binding("BorderThickness") { RelativeSource = new System.Windows.Data.RelativeSource(System.Windows.Data.RelativeSourceMode.TemplatedParent) });
-            factory.SetValue(Border.CornerRadiusProperty, new CornerRadius(4));
-            var content = new System.Windows.FrameworkElementFactory(typeof(ContentPresenter));
-            content.SetValue(ContentPresenter.HorizontalAlignmentProperty, HorizontalAlignment.Center);
-            content.SetValue(ContentPresenter.VerticalAlignmentProperty,   VerticalAlignment.Center);
-            factory.AppendChild(content);
-            return new System.Windows.Controls.ControlTemplate(typeof(Button)) { VisualTree = factory };
         }
 
         private void AddHdr(Grid g, string text, int col)
@@ -907,7 +893,7 @@ namespace METools.FamilyPlacer
             Handle = new TextBlock
             {
                 Text = "\u283F", FontSize = 13,
-                Foreground = new SolidColorBrush(Color.FromRgb(0xa8, 0xb4, 0xbb)),
+                Foreground = MeToolsTheme.BrMuted,
                 VerticalAlignment = VerticalAlignment.Center,
                 Cursor = Cursors.SizeNS,
             };
@@ -918,7 +904,7 @@ namespace METools.FamilyPlacer
             {
                 Text      = _index.ToString(),
                 FontSize  = 10, FontWeight = FontWeights.Bold,
-                Foreground = MeToolsTheme.BrPetrol,
+                Foreground = MeToolsTheme.BrActiveFg,
                 VerticalAlignment   = VerticalAlignment.Center,
                 HorizontalAlignment = HorizontalAlignment.Center,
             };
@@ -1084,6 +1070,7 @@ namespace METools.FamilyPlacer
                 VerticalAlignment = VerticalAlignment.Center,
                 Cursor          = Cursors.Hand,
                 ToolTip         = "Family parameters",
+                Template        = METools.MeToolsWindowBase.RoundedBtnTemplate(),
             };
             _gearBtn.Click += (s, e) => ToggleParamsPopup();
 
@@ -1115,6 +1102,7 @@ namespace METools.FamilyPlacer
                 Foreground      = METools.MeToolsTheme.BrMuted,
                 VerticalAlignment = VerticalAlignment.Center,
                 Cursor          = Cursors.Hand,
+                Template        = METools.MeToolsWindowBase.RoundedBtnTemplate(),
             };
             delBtn.Click      += (s, e) => OnRemove?.Invoke();
             delBtn.MouseEnter += (s, e) => {
@@ -1420,11 +1408,16 @@ namespace METools.FamilyPlacer
                 Margin = new Thickness(0, 10, 0, 0),
             };
             var cancel = new Button { Content = "Cancel", Height = 28, MinWidth = 80,
-                Margin = new Thickness(0, 0, 8, 0) };
+                Margin = new Thickness(0, 0, 8, 0),
+                Background = MeToolsTheme.BrBtnBg, Foreground = MeToolsTheme.BrText,
+                BorderBrush = MeToolsTheme.BrBtnBorder, BorderThickness = new Thickness(1),
+                Cursor = Cursors.Hand, Template = METools.MeToolsWindowBase.RoundedBtnTemplate() };
             var ok = new Button { Content = "Save", Height = 28, MinWidth = 80,
                 IsDefault = true,
-                Background = new SolidColorBrush(Color.FromRgb(0x18, 0x5f, 0x5f)),
-                Foreground = MeToolsTheme.BrBtnBg };
+                Background = MeToolsTheme.BrPetrol,
+                Foreground = Brushes.White,
+                BorderBrush = MeToolsTheme.BrPetrol, BorderThickness = new Thickness(1),
+                Cursor = Cursors.Hand, Template = METools.MeToolsWindowBase.RoundedBtnTemplate() };
             cancel.Click += (s, e) => { DialogResult = false; Close(); };
             ok.Click     += (s, e) => { TemplateName = tb.Text; DialogResult = true; Close(); };
             btnRow.Children.Add(cancel);
