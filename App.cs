@@ -113,6 +113,20 @@ namespace METools
             RibbonThemeWatcher.Register(lmButton, "icon_lm");
             panel.AddSeparator();
 
+            // -- Project Transfer ---------------------------------------------
+            var ptBtn = new PushButtonData(
+                "ProjectTransfer", "Project\nTransfer", dll,
+                "METools.ProjectTransfer.ProjectTransferCommand")
+            {
+                ToolTip         = "Copy filters, drafting views/legends, sheets and schedules from this project into another one.",
+                LongDescription = $"Project Transfer -- {VENDOR}\n\nCopies Filters, Views, Sheets and Schedules from the active project into another project -- either already open in Revit, or opened from disk.\n\n* Views: Drafting Views and Legends only (plan/section/3D views depend on this project's own levels & grids)\n* Sheets: copied together with whatever is placed on them; sheets flag a warning if they hold a plan/section/3D view\n* Duplicate type names in the target keep the target's own version",
+                Image           = LoadIcon("icon_pt_light_16.png") ?? LoadIcon("icon_fp_light_16.png"),
+                LargeImage      = LoadIcon("icon_pt_light_32.png") ?? LoadIcon("icon_fp_light_32.png"),
+            };
+            var ptButton = panel.AddItem(ptBtn) as PushButton;
+            RibbonThemeWatcher.Register(ptButton, "icon_pt");
+            panel.AddSeparator();
+
             // -- Circuit Tagger ---------------------------------------------
             var ctBtn = new PushButtonData(
                 "CircuitTagger", "Circuit\nTagger", dll,

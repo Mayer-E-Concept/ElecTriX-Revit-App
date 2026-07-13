@@ -20,6 +20,8 @@ namespace METools
                     METools.FamilyPlacer.FamilyPlacerCommand.Open(app);
                 else if (Target == "LevelManager")
                     METools.LevelManager.LevelManagerCommand.Open(app);
+                else if (Target == "ProjectTransfer")
+                    METools.ProjectTransfer.ProjectTransferCommand.Open(app);
                 else if (Target == "CircuitTagger")
                     METools.FamilyPlacer.CircuitTaggerCommand.Open(app);
                 else if (Target == "FamilyBrowser")
@@ -66,6 +68,7 @@ namespace METools
                 ("FamilyBrowser", "Family Browser"),
                 ("LampPlacer",    "Lamp Placer"),
                 ("LevelManager",  "Level Manager"),
+                ("ProjectTransfer", "Project Transfer"),
                 ("FixLevel",      "Fix Level"),
                 ("CircuitTagger", "Circuit Tagger"),
                 ("Statistics",    "Statistics"),
