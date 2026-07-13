@@ -35,6 +35,10 @@
     <None Update="METools.addin">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </None>
+    <None Include="standard_worksets.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <TargetPath>config\standard_worksets.json</TargetPath>
+    </None>
     <EmbeddedResource Include="Icons\*.png" />
   </ItemGroup>
 
@@ -72,6 +76,7 @@
       <RevitAddinsDir>C:\ProgramData\Autodesk\Revit\Addins\2025</RevitAddinsDir>
     </PropertyGroup>
     <MakeDir Directories="$(RevitAddinsDir)\Icons" Condition="!Exists('$(RevitAddinsDir)\Icons')" />
+    <MakeDir Directories="$(RevitAddinsDir)\config" Condition="!Exists('$(RevitAddinsDir)\config')" />
     <Copy SourceFiles="$(OutputPath)METools.dll"
           DestinationFolder="$(RevitAddinsDir)"
           SkipUnchangedFiles="false"
@@ -84,6 +89,11 @@
           ContinueOnError="true" />
     <Copy SourceFiles="@(EmbeddedResource)"
           DestinationFolder="$(RevitAddinsDir)\Icons"
+          SkipUnchangedFiles="false"
+          OverwriteReadOnlyFiles="true"
+          ContinueOnError="true" />
+    <Copy SourceFiles="$(OutputPath)config\standard_worksets.json"
+          DestinationFolder="$(RevitAddinsDir)\config"
           SkipUnchangedFiles="false"
           OverwriteReadOnlyFiles="true"
           ContinueOnError="true" />

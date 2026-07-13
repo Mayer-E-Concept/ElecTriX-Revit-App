@@ -94,30 +94,53 @@ namespace METools
         {
             try
             {
-                // Autodesk.Windows.Theme enum: Light = 0, Dark = 1 (names may vary
-                // slightly by Revit version, hence the string compare fallback).
                 var theme = Autodesk.Windows.ComponentManager.CurrentTheme;
-                return theme.ToString().IndexOf("Dark", StringComparison.OrdinalIgnoreCase) >= 0;
+                bool isDark = theme.ToString().IndexOf("Dark", StringComparison.OrdinalIgnoreCase) >= 0;
+                LogDiag($"Theme detected: '{theme}' -> isDark={isDark}");
+                return isDark;
             }
-            catch
+            catch (Exception ex)
             {
+                LogDiag($"Theme detection FAILED: {ex.Message} -- defaulting to light icons");
                 return false; // default to light icons if theme can't be detected
             }
+        }
+
+        // Writes a one-line diagnostic to %APPDATA%\METools\theme-debug.log so we
+        // can see exactly what's happening without needing to attach a debugger.
+        // Safe to delete this method (and its two call sites) once icons are
+        // confirmed working correctly.
+        private static void LogDiag(string msg)
+        {
+            try
+            {
+                var dir = System.IO.Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "METools");
+                System.IO.Directory.CreateDirectory(dir);
+                var path = System.IO.Path.Combine(dir, "theme-debug.log");
+                System.IO.File.AppendAllText(path, $"{DateTime.Now:HH:mm:ss}  {msg}\r\n");
+            }
+            catch { }
         }
 
         private static void ApplyCurrentTheme()
         {
             bool dark = IsDarkTheme();
             string variant = dark ? "dark" : "light";
+            LogDiag($"Applying variant='{variant}' to {_entries.Count} button(s)");
 
             foreach (var entry in _entries)
             {
                 try
                 {
-                    entry.Button.Image      = LoadIcon($"{entry.IconKey}_{variant}_16.png");
-                    entry.Button.LargeImage = LoadIcon($"{entry.IconKey}_{variant}_32.png");
+                    var img16 = LoadIcon($"{entry.IconKey}_{variant}_16.png");
+                    var img32 = LoadIcon($"{entry.IconKey}_{variant}_32.png");
+                    if (img16 == null || img32 == null)
+                        LogDiag($"  '{entry.IconKey}': MISSING resource(s) for variant '{variant}' (16={(img16==null?"NULL":"ok")}, 32={(img32==null?"NULL":"ok")})");
+                    entry.Button.Image      = img16;
+                    entry.Button.LargeImage = img32;
                 }
-                catch { }
+                catch (Exception ex) { LogDiag($"  '{entry.IconKey}': EXCEPTION {ex.Message}"); }
             }
         }
 
