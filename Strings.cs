@@ -247,6 +247,8 @@ namespace METools
             ["browser.grp.data"]        = "Data / Comms",
             ["browser.grp.sensors"]     = "Sensors",
             ["browser.grp.other"]       = "Other",
+            ["browser.grp.lightning"]   = "Lightning Protection",
+            ["browser.grp.conduit"]     = "Conduit & Fittings",
 
             // ── Settings appearance (full) ────────────────────────────────
             ["settings.appearance.theme_label"] = "Theme",
@@ -454,6 +456,8 @@ namespace METools
             ["browser.grp.data"]        = "Daten / Komm.",
             ["browser.grp.sensors"]     = "Sensoren",
             ["browser.grp.other"]       = "Sonstige",
+            ["browser.grp.lightning"]   = "Blitzschutz",
+            ["browser.grp.conduit"]     = "Rohrformstuecke",
 
             ["settings.appearance.theme_label"] = "Design",
         };
@@ -660,6 +664,8 @@ namespace METools
             ["browser.grp.data"]        = "Date / Comm.",
             ["browser.grp.sensors"]     = "Senzori",
             ["browser.grp.other"]       = "Altele",
+            ["browser.grp.lightning"]   = "Protectie la trasnet",
+            ["browser.grp.conduit"]     = "Fitinguri tub",
 
             ["settings.appearance.theme_label"] = "Tema",
         };

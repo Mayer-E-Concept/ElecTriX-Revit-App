@@ -15,6 +15,8 @@ namespace METools.ClashDetector
 
         public Result Execute(ExternalCommandData commandData, ref string message, ElementSet elements)
         {
+            if (!METools.LicenseManager.CheckAccessOrExplain()) return Result.Cancelled;
+
             if (_window != null && _window.IsVisible)
             { _window.Activate(); _window.Focus(); return Result.Succeeded; }
 

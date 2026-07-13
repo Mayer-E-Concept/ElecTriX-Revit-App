@@ -1,7 +1,7 @@
 // LicenseManager.cs — ME-Tools Trial License Management
 // Mayer E-Concept SRL
 // -----------------------------------------------------------------
-// Handles 30-day beta trial enforcement and holds the stub API used
+// Handles 14-day beta trial enforcement and holds the stub API used
 // by LicenseWindow / LicenseCheck. The real activation logic is a
 // clean seam: Activate(code) currently rejects all codes — replace
 // the body with real validation once the licensing backend is ready.
@@ -12,6 +12,7 @@ using System.Globalization;
 using System.IO;
 using System.Security.Cryptography;
 using System.Text;
+using Autodesk.Revit.UI;
 
 namespace METools
 {
@@ -37,7 +38,7 @@ namespace METools
     internal static class LicenseManager
     {
         // ── Configuration ─────────────────────────────────────────────────
-        private const int TrialDays = 30;
+        private const int TrialDays = 14;
 
         private static readonly string DataDir = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
@@ -48,6 +49,55 @@ namespace METools
 
         // Simple XOR key — enough to prevent casual text-editor tampering.
         private static readonly byte[] XorKey = { 0x4D, 0x45, 0x54, 0x6C }; // "METl"
+
+        /// <summary>Info about the currently active full license, or null if none (trial mode).</summary>
+        public class ActiveLicenseInfo
+        {
+            public LicenseType Type   { get; set; }
+            public DateTime    Expiry { get; set; } // DateTime.MaxValue = permanent
+        }
+
+        /// <summary>
+        /// Returns the currently active license's type and expiry, or null when
+        /// running on the trial (no valid key on disk). Used by Settings/License
+        /// UI to show how long the license is valid for.
+        /// </summary>
+        public static ActiveLicenseInfo GetActiveLicense()
+        {
+            try
+            {
+                if (!File.Exists(KeyFile)) return null;
+                var code = (File.ReadAllText(KeyFile) ?? "").Trim();
+                if (!VerifyCode(code, out var type, out var expiry)) return null;
+                return new ActiveLicenseInfo { Type = type, Expiry = expiry };
+            }
+            catch { return null; }
+        }
+
+        /// <summary>
+        /// Gate called at the top of every tool command's Open()/Execute(),
+        /// EXCEPT Settings — which must always stay reachable so the user can
+        /// activate a key. Shows a blocking message and returns false once the
+        /// trial has expired with no license; returns true otherwise.
+        /// </summary>
+        public static bool CheckAccessOrExplain()
+        {
+            if (!IsTrialExpired) return true;
+            try
+            {
+                var td = new TaskDialog("ME-Tools — Trial Expired")
+                {
+                    MainInstruction = "Your ME-Tools trial has expired",
+                    MainContent     = "Your 14-day trial has ended, so this tool is locked.\n\n" +
+                                      "Open ME-Tools \u2192 Settings \u2192 License to activate a key and keep using ME-Tools.\n\n" +
+                                      "Need a license? Contact office@mayer-econcept.ro (include your Machine ID, shown in Settings).",
+                    CommonButtons   = TaskDialogCommonButtons.Ok,
+                };
+                td.Show();
+            }
+            catch { }
+            return false;
+        }
 
         // ── Public API ────────────────────────────────────────────────────
 
@@ -90,7 +140,17 @@ namespace METools
         {
             get
             {
-                if (IsLicensed()) return "Licensed";
+                if (IsLicensed())
+                {
+                    var lic = GetActiveLicense();
+                    if (lic != null)
+                    {
+                        if (lic.Type == LicenseType.Permanent) return "Licensed — Permanent";
+                        int daysLeft = Math.Max(0, (lic.Expiry.Date - DateTime.Today).Days);
+                        return $"Licensed — {daysLeft} day{(daysLeft == 1 ? "" : "s")} left";
+                    }
+                    return "Licensed";
+                }
                 int d = DaysRemaining;
                 return d > 0
                     ? $"Beta — {d} day{(d == 1 ? "" : "s")} remaining"

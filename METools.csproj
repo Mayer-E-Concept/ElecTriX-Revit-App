@@ -40,6 +40,7 @@
       <TargetPath>config\standard_worksets.json</TargetPath>
     </None>
     <EmbeddedResource Include="Icons\*.png" />
+    <EmbeddedResource Include="setup.iss" />
   </ItemGroup>
 
   <ItemGroup>

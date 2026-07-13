@@ -21,6 +21,8 @@ namespace METools.FamilyPlacer
 
         public static void Open(UIApplication uiApp)
         {
+            if (!METools.LicenseManager.CheckAccessOrExplain()) return;
+
             var uidoc = uiApp.ActiveUIDocument;
             var doc   = uidoc.Document;
 

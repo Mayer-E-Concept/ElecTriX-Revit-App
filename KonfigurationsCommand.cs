@@ -11,6 +11,8 @@ namespace METools.FamilyPlacer
     {
         public Result Execute(ExternalCommandData commandData, ref string message, ElementSet elements)
         {
+            if (!METools.LicenseManager.CheckAccessOrExplain()) return Result.Cancelled;
+
             try
             {
                 var doc    = commandData.Application.ActiveUIDocument.Document;

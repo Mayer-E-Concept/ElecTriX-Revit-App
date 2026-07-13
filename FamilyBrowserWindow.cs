@@ -50,16 +50,41 @@ namespace METools
             public List<string> TypeNames { get; set; } = new List<string>();
         }
 
-        // Group definitions — order matters, first match wins
+        // Group definitions — order matters, first match wins.
+        // Matching is case-INSENSITIVE: German compound words (e.g. "Wechselschalter",
+        // "Serienschalter") don't capitalize their second half, so a case-sensitive
+        // Contains("Schalter") silently misses them — that was the main reason so many
+        // families fell through to "Other". A couple of short acronyms (GSM, RWA) use a
+        // word-boundary match instead of plain Contains, since as plain substrings they
+        // can appear by accident inside unrelated German compounds (e.g. "GSM" inside
+        // "Bewegung**gsm**elder").
+        private static bool Ci(string n, string s) => n.IndexOf(s, StringComparison.OrdinalIgnoreCase) >= 0;
+        private static bool Word(string n, string s) =>
+            System.Text.RegularExpressions.Regex.IsMatch(n, $@"\b{System.Text.RegularExpressions.Regex.Escape(s)}\b",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
         private static readonly List<(string Label, Func<string, bool> Match)> Groups = new()
         {
-            ("Sockets",     n => n.Contains("Steckdose") || n.Contains("socket") || n.Contains("Socket") || n.Contains("Herd") || n.Contains("schaltbar")),
-            ("Switches",    n => n.Contains("Schalter") || n.Contains("switch") || n.Contains("Switch") || n.Contains("Taster") || n.Contains("Jalousie") || n.Contains("series switch") || n.Contains("pushers") || n.Contains("shutter")),
-            ("Lighting",    n => n.Contains("Beleuchtung") || n.Contains("lighting") || n.Contains("Lighting") || n.Contains("Ceiling") || n.Contains("lamp") || n.Contains("Lamp") || n.Contains("Leuchte") || n.Contains("licht") || n.Contains("Licht") || n.Contains("OV_Lampe") || n.Contains("W-Auslass")),
-            ("Panels",      n => n.Contains("Verteiler") || n.Contains("Wohnungsverteiler") || n.Contains("Panel") || n.Contains("panel") || n.Contains("Schaltschrank") || n.Contains("Distribution")),
-            ("Fire Alarm",  n => n.Contains("Druckknopf") || n.Contains("Wärmemelder") || n.Contains("Brandmelde") || n.Contains("Feststellzen") || n.Contains("Blitzleuchte") || n.Contains("Sirene") || n.Contains("smoke") || n.Contains("fire") || n.Contains("alarm")),
-            ("Data / Comms",n => n.Contains("EDV") || n.Contains("Dose") || n.Contains("RJ45") || n.Contains("Datennetz") || n.Contains("data") || n.Contains("Data") || n.Contains("comms") || n.Contains("intercom") || n.Contains("Intercom") || n.Contains("GSM") || n.Contains("Telefon") || n.Contains("fibre") || n.Contains("SW-Verteiler")),
-            ("Sensors",     n => n.Contains("Temperature") || n.Contains("sensor") || n.Contains("Sensor") || n.Contains("Melder") || n.Contains("melder")),
+            ("Sockets",     n => Ci(n,"Steckdose") || Ci(n,"socket") || Ci(n,"Herd") || Ci(n,"schaltbar")
+                                || Ci(n,"Bodendose") || Ci(n,"Bodentank")),
+            ("Switches",    n => Ci(n,"Schalter") || Ci(n,"switch") || Ci(n,"Taster") || Ci(n,"Jalousie")
+                                || Ci(n,"pushers") || Ci(n,"shutter")),
+            ("Fire Alarm",  n => Ci(n,"Druckknopf") || Ci(n,"Wärmemelder") || Ci(n,"Brandmelde") || Ci(n,"Feststellzen")
+                                || Ci(n,"Blitzleuchte") || Ci(n,"Sirene") || Ci(n,"smoke") || Ci(n,"fire") || Ci(n,"alarm")
+                                || Ci(n,"Rettungsweg") || Word(n,"RWA") || Ci(n,"Auslöse") || Ci(n,"Auswerteeinheit")
+                                || Ci(n,"release button") || Ci(n,"ventilation") || Ci(n,"safety") || Ci(n,"security")
+                                || Ci(n,"Lufter") || Ci(n,"Lüfter") || Ci(n,"sicherheit")),
+            ("Lightning Protection", n => Ci(n,"Blitzschutz") || Ci(n,"Blitzleiter") || Ci(n,"Fangstange")
+                                || Ci(n,"Erder") || Ci(n,"Potential") || Ci(n,"Potenzial")),
+            ("Lighting",    n => Ci(n,"Beleuchtung") || Ci(n,"lighting") || Ci(n,"Ceiling") || Ci(n,"lamp")
+                                || Ci(n,"Leuchte") || Ci(n,"licht") || Ci(n,"W-Auslass") || Ci(n,"light")),
+            ("Panels",      n => Ci(n,"Verteiler") || Ci(n,"Panel") || Ci(n,"Schaltschrank") || Ci(n,"Distribution")
+                                || Ci(n,"Anschlüsse") || Ci(n,"Anschlusskasten") || Ci(n,"connection")),
+            ("Data / Comms",n => Ci(n,"EDV") || Ci(n,"Dose") || Ci(n,"RJ45") || Ci(n,"Datennetz") || Ci(n,"data") || Ci(n,"comms")
+                                || Ci(n,"intercom") || Word(n,"GSM") || Ci(n,"Telefon") || Ci(n,"fibre") || Ci(n,"sprech")),
+            ("Sensors",     n => Ci(n,"Temperature") || Ci(n,"Temperatur") || Ci(n,"sensor") || Ci(n,"Melder") || Ci(n,"Fühler")),
+            ("Conduit & Fittings", n => Ci(n,"Bogen") || Ci(n,"Knie") || Ci(n,"Reduzierung") || Ci(n,"T-Stück")
+                                || Ci(n,"Tstück") || Ci(n,"Z-Sprung") || Ci(n,"KreuzTstück")),
             ("Other",       n => true),
         };
 
@@ -485,13 +510,17 @@ namespace METools
                 FontSize   = 10,
                 Background = MeToolsTheme.BrPetrol,
                 Foreground = System.Windows.Media.Brushes.White,
-                BorderThickness = new Thickness(0),
+                BorderBrush = MeToolsTheme.BrPetrol,
+                BorderThickness = new Thickness(1),
                 VerticalAlignment = VerticalAlignment.Center,
                 Margin     = new Thickness(8, 0, 0, 0),
                 ToolTip    = "Click to enter placement mode for this family (like drag-and-drop)",
                 Cursor     = Cursors.Hand,
                 Visibility = System.Windows.Visibility.Collapsed,
+                Template   = RoundedBtnTemplate(),
             };
+            btnPlace.MouseEnter += (s, e) => btnPlace.Background = MeToolsTheme.BrPetrolDark;
+            btnPlace.MouseLeave += (s, e) => btnPlace.Background = MeToolsTheme.BrPetrol;
             var capturedFam = fam;
             btnPlace.Click += (s, e) =>
             {
@@ -526,6 +555,8 @@ namespace METools
             "Fire Alarm"  => new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(231,  76,  60)),
             "Data / Comms"=> new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb( 52, 152, 219)),
             "Sensors"     => new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb( 26, 188, 156)),
+            "Lightning Protection" => new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(230, 126,  34)),
+            "Conduit & Fittings"   => new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(127, 140, 141)),
             _             => new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(149, 165, 166)),
         };
 
@@ -539,6 +570,8 @@ namespace METools
             "Fire Alarm"   => S.Get("browser.grp.fire"),
             "Data / Comms" => S.Get("browser.grp.data"),
             "Sensors"      => S.Get("browser.grp.sensors"),
+            "Lightning Protection" => S.Get("browser.grp.lightning"),
+            "Conduit & Fittings"   => S.Get("browser.grp.conduit"),
             "Other"        => S.Get("browser.grp.other"),
             _              => group,
         };
@@ -552,6 +585,8 @@ namespace METools
             "Fire Alarm"   => "FA",
             "Data / Comms" => "DT",
             "Sensors"      => "SN",
+            "Lightning Protection" => "LP",
+            "Conduit & Fittings"   => "CF",
             _              => "?",
         };
 

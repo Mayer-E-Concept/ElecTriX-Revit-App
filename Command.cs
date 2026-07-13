@@ -14,6 +14,8 @@ namespace METools
     {
         public Result Execute(ExternalCommandData commandData, ref string message, ElementSet elements)
         {
+            if (!METools.LicenseManager.CheckAccessOrExplain()) return Result.Cancelled;
+
             UIDocument uidoc = commandData.Application.ActiveUIDocument;
             Document   doc   = uidoc.Document;
 
