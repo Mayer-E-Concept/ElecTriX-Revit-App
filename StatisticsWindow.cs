@@ -27,7 +27,9 @@ namespace METools
 
         // Section render order
         private static readonly string[] _sections =
-            { "Electrical", "Sockets by type", "Switches by type", "Per floor", "Cable & Containment", "Mechanical & Plumbing", "Spaces & Levels" };
+            { "Electrical", "Sockets by type", "Switches by type",
+              "Sockets by workset", "Switches by workset", "Lamps by workset",
+              "Per floor", "Cable & Containment", "Mechanical & Plumbing", "Spaces & Levels" };
 
         public StatisticsWindow(ExternalEvent ev, StatisticsHandler handler, List<StatRow> rows, string docTitle)
         {
@@ -190,6 +192,9 @@ namespace METools
             "Per floor"            => S.Get("stats.per_floor"),
             "Sockets by type"      => S.Get("stats.sockets_type"),
             "Switches by type"     => S.Get("stats.switches_type"),
+            "Sockets by workset"   => "Sockets by workset",
+            "Switches by workset"  => "Switches by workset",
+            "Lamps by workset"     => "Lamps by workset",
             "Electrical"           => S.Get("stats.electrical"),
             "Cable & Containment"  => S.Get("stats.cable"),
             "Mechanical & Plumbing"=> S.Get("stats.mech"),
@@ -288,8 +293,31 @@ namespace METools
                     "statistics_" + safe + "_" + DateTime.Now.ToString("yyyyMMdd_HHmmss") + ".csv");
 
                 var sb = new StringBuilder();
-                sb.AppendLine("Section,Category,Value,Unit");
-                foreach (var row in _rows.Where(x => x.Section != "Highlights" && (x.Count > 0 || x.LengthM > 0)))
+                sb.AppendLine("Section,Name,Value,Unit");
+
+                // Defines the order sections appear in the export (matches on-screen order).
+                var sectionOrder = new List<string>
+                {
+                    "Electrical", "Sockets by type", "Switches by type",
+                    "Sockets by workset", "Switches by workset", "Lamps by workset",
+                    "Per floor", "Cable & Containment", "Mechanical & Plumbing", "Spaces & Levels",
+                };
+                int SectionRank(string s)
+                {
+                    int i = sectionOrder.IndexOf(s);
+                    return i < 0 ? sectionOrder.Count : i;
+                }
+
+                // Sort by section (in the defined order), then alphabetically by name --
+                // e.g. within "Sockets by type" every row is listed A-Z by its type name,
+                // rather than by how many were found.
+                var sorted = _rows
+                    .Where(x => x.Section != "Highlights" && (x.Count > 0 || x.LengthM > 0))
+                    .OrderBy(x => SectionRank(x.Section))
+                    .ThenBy(x => x.Label, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+
+                foreach (var row in sorted)
                 {
                     string val  = row.Section == "Cable & Containment" && row.LengthM > 0
                         ? row.LengthM.ToString("F1", System.Globalization.CultureInfo.InvariantCulture)

@@ -1145,46 +1145,86 @@ namespace METools.LampPlacer
                       spots.Add(new KeyValuePair<XYZ, double>(p, tan)); }
                 }
             }
-            else // BySpacing: click first lamp, prompt distance, click as many as wanted (= count)
+            else // BySpacing
             {
-                XYZ firstPick;
-                try { firstPick = uidoc.Selection.PickPoint("Click where the FIRST lamp should go on the line"); }
-                catch (OperationCanceledException) { firstPick = null; }
-                catch (Exception) { firstPick = null; }
+                double wallFt = ToFeet(cfg.WallMargin);
 
-                if (firstPick != null)
+                if (polylines.Count == 1)
                 {
-                    List<XYZ> path = null; double bestDist = double.MaxValue, s0 = 0;
-                    foreach (var chain in polylines)
-                    { double dd; double s = ProjectOnPolyline(chain, firstPick, out dd);
-                      if (dd < bestDist) { bestDist = dd; path = chain; s0 = s; } }
-                    if (path == null) { path = polylines[0]; s0 = 0; }
+                    // Single line: keep the original interactive flow (click first lamp,
+                    // confirm spacing, click extras) since there's no ambiguity about which
+                    // line the clicks apply to.
+                    var path = polylines[0];
+                    XYZ firstPick;
+                    try { firstPick = uidoc.Selection.PickPoint("Click where the FIRST lamp should go on the line"); }
+                    catch (OperationCanceledException) { firstPick = null; }
+                    catch (Exception) { firstPick = null; }
 
-                    // Wall margin: first lamp kept at least WallMargin from the nearest line end
-                    double wallFt   = ToFeet(cfg.WallMargin);
-                    double totalLen = PolylineLength(path);
-                    double loS = wallFt, hiS = totalLen - wallFt;
-                    if (loS > hiS) { loS = hiS = totalLen / 2.0; }
-                    if (s0 < loS) s0 = loS; else if (s0 > hiS) s0 = hiS;
+                    if (firstPick != null)
+                    {
+                        double dd;
+                        double s0 = ProjectOnPolyline(path, firstPick, out dd);
 
+                        double totalLen = PolylineLength(path);
+                        double loS = wallFt, hiS = totalLen - wallFt;
+                        if (loS > hiS) { loS = hiS = totalLen / 2.0; }
+                        if (s0 < loS) s0 = loS; else if (s0 > hiS) s0 = hiS;
+
+                        double? mm = OnPromptSpacing?.Invoke(cfg.LineSpacing);
+                        if (mm != null && mm.Value > 0)
+                        {
+                            double d = ToFeet(mm.Value);
+                            // Count = number of lamp clicks (first + extras); spacing forced to d.
+                            int count = 1;
+                            while (true)
+                            {
+                                try { uidoc.Selection.PickPoint("Click to add another lamp at this spacing - press ESC when finished"); }
+                                catch (OperationCanceledException) { break; }
+                                catch (Exception) { break; }
+                                count++;
+                            }
+                            for (int k = 0; k < count; k++)
+                            { double tan; XYZ p = PointAtArcLength(path, s0 + d * k, out tan);
+                              spots.Add(new KeyValuePair<XYZ, double>(p, tan)); }
+                        }
+                        else OnStatus?.Invoke("Cancelled - no spacing entered.");
+                    }
+                }
+                else
+                {
+                    // Multiple lines (e.g. a zig-zag drawn as separate segments):
+                    // apply the same fixed spacing to EACH selected line independently,
+                    // filling from the wall margin at one end to the wall margin at the
+                    // other end. No per-line clicking needed -- avoids the old bug where
+                    // only the line nearest the first click got any lamps at all.
                     double? mm = OnPromptSpacing?.Invoke(cfg.LineSpacing);
-                    if (mm != null && mm.Value > 0)
+                    if (mm == null || mm.Value <= 0)
+                    {
+                        OnStatus?.Invoke("Cancelled - no spacing entered.");
+                    }
+                    else
                     {
                         double d = ToFeet(mm.Value);
-                        // Count = number of lamp clicks (first + extras); spacing forced to d.
-                        int count = 1;
-                        while (true)
+                        foreach (var chain in polylines)
                         {
-                            try { uidoc.Selection.PickPoint("Click to add another lamp at this spacing - press ESC when finished"); }
-                            catch (OperationCanceledException) { break; }
-                            catch (Exception) { break; }
-                            count++;
+                            double totalLen = PolylineLength(chain);
+                            double loS = wallFt, hiS = totalLen - wallFt;
+                            if (loS > hiS) { loS = hiS = totalLen / 2.0; }
+
+                            if (hiS - loS < 1e-6)
+                            {
+                                // Line too short for two margins -- place a single lamp at its centre
+                                double tan; XYZ p = PointAtArcLength(chain, loS, out tan);
+                                spots.Add(new KeyValuePair<XYZ, double>(p, tan));
+                            }
+                            else
+                            {
+                                for (double s = loS; s <= hiS + 1e-6; s += d)
+                                { double tan; XYZ p = PointAtArcLength(chain, s, out tan);
+                                  spots.Add(new KeyValuePair<XYZ, double>(p, tan)); }
+                            }
                         }
-                        for (int k = 0; k < count; k++)
-                        { double tan; XYZ p = PointAtArcLength(path, s0 + d * k, out tan);
-                          spots.Add(new KeyValuePair<XYZ, double>(p, tan)); }
                     }
-                    else OnStatus?.Invoke("Cancelled - no spacing entered.");
                 }
             }
 

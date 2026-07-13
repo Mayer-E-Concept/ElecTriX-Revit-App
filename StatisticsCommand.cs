@@ -73,6 +73,7 @@ namespace METools
         }
 
         // Returns type-name -> count for all instances of a category.
+        // Sorted alphabetically by name (not by count) so exports read as a clean list.
         public static List<(string TypeName, int Count)> CountByType(Document doc, BuiltInCategory cat)
         {
             try
@@ -82,7 +83,29 @@ namespace METools
                     .OfClass(typeof(FamilyInstance)).Cast<FamilyInstance>()
                     .GroupBy(fi => fi.Symbol?.Name ?? "(unknown)")
                     .Select(g => (g.Key, g.Count()))
-                    .OrderByDescending(x => x.Item2)
+                    .OrderBy(x => x.Item1, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+            }
+            catch { return new List<(string, int)>(); }
+        }
+
+        // Returns workset-name -> count for all instances of a category.
+        // Only meaningful in workshared (collaborative) projects; returns empty otherwise.
+        public static List<(string WorksetName, int Count)> CountByWorkset(Document doc, BuiltInCategory cat)
+        {
+            try
+            {
+                if (!doc.IsWorkshared) return new List<(string, int)>();
+                var wsTable = doc.GetWorksetTable();
+                return new FilteredElementCollector(doc)
+                    .OfCategory(cat).WhereElementIsNotElementType()
+                    .GroupBy(el =>
+                    {
+                        try { return wsTable.GetWorkset(el.WorksetId)?.Name ?? "(unknown)"; }
+                        catch { return "(unknown)"; }
+                    })
+                    .Select(g => (g.Key, g.Count()))
+                    .OrderBy(x => x.Item1, StringComparer.OrdinalIgnoreCase)
                     .ToList();
             }
             catch { return new List<(string, int)>(); }
@@ -151,6 +174,18 @@ namespace METools
             // Switches by type
             foreach (var (tn, cnt) in CountByType(doc, BuiltInCategory.OST_LightingDevices))
                 r.Add(new StatRow("Switches by type", tn, cnt));
+
+            // Sockets by workset (workshared projects only)
+            foreach (var (ws, cnt) in CountByWorkset(doc, BuiltInCategory.OST_ElectricalFixtures))
+                r.Add(new StatRow("Sockets by workset", ws, cnt));
+
+            // Switches by workset (workshared projects only)
+            foreach (var (ws, cnt) in CountByWorkset(doc, BuiltInCategory.OST_LightingDevices))
+                r.Add(new StatRow("Switches by workset", ws, cnt));
+
+            // Lamps by workset (workshared projects only)
+            foreach (var (ws, cnt) in CountByWorkset(doc, BuiltInCategory.OST_LightingFixtures))
+                r.Add(new StatRow("Lamps by workset", ws, cnt));
 
             // Per-floor breakdown
             foreach (var (lvl, soc, sw, lmp) in CountByFloor(doc))

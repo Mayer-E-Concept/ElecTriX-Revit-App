@@ -34,12 +34,13 @@ namespace METools
                 ToolTip         = "ME-Tools settings: appearance, language, license and worksets.",
                 LongDescription = $"Settings -- {VENDOR}\n\nAppearance ? Language ? License ? Worksets\n\n" +
                                   $"License status: {LicenseManager.StatusText}",
-                Image           = LoadIcon("icon_settings_32.png"),
-                LargeImage      = LoadIcon("icon_settings_32.png"),
+                Image           = LoadIcon("icon_settings_light_16.png"),
+                LargeImage      = LoadIcon("icon_settings_light_32.png"),
             };
             var settingsButton = panel.AddItem(stBtn) as PushButton;
             if (settingsButton != null)
                 SettingsCommand.RibbonButton = settingsButton;
+            RibbonThemeWatcher.Register(settingsButton, "icon_settings");
             panel.AddSeparator();
 
             // -- Family Placer -----------------------------------------------
@@ -49,10 +50,11 @@ namespace METools
             {
                 ToolTip         = "Place stacked combinations of electrical families with configurable height and offset.",
                 LongDescription = $"Family Placer -- {VENDOR}\n\nBuild a stack of electrical families, set their mounting height (Niveau) and offset factor, then place them all at once.\n\n? SPACEBAR to rotate before placing\n? Multi-Place: collect multiple positions, ESC to finish\n? Wall detection active -- free workplane also supported\n? Save and load placement templates for reuse",
-                Image           = LoadIcon("icon_fp_16.png"),
-                LargeImage      = LoadIcon("icon_fp_32.png"),
+                Image           = LoadIcon("icon_fp_light_16.png"),
+                LargeImage      = LoadIcon("icon_fp_light_32.png"),
             };
-            panel.AddItem(fpBtn);
+            var fpButton = panel.AddItem(fpBtn) as PushButton;
+            RibbonThemeWatcher.Register(fpButton, "icon_fp");
             panel.AddSeparator();
 
             // -- Family Browser ---------------------------------------------
@@ -62,10 +64,11 @@ namespace METools
             {
                 ToolTip         = "Browse and place loaded electrical CAx families by category.",
                 LongDescription = $"Family Browser -- {VENDOR}\n\nLists all loaded _E_CAx families grouped by category.\nHover a family to reveal the Place button.",
-                Image           = LoadIcon("icon_fb_16.png") ?? LoadIcon("icon_fp_16.png"),
-                LargeImage      = LoadIcon("icon_fb_32.png") ?? LoadIcon("icon_fp_32.png"),
+                Image           = LoadIcon("icon_fb_light_16.png") ?? LoadIcon("icon_fp_light_16.png"),
+                LargeImage      = LoadIcon("icon_fb_light_32.png") ?? LoadIcon("icon_fp_light_32.png"),
             };
-            panel.AddItem(fbBtn);
+            var fbButton = panel.AddItem(fbBtn) as PushButton;
+            RibbonThemeWatcher.Register(fbButton, "icon_fb");
             panel.AddSeparator();
 
             // -- Lamp Placer -------------------------------------------------
@@ -75,10 +78,11 @@ namespace METools
             {
                 ToolTip         = "Place lighting fixtures evenly distributed across selected rooms.",
                 LongDescription = $"Lamp Placer -- {VENDOR}\n\nSelect a room and lamps are placed automatically.\n\n? Configurable wall margin and lamp spacing\n? Height = UKD (underside of ceiling)\n? Multiple rooms simultaneously\n? Manual grid (rows ? columns) or area-based auto mode",
-                Image           = LoadIcon("icon_lamp_16.png"),
-                LargeImage      = LoadIcon("icon_lamp_32.png"),
+                Image           = LoadIcon("icon_lamp_light_16.png"),
+                LargeImage      = LoadIcon("icon_lamp_light_32.png"),
             };
-            panel.AddItem(lpBtn);
+            var lpButton = panel.AddItem(lpBtn) as PushButton;
+            RibbonThemeWatcher.Register(lpButton, "icon_lamp");
             panel.AddSeparator();
 
             // -- Fix Level ---------------------------------------------------
@@ -88,10 +92,11 @@ namespace METools
             {
                 ToolTip         = "Assign the correct schedule level to all visible electrical elements in the active view.",
                 LongDescription = $"Fix Level -- {VENDOR}\n\nSets the 'Schedule Level' parameter of all electrical elements visible in the current floor plan view.",
-                Image           = LoadIcon("icon_fl_fix_16.png") ?? LoadIcon("icon_fp_16.png"),
-                LargeImage      = LoadIcon("icon_fl_fix_32.png") ?? LoadIcon("icon_fp_32.png"),
+                Image           = LoadIcon("icon_fl_fix_light_16.png") ?? LoadIcon("icon_fp_light_16.png"),
+                LargeImage      = LoadIcon("icon_fl_fix_light_32.png") ?? LoadIcon("icon_fp_light_32.png"),
             };
-            panel.AddItem(flBtn);
+            var flButton = panel.AddItem(flBtn) as PushButton;
+            RibbonThemeWatcher.Register(flButton, "icon_fl_fix");
             panel.AddSeparator();
 
             // -- Circuit Tagger ---------------------------------------------
@@ -106,10 +111,11 @@ namespace METools
                                   "* Circuit Stats tab: grouped view with socket/lamp/switch counts\n" +
                                   "* All Tagged tab: every tagged element in the project\n" +
                                   "* Export to Excel or CSV",
-                Image           = LoadIcon("icon_cfg_new_16.png"),
-                LargeImage      = LoadIcon("icon_cfg_new_32.png"),
+                Image           = LoadIcon("icon_ct_light_16.png"),
+                LargeImage      = LoadIcon("icon_ct_light_32.png"),
             };
-            panel.AddItem(ctBtn);
+            var ctButton = panel.AddItem(ctBtn) as PushButton;
+            RibbonThemeWatcher.Register(ctButton, "icon_ct");
             panel.AddSeparator();
 
             // -- Statistics ------------------------------------------------
@@ -119,10 +125,16 @@ namespace METools
             {
                 ToolTip         = "Count all electrical elements by category and floor.",
                 LongDescription = $"Statistics -- {VENDOR}\n\nCounts all electrical elements by category with a per-floor breakdown.\n\nExport to CSV.",
-                Image           = LoadIcon("icon_stats_16.png") ?? LoadIcon("icon_cfg_new_16.png"),
-                LargeImage      = LoadIcon("icon_stats_32.png") ?? LoadIcon("icon_cfg_new_32.png"),
+                Image           = LoadIcon("icon_stats_light_16.png"),
+                LargeImage      = LoadIcon("icon_stats_light_32.png"),
             };
-            panel.AddItem(statsBtn);
+            var statsButton = panel.AddItem(statsBtn) as PushButton;
+            RibbonThemeWatcher.Register(statsButton, "icon_stats");
+
+            // Apply the correct light/dark icon set right now based on Revit's
+            // current theme, and subscribe so it stays in sync if the user
+            // switches Revit's theme later without restarting.
+            RibbonThemeWatcher.Init();
 
             return Result.Succeeded;
         }
