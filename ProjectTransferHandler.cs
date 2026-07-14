@@ -130,7 +130,10 @@ namespace METools.ProjectTransfer
                     string prefix = (idx > 0 && idx <= 6) ? name.Substring(0, idx) : "";
                     prefixOf[item] = prefix;
                     if (!string.IsNullOrEmpty(prefix))
-                        counts[prefix] = counts.GetValueOrDefault(prefix) + 1;
+                    {
+                        counts.TryGetValue(prefix, out var c);
+                        counts[prefix] = c + 1;
+                    }
                 }
                 foreach (var item in group)
                 {

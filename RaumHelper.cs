@@ -61,7 +61,7 @@ namespace METools.FamilyPlacer
         public static List<string> GetSynonyme(string kanonisch)
         {
             if (Synonyme.TryGetValue(kanonisch, out var liste))
-                return liste.Select(s => char.ToUpper(s[0]) + s[1..]).Take(3).ToList();
+                return liste.Select(s => char.ToUpper(s[0]) + s.Substring(1)).Take(3).ToList();
             return new();
         }
     }

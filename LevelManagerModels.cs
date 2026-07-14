@@ -57,11 +57,17 @@ namespace METools.LevelManager
 
                 var first = tokens[0];
                 if (IsGroupTag(first))
-                    firstCounts[first] = firstCounts.GetValueOrDefault(first) + 1;
+                {
+                    firstCounts.TryGetValue(first, out var c1);
+                    firstCounts[first] = c1 + 1;
+                }
 
                 var last = tokens[tokens.Length - 1];
                 if (IsZoneTag(last))
-                    lastCounts[last] = lastCounts.GetValueOrDefault(last) + 1;
+                {
+                    lastCounts.TryGetValue(last, out var c2);
+                    lastCounts[last] = c2 + 1;
+                }
             }
 
             foreach (var row in rows)

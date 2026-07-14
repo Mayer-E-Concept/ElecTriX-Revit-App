@@ -1,7 +1,19 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
+  <!--
+    Revit 2024 runs on .NET Framework 4.8. Revit 2025 and 2026 both run on .NET 8.
+    These are genuinely different runtimes: a single compiled DLL cannot load in
+    both, so this project now builds TWO separate DLLs from the same source:
+      net48            -> Revit 2024
+      net8.0-windows   -> Revit 2025 AND 2026 (one binary covers both; Autodesk
+                           keeps the common Revit API surface source/binary
+                           compatible year-to-year, and this project doesn't use
+                           anything 2026-only)
+    Building will now produce bin\<Debug|Release>\net48\METools.dll AND
+    bin\<Debug|Release>\net8.0-windows\METools.dll.
+  -->
   <PropertyGroup>
-    <TargetFramework>net8.0-windows</TargetFramework>
+    <TargetFrameworks>net48;net8.0-windows</TargetFrameworks>
     <UseWPF>true</UseWPF>
     <AssemblyName>METools</AssemblyName>
     <RootNamespace>METools</RootNamespace>
@@ -11,12 +23,33 @@
     <PlatformTarget>x64</PlatformTarget>
     <LangVersion>9</LangVersion>
     <Company>Mayer E-Concept SRL</Company>
-    <Product>ElecTriX for Autodesk Revit 2025</Product>
+    <Product>ElecTriX for Autodesk Revit</Product>
     <Copyright>© 2025 Mayer E-Concept SRL</Copyright>
-    <Version>1.0.0</Version>
+    <Version>1.3.0</Version>
   </PropertyGroup>
 
-  <ItemGroup>
+  <!-- Revit API references: net48 build links against a Revit 2024 install;
+       net8.0-windows links against a Revit 2025 install (used at runtime for
+       2026 too). Adjust these HintPaths if your installs live elsewhere. -->
+  <ItemGroup Condition="'$(TargetFramework)' == 'net48'">
+    <Reference Include="RevitAPI">
+      <HintPath>C:\Program Files\Autodesk\Revit 2024\RevitAPI.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="RevitAPIUI">
+      <HintPath>C:\Program Files\Autodesk\Revit 2024\RevitAPIUI.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="AdWindows">
+      <HintPath>C:\Program Files\Autodesk\Revit 2024\AdWindows.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <!-- System.Text.Json ships inside the .NET 8 runtime itself, but NOT inside
+         .NET Framework 4.8; it needs to come from NuGet for this target only. -->
+    <PackageReference Include="System.Text.Json" Version="8.0.5" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' == 'net8.0-windows'">
     <Reference Include="RevitAPI">
       <HintPath>C:\Program Files\Autodesk\Revit 2025\RevitAPI.dll</HintPath>
       <Private>False</Private>
@@ -71,34 +104,85 @@
     <Message Condition="!Exists('$(CertPath)')" Text="⚠ Nicht signiert — setup-signing.ps1 zuerst ausführen." Importance="high" />
   </Target>
 
-  <!-- Nach jedem Build: DLL + addin automatisch nach ProgramData kopieren -->
+  <!--
+    Nach jedem Build: DLL + addin automatisch nach ProgramData kopieren.
+    Runs once PER TARGET FRAMEWORK during a build (i.e. twice total if you build
+    both net48 and net8.0-windows): each deploys to whichever Revit version(s)
+    that specific binary is actually meant for:
+      net48          -> Revit 2024 only
+      net8.0-windows -> Revit 2025 AND 2026 (same binary, two folders)
+    Day-to-day, if you only build/debug against Revit 2025, this behaves exactly
+    like before; it just also now reaches 2026's folder for free.
+  -->
   <Target Name="DeployToRevit" AfterTargets="SignAssembly">
-    <PropertyGroup>
-      <RevitAddinsDir>C:\ProgramData\Autodesk\Revit\Addins\2025</RevitAddinsDir>
+
+    <!-- ── net48 build -> Revit 2024 ─────────────────────────────────────── -->
+    <PropertyGroup Condition="'$(TargetFramework)' == 'net48'">
+      <RevitAddinsDir2024>C:\ProgramData\Autodesk\Revit\Addins\2024</RevitAddinsDir2024>
     </PropertyGroup>
-    <MakeDir Directories="$(RevitAddinsDir)\Icons" Condition="!Exists('$(RevitAddinsDir)\Icons')" />
-    <MakeDir Directories="$(RevitAddinsDir)\config" Condition="!Exists('$(RevitAddinsDir)\config')" />
-    <Copy SourceFiles="$(OutputPath)METools.dll"
-          DestinationFolder="$(RevitAddinsDir)"
-          SkipUnchangedFiles="false"
-          OverwriteReadOnlyFiles="true"
-          ContinueOnError="true" />
-    <Copy SourceFiles="$(ProjectDir)METools.addin"
-          DestinationFolder="$(RevitAddinsDir)"
-          SkipUnchangedFiles="false"
-          OverwriteReadOnlyFiles="true"
-          ContinueOnError="true" />
-    <Copy SourceFiles="@(EmbeddedResource)"
-          DestinationFolder="$(RevitAddinsDir)\Icons"
-          SkipUnchangedFiles="false"
-          OverwriteReadOnlyFiles="true"
-          ContinueOnError="true" />
-    <Copy SourceFiles="$(OutputPath)config\standard_worksets.json"
-          DestinationFolder="$(RevitAddinsDir)\config"
-          SkipUnchangedFiles="false"
-          OverwriteReadOnlyFiles="true"
-          ContinueOnError="true" />
-    <Message Text="✓ ME-Tools deployed to $(RevitAddinsDir)" Importance="high" />
+    <MakeDir Condition="'$(TargetFramework)' == 'net48'"
+             Directories="$(RevitAddinsDir2024)\Icons" ContinueOnError="true" />
+    <MakeDir Condition="'$(TargetFramework)' == 'net48'"
+             Directories="$(RevitAddinsDir2024)\config" ContinueOnError="true" />
+    <Copy Condition="'$(TargetFramework)' == 'net48'"
+          SourceFiles="$(OutputPath)METools.dll" DestinationFolder="$(RevitAddinsDir2024)"
+          SkipUnchangedFiles="false" OverwriteReadOnlyFiles="true" ContinueOnError="true" />
+    <Copy Condition="'$(TargetFramework)' == 'net48'"
+          SourceFiles="$(ProjectDir)METools_2024.addin" DestinationFiles="$(RevitAddinsDir2024)\METools.addin"
+          SkipUnchangedFiles="false" OverwriteReadOnlyFiles="true" ContinueOnError="true" />
+    <Copy Condition="'$(TargetFramework)' == 'net48'"
+          SourceFiles="@(EmbeddedResource)" DestinationFolder="$(RevitAddinsDir2024)\Icons"
+          SkipUnchangedFiles="false" OverwriteReadOnlyFiles="true" ContinueOnError="true" />
+    <Copy Condition="'$(TargetFramework)' == 'net48'"
+          SourceFiles="$(OutputPath)config\standard_worksets.json" DestinationFolder="$(RevitAddinsDir2024)\config"
+          SkipUnchangedFiles="false" OverwriteReadOnlyFiles="true" ContinueOnError="true" />
+    <Message Condition="'$(TargetFramework)' == 'net48'"
+             Text="✓ ME-Tools (net48) deployed to $(RevitAddinsDir2024)" Importance="high" />
+
+    <!-- ── net8.0-windows build -> Revit 2025 ───────────────────────────── -->
+    <PropertyGroup Condition="'$(TargetFramework)' == 'net8.0-windows'">
+      <RevitAddinsDir2025>C:\ProgramData\Autodesk\Revit\Addins\2025</RevitAddinsDir2025>
+      <RevitAddinsDir2026>C:\ProgramData\Autodesk\Revit\Addins\2026</RevitAddinsDir2026>
+    </PropertyGroup>
+    <MakeDir Condition="'$(TargetFramework)' == 'net8.0-windows'"
+             Directories="$(RevitAddinsDir2025)\Icons" ContinueOnError="true" />
+    <MakeDir Condition="'$(TargetFramework)' == 'net8.0-windows'"
+             Directories="$(RevitAddinsDir2025)\config" ContinueOnError="true" />
+    <Copy Condition="'$(TargetFramework)' == 'net8.0-windows'"
+          SourceFiles="$(OutputPath)METools.dll" DestinationFolder="$(RevitAddinsDir2025)"
+          SkipUnchangedFiles="false" OverwriteReadOnlyFiles="true" ContinueOnError="true" />
+    <Copy Condition="'$(TargetFramework)' == 'net8.0-windows'"
+          SourceFiles="$(ProjectDir)METools.addin" DestinationFolder="$(RevitAddinsDir2025)"
+          SkipUnchangedFiles="false" OverwriteReadOnlyFiles="true" ContinueOnError="true" />
+    <Copy Condition="'$(TargetFramework)' == 'net8.0-windows'"
+          SourceFiles="@(EmbeddedResource)" DestinationFolder="$(RevitAddinsDir2025)\Icons"
+          SkipUnchangedFiles="false" OverwriteReadOnlyFiles="true" ContinueOnError="true" />
+    <Copy Condition="'$(TargetFramework)' == 'net8.0-windows'"
+          SourceFiles="$(OutputPath)config\standard_worksets.json" DestinationFolder="$(RevitAddinsDir2025)\config"
+          SkipUnchangedFiles="false" OverwriteReadOnlyFiles="true" ContinueOnError="true" />
+    <Message Condition="'$(TargetFramework)' == 'net8.0-windows'"
+             Text="✓ ME-Tools (net8.0-windows) deployed to $(RevitAddinsDir2025)" Importance="high" />
+
+    <!-- ── net8.0-windows build -> Revit 2026 (same DLL, second folder) ─── -->
+    <MakeDir Condition="'$(TargetFramework)' == 'net8.0-windows'"
+             Directories="$(RevitAddinsDir2026)\Icons" ContinueOnError="true" />
+    <MakeDir Condition="'$(TargetFramework)' == 'net8.0-windows'"
+             Directories="$(RevitAddinsDir2026)\config" ContinueOnError="true" />
+    <Copy Condition="'$(TargetFramework)' == 'net8.0-windows'"
+          SourceFiles="$(OutputPath)METools.dll" DestinationFolder="$(RevitAddinsDir2026)"
+          SkipUnchangedFiles="false" OverwriteReadOnlyFiles="true" ContinueOnError="true" />
+    <Copy Condition="'$(TargetFramework)' == 'net8.0-windows'"
+          SourceFiles="$(ProjectDir)METools_2026.addin" DestinationFiles="$(RevitAddinsDir2026)\METools.addin"
+          SkipUnchangedFiles="false" OverwriteReadOnlyFiles="true" ContinueOnError="true" />
+    <Copy Condition="'$(TargetFramework)' == 'net8.0-windows'"
+          SourceFiles="@(EmbeddedResource)" DestinationFolder="$(RevitAddinsDir2026)\Icons"
+          SkipUnchangedFiles="false" OverwriteReadOnlyFiles="true" ContinueOnError="true" />
+    <Copy Condition="'$(TargetFramework)' == 'net8.0-windows'"
+          SourceFiles="$(OutputPath)config\standard_worksets.json" DestinationFolder="$(RevitAddinsDir2026)\config"
+          SkipUnchangedFiles="false" OverwriteReadOnlyFiles="true" ContinueOnError="true" />
+    <Message Condition="'$(TargetFramework)' == 'net8.0-windows'"
+             Text="✓ ME-Tools (net8.0-windows) also deployed to $(RevitAddinsDir2026)" Importance="high" />
+
   </Target>
 
 </Project>

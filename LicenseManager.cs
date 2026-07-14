@@ -246,10 +246,35 @@ namespace METools
                 // Verify the signature with the embedded public key.
                 using (var ecdsa = ECDsa.Create())
                 {
+#if NETFRAMEWORK
+                    // .NET Framework 4.8 has neither ImportSubjectPublicKeyInfo nor
+                    // DSASignatureFormat -- both were added in .NET Core 3.0+. The key
+                    // above is a standard uncompressed P-256 SubjectPublicKeyInfo blob;
+                    // for that fixed structure, the raw EC point (0x04 marker + 32-byte
+                    // X + 32-byte Y) is always exactly the LAST 64 bytes, so it can be
+                    // pulled out directly instead of using the newer SPKI importer.
+                    // Signature format: .NET Framework's ECDsa (ECDsaCng, backed by
+                    // Windows CNG) has always produced/verified IEEE P1363 (raw R||S)
+                    // signatures natively -- that's exactly the format
+                    // DSASignatureFormat.IeeeP1363FixedFieldConcatenation requests
+                    // explicitly below, so omitting the format parameter here is not
+                    // an approximation, it's what this platform's VerifyData already does.
+                    byte[] spki = Convert.FromBase64String(PublicKeyB64);
+                    byte[] qx = new byte[32], qy = new byte[32];
+                    Array.Copy(spki, spki.Length - 64, qx, 0, 32);
+                    Array.Copy(spki, spki.Length - 32, qy, 0, 32);
+                    ecdsa.ImportParameters(new ECParameters
+                    {
+                        Curve = ECCurve.NamedCurves.nistP256,
+                        Q     = new ECPoint { X = qx, Y = qy },
+                    });
+                    bool ok = ecdsa.VerifyData(payloadBytes, signature, HashAlgorithmName.SHA256);
+#else
                     ecdsa.ImportSubjectPublicKeyInfo(Convert.FromBase64String(PublicKeyB64), out _);
                     bool ok = ecdsa.VerifyData(payloadBytes, signature,
                         HashAlgorithmName.SHA256,
                         DSASignatureFormat.IeeeP1363FixedFieldConcatenation);
+#endif
                     if (!ok) return false;
                 }
 
