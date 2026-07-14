@@ -163,7 +163,8 @@ namespace METools.FamilyPlacer
         {
             var gespeichert = LadeGespeicherteKonfig();
             var diag = RevitDatenHelper.ErstelleDiagnose(_doc);
-            var raumnummern  = RevitDatenHelper.LeseAlleRaumnummern(_doc);
+            var raeumeRoh    = RevitDatenHelper.LeseAlleRaeume(_doc); // fetched once, reused below
+            var raumnummern  = RevitDatenHelper.LeseAlleRaumnummern(raeumeRoh);
             var schema       = SchemaHelper.ErkenneSchema(raumnummern);
             var verteilerDet = RevitDatenHelper.LeseVerteilerDetails(_doc);
             var zuordnung    = RevitDatenHelper.ErmittleVerteilerzuordnung(_doc, schema);
@@ -271,7 +272,7 @@ namespace METools.FamilyPlacer
             }
 
             // Räume laden
-            var raeume = RevitDatenHelper.LeseAlleRaeume(_doc)
+            var raeume = raeumeRoh
                 .Where(r => !string.IsNullOrWhiteSpace(r.Name))
                 .OrderBy(r => SortKey(r.Nummer), StringComparer.OrdinalIgnoreCase)
                 .ThenBy(r => r.Name ?? "", StringComparer.OrdinalIgnoreCase)

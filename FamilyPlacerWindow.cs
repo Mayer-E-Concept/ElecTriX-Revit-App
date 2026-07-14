@@ -25,8 +25,6 @@ namespace METools.FamilyPlacer
         // the ME-Concept brand palette, instead of a frozen, always-light copy.
         private static Color CPetrol     => MeToolsTheme.CPetrol;
         private static Color CPetrolDark => MeToolsTheme.CPetrolDark;
-        private static Color CPetrolDim  => MeToolsTheme.Current == MeTheme.Dark ? Color.FromRgb(0x16, 0x3A, 0x3A) : Color.FromRgb(0xcc, 0xe5, 0xe5);
-        private static Color CPetrolText => MeToolsTheme.Current == MeTheme.Dark ? MeToolsTheme.CAccent : Color.FromRgb(0x14, 0x4d, 0x4d);
         private static Color CStatusBar  => MeToolsTheme.CStatusBar;
         private static Color CBg         => MeToolsTheme.CBg;
         private static Color CSurface    => MeToolsTheme.CSurface;
@@ -56,7 +54,6 @@ namespace METools.FamilyPlacer
         private Button      _btnOri1, _btnOri2;
         private TextBlock   _statusCount;
 
-        private FrameworkElement _levelSection;
         private readonly List<SlotRow> _rows = new List<SlotRow>();
 
         public FamilyPlacerWindow(ExternalEvent extEvent,
@@ -276,7 +273,6 @@ namespace METools.FamilyPlacer
         private SlotRow              _dragRow;
         private System.Windows.Point _dragStart;
         private bool                 _dragging;
-        private Border    _dragPlaceholder;
 
         private void StartDrag(SlotRow row, MouseButtonEventArgs e)
         {
@@ -787,36 +783,6 @@ namespace METools.FamilyPlacer
             btn.MouseLeave += (s, e) => btn.Background = isOutline
                 ? MeToolsTheme.BrBtnBg
                 : MeToolsTheme.BrPetrol;
-            return btn;
-        }
-
-        private FrameworkElement MakeWinBtn(string symbol, bool isDanger, Action onClick)
-        {
-            var btn = new Border
-            {
-                Width  = 44, Height = 36,
-                Background = Brushes.Transparent,
-                Cursor = Cursors.Hand,
-                Child = new TextBlock
-                {
-                    Text = symbol,
-                    FontSize = 11,
-                    Foreground = new SolidColorBrush(Color.FromArgb(140, 255, 255, 255)),
-                    HorizontalAlignment = HorizontalAlignment.Center,
-                    VerticalAlignment   = VerticalAlignment.Center,
-                }
-            };
-            btn.MouseEnter += (s, e) => {
-                btn.Background = isDanger
-                    ? new SolidColorBrush(Color.FromRgb(0xc4, 0x2b, 0x1c))
-                    : new SolidColorBrush(Color.FromRgb(0x3e, 0x4e, 0x4e));
-                ((TextBlock)btn.Child).Foreground = MeToolsTheme.BrBtnBg;
-            };
-            btn.MouseLeave += (s, e) => {
-                btn.Background = Brushes.Transparent;
-                ((TextBlock)btn.Child).Foreground = new SolidColorBrush(Color.FromArgb(140, 255, 255, 255));
-            };
-            btn.MouseLeftButtonDown += (s, e) => onClick();
             return btn;
         }
 

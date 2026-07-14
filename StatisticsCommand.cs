@@ -38,6 +38,19 @@ namespace METools
     // Counts elements per category. All reads only - no transaction needed.
     public static class StatisticsCollector
     {
+        // Fetches a category's elements once so multiple views (total count, by-type,
+        // by-workset) can be derived from the same scan instead of re-querying the
+        // document for each one. Matches Cnt()'s own filter exactly (WhereElementIsNotElementType).
+        private static List<Element> FetchCategory(Document doc, BuiltInCategory cat)
+        {
+            try
+            {
+                return new FilteredElementCollector(doc)
+                    .OfCategory(cat).WhereElementIsNotElementType().ToElements().ToList();
+            }
+            catch { return new List<Element>(); }
+        }
+
         private static int Cnt(Document doc, BuiltInCategory cat)
         {
             try
@@ -49,6 +62,9 @@ namespace METools
             }
             catch { return 0; }
         }
+
+        // Same count, against an already-fetched element list.
+        private static int Cnt(List<Element> elements) => elements.Count;
 
         // Sum CURVE_ELEM_LENGTH in metres for a category (run lengths only, no fittings)
         private static double SumLengthM(Document doc, BuiltInCategory cat)
@@ -78,9 +94,23 @@ namespace METools
         {
             try
             {
-                return new FilteredElementCollector(doc)
+                return CountByType(new FilteredElementCollector(doc)
                     .OfCategory(cat).WhereElementIsNotElementType()
-                    .OfClass(typeof(FamilyInstance)).Cast<FamilyInstance>()
+                    .OfClass(typeof(FamilyInstance)).Cast<FamilyInstance>().ToList());
+            }
+            catch { return new List<(string, int)>(); }
+        }
+
+        // Same grouping, against an already-fetched element list (filtered to
+        // FamilyInstance the same way the Document overload above does).
+        public static List<(string TypeName, int Count)> CountByType(List<Element> elements)
+            => CountByType(elements.OfType<FamilyInstance>().ToList());
+
+        private static List<(string TypeName, int Count)> CountByType(List<FamilyInstance> instances)
+        {
+            try
+            {
+                return instances
                     .GroupBy(fi => fi.Symbol?.Name ?? "(unknown)")
                     .Select(g => (g.Key, g.Count()))
                     .OrderBy(x => x.Item1, StringComparer.OrdinalIgnoreCase)
@@ -96,9 +126,20 @@ namespace METools
             try
             {
                 if (!doc.IsWorkshared) return new List<(string, int)>();
+                return CountByWorkset(doc, new FilteredElementCollector(doc)
+                    .OfCategory(cat).WhereElementIsNotElementType().ToElements().ToList());
+            }
+            catch { return new List<(string, int)>(); }
+        }
+
+        // Same grouping, against an already-fetched element list.
+        public static List<(string WorksetName, int Count)> CountByWorkset(Document doc, List<Element> elements)
+        {
+            try
+            {
+                if (!doc.IsWorkshared) return new List<(string, int)>();
                 var wsTable = doc.GetWorksetTable();
-                return new FilteredElementCollector(doc)
-                    .OfCategory(cat).WhereElementIsNotElementType()
+                return elements
                     .GroupBy(el =>
                     {
                         try { return wsTable.GetWorkset(el.WorksetId)?.Name ?? "(unknown)"; }
@@ -153,9 +194,16 @@ namespace METools
 
             // Mapping for this project (verified): sockets = Electrical Fixtures,
             // switches = Lighting Devices, lamps = Lighting Fixtures.
-            int sockets  = Cnt(doc, BuiltInCategory.OST_ElectricalFixtures);
-            int switches = Cnt(doc, BuiltInCategory.OST_LightingDevices);
-            int lamps    = Cnt(doc, BuiltInCategory.OST_LightingFixtures);
+            // Each category is fetched once and reused below for the total count,
+            // the by-type breakdown, and the by-workset breakdown — previously each
+            // of those ran its own separate document-wide scan of the same category.
+            var socketEls = FetchCategory(doc, BuiltInCategory.OST_ElectricalFixtures);
+            var switchEls = FetchCategory(doc, BuiltInCategory.OST_LightingDevices);
+            var lampEls   = FetchCategory(doc, BuiltInCategory.OST_LightingFixtures);
+
+            int sockets  = Cnt(socketEls);
+            int switches = Cnt(switchEls);
+            int lamps    = Cnt(lampEls);
 
             // Highlight tiles
             r.Add(new StatRow("Highlights", "Sockets",  sockets,  true));
@@ -168,23 +216,23 @@ namespace METools
             r.Add(new StatRow("Electrical", "Switches (Lighting Devices)",  switches));
 
             // Sockets by type
-            foreach (var (tn, cnt) in CountByType(doc, BuiltInCategory.OST_ElectricalFixtures))
+            foreach (var (tn, cnt) in CountByType(socketEls))
                 r.Add(new StatRow("Sockets by type", tn, cnt));
 
             // Switches by type
-            foreach (var (tn, cnt) in CountByType(doc, BuiltInCategory.OST_LightingDevices))
+            foreach (var (tn, cnt) in CountByType(switchEls))
                 r.Add(new StatRow("Switches by type", tn, cnt));
 
             // Sockets by workset (workshared projects only)
-            foreach (var (ws, cnt) in CountByWorkset(doc, BuiltInCategory.OST_ElectricalFixtures))
+            foreach (var (ws, cnt) in CountByWorkset(doc, socketEls))
                 r.Add(new StatRow("Sockets by workset", ws, cnt));
 
             // Switches by workset (workshared projects only)
-            foreach (var (ws, cnt) in CountByWorkset(doc, BuiltInCategory.OST_LightingDevices))
+            foreach (var (ws, cnt) in CountByWorkset(doc, switchEls))
                 r.Add(new StatRow("Switches by workset", ws, cnt));
 
             // Lamps by workset (workshared projects only)
-            foreach (var (ws, cnt) in CountByWorkset(doc, BuiltInCategory.OST_LightingFixtures))
+            foreach (var (ws, cnt) in CountByWorkset(doc, lampEls))
                 r.Add(new StatRow("Lamps by workset", ws, cnt));
 
             // Per-floor breakdown

@@ -38,7 +38,7 @@ namespace METools.FamilyPlacer
         // Input fields
         private TextBox   _tbVorsicherung, _tbFI, _tbStromkreis, _tbSubIndex, _tbBeleuchtungskreis, _tbSubLabel;
         private ComboBox  _cbApartment, _cbBuilding;
-        private TextBox   _tbGapMm, _tbStackGapMm, _tbOffsetYMm;
+        private TextBox   _tbGapMm, _tbStackGapMm;
         // Settings tab controls
         private TextBox   _tbSetGapMm, _tbSetOffsetYMm, _tbSetStackGapMm;
         private TextBox   _tbSetFontName, _tbSetFontSizeMm, _tbSetColorHex;

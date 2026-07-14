@@ -88,7 +88,15 @@ namespace METools.FamilyPlacer
 
         public static List<string> LeseAlleRaumnummern(Document doc)
         {
-            return LeseAlleRaeume(doc)
+            return LeseAlleRaumnummern(LeseAlleRaeume(doc));
+        }
+
+        // Same logic as above, but against an already-fetched room list — avoids a
+        // second full Rooms+MEPSpaces scan when a caller (e.g. KonfigViewModel.LadeDaten)
+        // already needs the raw room list for something else too.
+        public static List<string> LeseAlleRaumnummern(List<(string Nummer, string Name)> raeume)
+        {
+            return raeume
                 .Select(r => r.Nummer)
                 .Where(n => !string.IsNullOrWhiteSpace(n))
                 .Distinct()

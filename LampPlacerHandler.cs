@@ -1050,6 +1050,11 @@ namespace METools.LampPlacer
             var allRooms = new FilteredElementCollector(doc)
                 .OfClass(typeof(SpatialElement)).OfCategory(BuiltInCategory.OST_Rooms)
                 .Cast<Room>().Where(r => r != null && r.Area > 0).ToList();
+            // Fetched once up front instead of inside the grid loop below — GetNearestLevel
+            // was re-scanning every Level in the document on every single grid point.
+            var allLevels = fallbackLvl != null
+                ? null
+                : new FilteredElementCollector(doc).OfClass(typeof(Level)).Cast<Level>().ToList();
 
             int rows = Math.Max(1, cfg.ManualRows);
             int cols = Math.Max(1, cfg.ManualCols);
@@ -1081,7 +1086,7 @@ namespace METools.LampPlacer
                     {
                         var bb = room.get_BoundingBox(null);
                         ukdZ  = (bb != null ? bb.Max.Z : GetUKD(room)) - offsetFt;
-                        level = GetNearestLevel(doc, ukdZ);
+                        level = GetNearestLevel(allLevels, ukdZ);
                     }
                     else { continue; }
 
@@ -1129,6 +1134,11 @@ namespace METools.LampPlacer
             var allRooms = new FilteredElementCollector(doc)
                 .OfClass(typeof(SpatialElement)).OfCategory(BuiltInCategory.OST_Rooms)
                 .Cast<Room>().Where(r => r != null && r.Area > 0).ToList();
+            // Fetched once up front instead of inside the per-spot loop below — same fix
+            // as the grid-placement method just above.
+            var allLevels = fallbackLvl != null
+                ? null
+                : new FilteredElementCollector(doc).OfClass(typeof(Level)).Cast<Level>().ToList();
 
             // 4. Build placement points (XY + tangent) per mode
             var spots = new List<KeyValuePair<XYZ, double>>();
@@ -1242,7 +1252,7 @@ namespace METools.LampPlacer
                 {
                     var bb = room.get_BoundingBox(null);
                     ukdZ  = (bb != null ? bb.Max.Z : GetUKD(room)) - offsetFt;
-                    level = GetNearestLevel(doc, ukdZ);
+                    level = GetNearestLevel(allLevels, ukdZ);
                 }
                 else { continue; }
 
@@ -1559,6 +1569,16 @@ namespace METools.LampPlacer
         {
             try { return new FilteredElementCollector(doc).OfClass(typeof(Level))
                 .Cast<Level>().OrderBy(l => Math.Abs(l.Elevation - z)).FirstOrDefault(); }
+            catch { return null; }
+        }
+
+        // Same lookup as above, but against an already-fetched level list — used inside
+        // per-point placement loops (grid/line modes) so the document isn't re-scanned
+        // for every single point. Identical selection logic, just given the list instead
+        // of re-querying it.
+        private Level GetNearestLevel(List<Level> levels, double z)
+        {
+            try { return levels.OrderBy(l => Math.Abs(l.Elevation - z)).FirstOrDefault(); }
             catch { return null; }
         }
 
