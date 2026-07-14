@@ -30,6 +30,8 @@ namespace METools
                     TryOpen("METools.FixLevelCommand", app);
                 else if (Target == "Statistics")
                     TryOpen("METools.StatisticsCommand", app);
+                else if (Target == "Comments")
+                    METools.Comments.CommentsCommand.Open(app);
             }
             catch { }
         }
@@ -72,6 +74,7 @@ namespace METools
                 ("FixLevel",      "Fix Level"),
                 ("CircuitTagger", "Circuit Tagger"),
                 ("Statistics",    "Statistics"),
+                ("Comments",      "Comments"),
             };
 
         private static AppSwitchHandler _handler;

@@ -20,6 +20,10 @@ namespace METools
             // so the ribbon setup below stays exactly as it was.
             SplashGate.Register(app);
 
+            // -- Project Comments background notifier (silent unless a shared
+            // folder is configured in the Comments tool's own settings) --------
+            METools.Comments.CommentsWatcher.Register(app);
+
             try { app.CreateRibbonTab(TAB); } catch { }
 
             var panel  = app.CreateRibbonPanel(TAB, PANEL);
@@ -158,6 +162,25 @@ namespace METools
             };
             var statsButton = panel.AddItem(statsBtn) as PushButton;
             RibbonThemeWatcher.Register(statsButton, "icon_stats");
+            panel.AddSeparator();
+
+            // -- Comments ----------------------------------------------------
+            var cmtBtn = new PushButtonData(
+                "Comments", "Comments", dll,
+                "METools.Comments.CommentsCommand")
+            {
+                ToolTip         = "Leave a comment tagged to a level; teammates get notified when they open this project.",
+                LongDescription = $"Comments -- {VENDOR}\n\nLeave a note on the level you're working on -- a teammate " +
+                                  "on another computer gets a popup with a sound cue when they open this project and " +
+                                  "navigate there.\n\n" +
+                                  "* Requires a shared network folder (configured once in this tool's own settings)\n" +
+                                  "* See every comment for this project, by whom, on which level, and its status\n" +
+                                  "* Mark Done, Ignore, or Reopen from either the popup or the full list",
+                Image           = LoadIcon("icon_comments_light_16.png"),
+                LargeImage      = LoadIcon("icon_comments_light_32.png"),
+            };
+            var cmtButton = panel.AddItem(cmtBtn) as PushButton;
+            RibbonThemeWatcher.Register(cmtButton, "icon_comments");
 
             // Apply the correct light/dark icon set right now based on Revit's
             // current theme, and subscribe so it stays in sync if the user

@@ -6,6 +6,7 @@ using Autodesk.Revit.UI;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text;
 
 namespace METools
 {
@@ -152,11 +153,113 @@ namespace METools
             catch { return new List<(string, int)>(); }
         }
 
-        // Groups elements by CAx_Trassenbezugsebene (the level name string set by Fix Level).
-        // Falls back to the Revit built-in level name if the CAx param is empty.
+        // Groups elements by level, in priority order:
+        //  1. CAx_Trassenbezugsebene -- the office-defined schedule level string set by
+        //     Fix Level; authoritative when present.
+        //  2. INSTANCE_SCHEDULE_ONLY_LEVEL_PARAM -- Revit's own built-in "Schedule Level"
+        //     field. Same fallback FixLevelCommand.CurrentLevelId already relies on.
+        //  3. The instance's own placement Level (LevelId).
+        //  4. Nearest real Level by Z-elevation -- confirmed via live model inspection
+        //     that some elements (e.g. ones Family Placer's last-resort placement path
+        //     created with no host, no workplane, and no level association at all) have
+        //     NONE of the above set, despite sitting at a perfectly real, sensible Z
+        //     position. Rather than let every one of those fall into "Unknown", this
+        //     finds whichever real Level in the project is physically closest -- the
+        //     same technique LampPlacerHandler.GetNearestLevel already uses.
+        //  "Unknown" only once all four genuinely have nothing usable.
+        private static string ResolveFloorLevelName(Document doc, FamilyInstance fi, List<Level> allLevels)
+        {
+            try
+            {
+                var lvl = fi.LookupParameter("CAx_Trassenbezugsebene")?.AsString();
+                if (!string.IsNullOrWhiteSpace(lvl)) return lvl;
+            }
+            catch { }
+
+            try
+            {
+                var p = fi.get_Parameter(BuiltInParameter.INSTANCE_SCHEDULE_ONLY_LEVEL_PARAM);
+                if (p != null)
+                {
+                    var id = p.AsElementId();
+                    if (id != null && id != ElementId.InvalidElementId)
+                    {
+                        var name = (doc.GetElement(id) as Level)?.Name;
+                        if (!string.IsNullOrWhiteSpace(name)) return name;
+                    }
+                }
+            }
+            catch { }
+
+            try
+            {
+                var name = (doc.GetElement(fi.LevelId) as Level)?.Name;
+                if (!string.IsNullOrWhiteSpace(name)) return name;
+            }
+            catch { }
+
+            try
+            {
+                if (allLevels.Count > 0 && fi.Location is LocationPoint lp)
+                {
+                    var nearest = allLevels.OrderBy(l => Math.Abs(l.Elevation - lp.Point.Z)).First();
+                    if (!string.IsNullOrWhiteSpace(nearest.Name)) return nearest.Name;
+                }
+            }
+            catch { }
+
+            return "Unknown";
+        }
+
+        // Natural sort: splits each name into text/number runs so "Obergeschoss 10" sorts
+        // after "Obergeschoss 2" instead of before it (plain string sort compares the "1"
+        // before the "2" and gets that backwards). "Unknown" is always forced last,
+        // deterministically, rather than however it happens to fall alphabetically.
+        private static List<string> NaturalSortKey(string s)
+        {
+            var parts = new List<string>();
+            var current = new StringBuilder();
+            bool? lastWasDigit = null;
+            foreach (var ch in s)
+            {
+                bool isDigit = char.IsDigit(ch);
+                if (lastWasDigit != null && isDigit != lastWasDigit)
+                {
+                    parts.Add(current.ToString());
+                    current.Clear();
+                }
+                current.Append(ch);
+                lastWasDigit = isDigit;
+            }
+            if (current.Length > 0) parts.Add(current.ToString());
+            return parts;
+        }
+
+        private static int CompareFloorNames(string a, string b)
+        {
+            bool aUnknown = string.Equals(a, "Unknown", StringComparison.OrdinalIgnoreCase);
+            bool bUnknown = string.Equals(b, "Unknown", StringComparison.OrdinalIgnoreCase);
+            if (aUnknown != bUnknown) return aUnknown ? 1 : -1; // Unknown always last
+            if (aUnknown && bUnknown) return 0;
+
+            var pa = NaturalSortKey(a);
+            var pb = NaturalSortKey(b);
+            for (int i = 0; i < Math.Min(pa.Count, pb.Count); i++)
+            {
+                bool numA = int.TryParse(pa[i], out int na);
+                bool numB = int.TryParse(pb[i], out int nb);
+                int cmp = (numA && numB) ? na.CompareTo(nb)
+                                          : string.Compare(pa[i], pb[i], StringComparison.OrdinalIgnoreCase);
+                if (cmp != 0) return cmp;
+            }
+            return pa.Count.CompareTo(pb.Count);
+        }
+
         public static List<(string LevelName, int Sockets, int Switches, int Lamps)> CountByFloor(Document doc)
         {
             var result = new Dictionary<string, (int s, int sw, int l)>(StringComparer.OrdinalIgnoreCase);
+            // Fetched once, not per-element, for the geometric fallback in ResolveFloorLevelName.
+            var allLevels = new FilteredElementCollector(doc).OfClass(typeof(Level)).Cast<Level>().ToList();
             void Add(BuiltInCategory cat, int slot)
             {
                 try
@@ -166,10 +269,7 @@ namespace METools
                         .OfClass(typeof(FamilyInstance)).Cast<FamilyInstance>();
                     foreach (var fi in instances)
                     {
-                        string lvl = "";
-                        try { lvl = fi.LookupParameter("CAx_Trassenbezugsebene")?.AsString() ?? ""; } catch { }
-                        if (string.IsNullOrWhiteSpace(lvl))
-                            try { lvl = (doc.GetElement(fi.LevelId) as Level)?.Name ?? "Unknown"; } catch { lvl = "Unknown"; }
+                        string lvl = ResolveFloorLevelName(doc, fi, allLevels);
                         if (!result.TryGetValue(lvl, out var t)) t = (0, 0, 0);
                         result[lvl] = slot == 0 ? (t.s + 1, t.sw, t.l)
                                     : slot == 1 ? (t.s, t.sw + 1, t.l)
@@ -181,9 +281,10 @@ namespace METools
             Add(BuiltInCategory.OST_ElectricalFixtures, 0);
             Add(BuiltInCategory.OST_LightingDevices,    1);
             Add(BuiltInCategory.OST_LightingFixtures,   2);
-            return result
-                .OrderBy(kv => kv.Key)
-                .Select(kv => (kv.Key, kv.Value.s, kv.Value.sw, kv.Value.l))
+            var keys = result.Keys.ToList();
+            keys.Sort(CompareFloorNames);
+            return keys
+                .Select(k => (k, result[k].s, result[k].sw, result[k].l))
                 .ToList();
         }
 

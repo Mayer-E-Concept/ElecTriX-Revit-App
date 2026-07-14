@@ -12,7 +12,7 @@
 ; NOTE: every Source/DestDir entry is a SINGLE line (Inno requirement).
 
 #define AppName     "ME-Tools"
-#define AppVersion  "1.3.0"
+#define AppVersion  "1.5.0"
 #define Publisher   "Mayer E-Concept SRL"
 
 ; --- adjust this absolute path to your machine if it differs ------------------
@@ -75,6 +75,12 @@ Source: "{#Dll2025Path}"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2026";
 Source: "{#ProjectDir}\METools_2026.addin"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2026"; DestName: "METools.addin"; Flags: ignoreversion; Tasks: rvt2026
 Source: "{#ProjectDir}\standard_worksets.json"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2026\config"; Flags: ignoreversion onlyifdoesntexist; Tasks: rvt2026
 
+; -- Project Comments: pre-fills the shared network folder so every teammate
+; gets it working out of the box instead of typing the UNC path in by hand.
+; onlyifdoesntexist so re-installing/upgrading never overwrites someone's own
+; customized path (e.g. if a specific person needs a different folder).
+Source: "{#ProjectDir}\comments-settings-default.json"; DestDir: "{userappdata}\METools"; DestName: "comments-settings.json"; Flags: ignoreversion onlyifdoesntexist
+
 [UninstallDelete]
 Type: files; Name: "{commonappdata}\Autodesk\Revit\Addins\2024\METools.dll"
 Type: files; Name: "{commonappdata}\Autodesk\Revit\Addins\2024\METools.addin"
@@ -88,98 +94,48 @@ Type: files; Name: "{commonappdata}\Autodesk\Revit\Addins\2026\METools.dll"
 Type: files; Name: "{commonappdata}\Autodesk\Revit\Addins\2026\METools.addin"
 Type: files; Name: "{commonappdata}\Autodesk\Revit\Addins\2026\config\standard_worksets.json"
 Type: dirifempty; Name: "{commonappdata}\Autodesk\Revit\Addins\2026\config"
+Type: files; Name: "{userappdata}\METools\comments-settings.json"
 
 [Messages]
 WelcomeLabel2=This will install [name/ver] for Autodesk Revit.%n%nPlease close Revit before continuing.
 
 [Code]
 { ────────────────────────────────────────────────────────────────────────────
-  Recolors the setup wizard to match the app's own dark teal / cyan-accent
-  theme (see MeToolsTheme.cs's dark palette -- these are the same hex values).
-
-  Being upfront about what this can and can't do: Inno Setup's wizard is a
-  native Win32-style UI, not WPF, so this can't be pixel-identical to the app
-  -- there's no custom title bar, no rounded buttons, no hover animations here.
-  What DOES translate well: page backgrounds, text colors, the checklist/edit/
-  memo boxes, and the page title in the accent cyan. The one area Inno itself
-  has the least control over is button chrome -- Next/Back/Cancel often defer
-  to Windows' own theme rendering for authenticity, so the button FACE may stay
-  the OS default even though its text color changes. If anything still looks
-  off after compiling, a screenshot is the fastest way to pin down exactly
-  which control needs a follow-up fix.
+  Themes the setup wizard's OUTER background (the title strip at the top and
+  the button bar at the bottom -- WizardForm's own background) to match the
+  app's dark teal / cyan-accent theme, and leaves the middle content area
+  (MainPanel: the Tasks checklist, instructions, license text, etc.) at Inno's
+  normal white-with-black-text default. Earlier attempts also forced that
+  middle area dark, but some of its controls kept reverting to white
+  regardless, so this settles on the combination that's actually reliable:
+  dark top/bottom, plain white middle -- rather than an inconsistent mix.
   ──────────────────────────────────────────────────────────────────────────── }
 var
-  ClrBg, ClrSurface, ClrText, ClrMuted, ClrAccent, ClrInputBg: TColor;
+  ClrBg, ClrAccent, ClrMuted: TColor;
 
-procedure ApplyDarkColors(Ctrl: TWinControl); forward;
-
-procedure InitializeWizard;
+procedure ApplyTitleColors;
 begin
-  { Same hex values as MeToolsTheme.cs's dark theme -- RGB() converts to the
-    BGR-ordered TColor Pascal/Delphi actually uses internally, so these numbers
-    match the app's palette even though the raw integer would look different. }
-  ClrBg      := RGB($0A, $1E, $1E); { CBg }
-  ClrSurface := RGB($10, $2B, $2B); { CSurface }
-  ClrText    := RGB($E9, $F4, $F3); { CText }
-  ClrMuted   := RGB($86, $A8, $A6); { CMuted }
-  ClrAccent  := RGB($54, $DB, $D3); { CAccent }
-  ClrInputBg := RGB($0D, $26, $26); { CInput }
-
-  WizardForm.Color := ClrBg;
-  try WizardForm.MainPanel.Color := ClrBg; except end;
-
-  ApplyDarkColors(WizardForm);
-
-  { Emphasis pass: page title in accent cyan, like the app uses accent color
-    for emphasis throughout, after the generic recolor above already ran. }
   try WizardForm.PageNameLabel.Font.Color := ClrAccent; except end;
   try WizardForm.PageDescriptionLabel.Font.Color := ClrMuted; except end;
 end;
 
-{ Recursively recolors every control on every wizard page. Wrapped defensively
-  since not every Inno version exposes every property identically -- a failed
-  cast or missing property here just skips that one control instead of
-  crashing the installer. }
-procedure ApplyDarkColors(Ctrl: TWinControl);
-var
-  I: Integer;
-  C: TControl;
+procedure InitializeWizard;
 begin
-  for I := 0 to Ctrl.ControlCount - 1 do
-  begin
-    C := Ctrl.Controls[I];
+  { Same hex values as MeToolsTheme.cs's dark theme, converted by hand to the
+    BGR-ordered TColor integer Pascal/Delphi uses internally (Inno's Pascal
+    Script has no built-in RGB() function). }
+  ClrBg     := $1E1E0A; { CBg     = RGB(0x0A,0x1E,0x1E) }
+  ClrAccent := $D3DB54; { CAccent = RGB(0x54,0xDB,0xD3) }
+  ClrMuted  := $A6A886; { CMuted  = RGB(0x86,0xA8,0xA6) }
 
-    try
-      if C is TNewStaticText then
-        TNewStaticText(C).Font.Color := ClrText
-      else if C is TNewCheckListBox then
-      begin
-        TNewCheckListBox(C).Color := ClrSurface;
-        TNewCheckListBox(C).Font.Color := ClrText;
-      end
-      else if C is TNewEdit then
-      begin
-        TNewEdit(C).Color := ClrInputBg;
-        TNewEdit(C).Font.Color := ClrText;
-      end
-      else if C is TNewMemo then
-      begin
-        TNewMemo(C).Color := ClrInputBg;
-        TNewMemo(C).Font.Color := ClrText;
-      end
-      else if C is TRichEditViewer then
-      begin
-        TRichEditViewer(C).Color := ClrInputBg;
-        TRichEditViewer(C).Font.Color := ClrText;
-      end
-      else if C is TNewButton then
-        TNewButton(C).Font.Color := ClrText
-      else if C is TPanel then
-        TPanel(C).Color := ClrBg;
-    except
-    end;
+  WizardForm.Color := ClrBg;
+  ApplyTitleColors;
+end;
 
-    if C is TWinControl then
-      ApplyDarkColors(TWinControl(C));
-  end;
+{ PageNameLabel/PageDescriptionLabel get re-styled by Inno whenever the page
+  actually changes, after InitializeWizard's one-time pass -- re-applying the
+  same two colors here keeps the title area consistent on every page. }
+procedure CurPageChanged(CurPageID: Integer);
+begin
+  ApplyTitleColors;
 end;
