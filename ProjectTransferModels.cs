@@ -17,6 +17,10 @@ namespace METools.ProjectTransfer
         public string           SubInfo     { get; set; } = "";    // e.g. view type, field count, category count
         public bool             Warning     { get; set; }         // e.g. sheet holds views tied to this project's levels
         public string           WarningText { get; set; } = "";
+        // Auto-detected naming prefix within this category (e.g. "A", "E", "S" for
+        // discipline-coded filters like "A_Brandschutz_AUS") — "" if nothing recurs
+        // often enough in this category to call it a group.
+        public string           SubGroup    { get; set; } = "";
     }
 
     // One Revit document currently open in this session, offered as a copy target.

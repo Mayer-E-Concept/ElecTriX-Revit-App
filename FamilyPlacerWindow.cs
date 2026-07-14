@@ -332,7 +332,7 @@ namespace METools.FamilyPlacer
                 for (int i = 0; i < _rows.Count; i++)
                 {
                     _rows[i].SetIndex(i + 1);
-                    _rows[i].SetOffsetY(i);
+                    SetStackOffset(_rows[i], i);
                 }
                 RecalculateOffsetY();
                 UpdateCount();
@@ -371,6 +371,16 @@ namespace METools.FamilyPlacer
         }
         private void AddInitialSlot() => AddSlot();
 
+        // Sets the "auto-stacking" offset on the axis that matches the current
+        // arrangement: Off Y when Stacked (vertical), Off X when Side by Side
+        // (horizontal). Both AddSlot/RemoveSlot/drag-reorder route through this
+        // so they never fall out of sync with whichever mode is active.
+        private void SetStackOffset(SlotRow row, int index)
+        {
+            if (_orientation == "Horizontal") row.SetOffsetX(index);
+            else row.SetOffsetY(index);
+        }
+
         private void AddSlot(FamilySlot data = null)
         {
             var row = new SlotRow(_allFamilies, data, _rows.Count + 1, RequestFamilyParams, RequestNiveauSample);
@@ -390,21 +400,27 @@ namespace METools.FamilyPlacer
             {
                 int newIndex = _rows.Count - 1; // 0-based position of the new slot
 
-                // 2D stacking offset (OffsetY = 2DY_Versatzfaktor):
-                // Each new slot gets the next index so they stack vertically in plan view
-                row.SetOffsetY(newIndex);
+                // 2D stacking offset — Off Y when Stacked, Off X when Side by Side:
+                // each new slot gets the next index so they line up along whichever
+                // axis matches the current arrangement.
+                SetStackOffset(row, newIndex);
 
-                // 3D vertical offset (3DZ_Niveau_Versatzfaktor via ParamOverrides):
-                // When a new slot has the same Height as existing slots, add offset in 3D
-                // so they don't physically collide in the model.
-                // First at this height = 0, second = -1, third = -2, ...
-                double newHeight = row.Slot.Height;
-                int collisions = _rows
-                    .Take(_rows.Count - 1) // all slots before this one
-                    .Count(r => Math.Abs(r.Slot.Height - newHeight) < 0.5);
+                // 3D vertical offset (3DZ_Niveau_Versatzfaktor via ParamOverrides) is a
+                // Stacked-only concern: Side by Side already spreads slots out in space,
+                // so there's no collision to avoid and this must not touch Z there.
+                if (_orientation == "Vertical")
+                {
+                    // When a new slot has the same Height as existing slots, add offset in
+                    // 3D so they don't physically collide in the model.
+                    // First at this height = 0, second = -1, third = -2, ...
+                    double newHeight = row.Slot.Height;
+                    int collisions = _rows
+                        .Take(_rows.Count - 1) // all slots before this one
+                        .Count(r => Math.Abs(r.Slot.Height - newHeight) < 0.5);
 
-                if (collisions > 0)
-                    row.Slot.ParamOverrides["3DZ_Niveau_Versatzfaktor"] = (-collisions).ToString();
+                    if (collisions > 0)
+                        row.Slot.ParamOverrides["3DZ_Niveau_Versatzfaktor"] = (-collisions).ToString();
+                }
             }
 
             UpdateCount();
@@ -418,7 +434,7 @@ namespace METools.FamilyPlacer
             for (int i = 0; i < _rows.Count; i++)
             {
                 _rows[i].SetIndex(i + 1);
-                _rows[i].SetOffsetY(i); // 2D stacking offset = position index
+                SetStackOffset(_rows[i], i); // 2D stacking offset = position index, on the active axis
             }
             RecalculateOffsetY();
             UpdateCount();
@@ -433,8 +449,18 @@ namespace METools.FamilyPlacer
         // Recalculate 3DZ_Niveau_Versatzfaktor for all slots based on height collisions.
         // Called when any slot's height changes.
         // Groups slots by height, assigns 3DZ: 0, -1, -2, ... within each group.
+        // Stacked-only: Side by Side already spreads slots out in space so there's no
+        // collision to avoid, and Z must not be touched there — any stale value from
+        // before switching modes gets cleared instead.
         private void RecalculateOffsetY()
         {
+            if (_orientation != "Vertical")
+            {
+                foreach (var row in _rows)
+                    row.Slot.ParamOverrides.Remove("3DZ_Niveau_Versatzfaktor");
+                return;
+            }
+
             var heightCount = new Dictionary<double, int>();
             foreach (var row in _rows)
             {
@@ -708,10 +734,29 @@ namespace METools.FamilyPlacer
 
         private void SetOrientation(string mode)
         {
+            bool changed = mode != _orientation;
             _orientation = mode;
             bool isV = mode == "Vertical";
             UpdateOriBtn(_btnOri1, isV);
             UpdateOriBtn(_btnOri2, !isV);
+
+            if (!changed) return;
+
+            // Swap Off X <-> Off Y on every slot so whatever stacking order was
+            // already set up (e.g. 0,1,2,3 from auto-increment) carries over to
+            // the newly-active axis instead of being left behind on the old one.
+            foreach (var row in _rows)
+            {
+                int oldX = row.Slot.OffsetX;
+                int oldY = row.Slot.OffsetY;
+                row.SetOffsetX(oldY);
+                row.SetOffsetY(oldX);
+            }
+
+            // 3D height-collision avoidance is Stacked-only: this restores it when
+            // switching back to Vertical, and clears any stale value when switching
+            // to Side by Side (RecalculateOffsetY handles both, based on _orientation).
+            RecalculateOffsetY();
         }
         private void UpdateOriBtn(Button b, bool active)
         {

@@ -98,7 +98,6 @@ namespace METools.FamilyPlacer
             using (var tx = new Transaction(doc, "ME-Tools: Family Stack"))
             {
                 tx.Start();
-                const double frameWidthMm = 75.0;
 
                 foreach (var firstInst in captured)
                 {
@@ -168,9 +167,17 @@ namespace METools.FamilyPlacer
                         if (!sym.IsActive)
                             try { sym.Activate(); doc.Regenerate(); } catch { }
 
-                        XYZ placePt = Request.Orientation == "Horizontal"
-                            ? pt + walkDir * UnitUtils.ConvertToInternalUnits(i * frameWidthMm, UnitTypeId.Millimeters)
-                            : new XYZ(pt.X, pt.Y, pt.Z);
+                        // Every slot goes at the SAME real insertion point, exactly like
+                        // Stacked mode already does — the family's own 2DX_Versatzfaktor /
+                        // 2DY_Versatzfaktor formulas (set below via ApplyOffset, driven by
+                        // Off X / Off Y) are what actually create the visual spacing.
+                        // A previous version also nudged the real Revit point here by a
+                        // hardcoded 75mm along the nearest wall's direction, which fought
+                        // with that formula-driven spacing and produced inconsistent,
+                        // non-straight placement (75mm is much smaller than these families'
+                        // own multi-metre visual geometry, and "nearest wall" isn't
+                        // necessarily aligned with the direction being laid out anyway).
+                        XYZ placePt = new XYZ(pt.X, pt.Y, pt.Z);
 
                         FamilyInstance inst = null;
 

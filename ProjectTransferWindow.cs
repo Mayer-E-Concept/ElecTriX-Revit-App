@@ -25,11 +25,14 @@ namespace METools.ProjectTransfer
         private List<TransferItem> _all      = new List<TransferItem>();
         private HashSet<ElementId> _selected = new HashSet<ElementId>();
         private string _categoryFilter = "";     // "" = All
+        private string _subGroupFilter = "";     // "" = All (within the selected category)
         private string _searchText     = "";
 
         // ── UI refs ──────────────────────────────────────────────────────
         private ComboBox   _targetCombo;
         private StackPanel _categoryBar;
+        private StackPanel _subGroupBar;
+        private ScrollViewer _subGroupScroller;
         private TextBox    _searchBox;
         private StackPanel _rowsPanel;
         private TextBlock  _countLabel;
@@ -42,7 +45,7 @@ namespace METools.ProjectTransfer
             _extEvent = extEvent;
             _handler  = handler;
 
-            _handler.OnSourceLoaded  = items => Dispatcher.Invoke(() => { _all = items; RebuildCategoryBar(); RebuildList(); });
+            _handler.OnSourceLoaded  = items => Dispatcher.Invoke(() => { _all = items; RebuildCategoryBar(); RebuildSubGroupBar(); RebuildList(); });
             _handler.OnTargetsLoaded = docs  => Dispatcher.Invoke(() => RebuildTargetCombo(docs));
             _handler.OnStatus        = msg   => Dispatcher.Invoke(() => { if (StatusLeft != null) StatusLeft.Text = msg; });
             _handler.OnCopyDone      = res   => Dispatcher.Invoke(() => ShowCopyResult(res));
@@ -100,6 +103,20 @@ namespace METools.ProjectTransfer
                 Margin  = new Thickness(0, 0, 0, 8),
             };
             root.Children.Add(catScroller);
+
+            // Sub-group bar: auto-detected naming prefixes within the selected
+            // category (e.g. discipline codes on filters). Hidden for "All" and
+            // for categories where nothing recurs often enough to group.
+            _subGroupBar = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 8) };
+            _subGroupScroller = new ScrollViewer
+            {
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
+                VerticalScrollBarVisibility   = ScrollBarVisibility.Disabled,
+                Content = _subGroupBar,
+                Margin  = new Thickness(0, 0, 0, 8),
+                Visibility = System.Windows.Visibility.Collapsed,
+            };
+            root.Children.Add(_subGroupScroller);
 
             _searchBox = new TextBox
             {
@@ -252,16 +269,65 @@ namespace METools.ProjectTransfer
         private void SetCategoryFilter(string key)
         {
             _categoryFilter = key;
+            _subGroupFilter = "";
             RebuildCategoryBar();
+            RebuildSubGroupBar();
+            RebuildList();
+        }
+
+        // Sub-group bar shows auto-detected naming prefixes (e.g. "A", "E", "S" on
+        // discipline-coded filters) within whichever single category is selected.
+        // Hidden for "All" and for categories with no recurring prefix at all.
+        private void RebuildSubGroupBar()
+        {
+            _subGroupBar.Children.Clear();
+
+            if (string.IsNullOrEmpty(_categoryFilter))
+            {
+                _subGroupScroller.Visibility = System.Windows.Visibility.Collapsed;
+                return;
+            }
+
+            var inCategory = _all.Where(i => i.Category.ToString() == _categoryFilter).ToList();
+            var subGroups = inCategory.Select(i => i.SubGroup).Distinct()
+                .Where(g => !string.IsNullOrEmpty(g))
+                .OrderBy(g => g)
+                .ToList();
+
+            if (subGroups.Count == 0)
+            {
+                _subGroupScroller.Visibility = System.Windows.Visibility.Collapsed;
+                return;
+            }
+
+            _subGroupScroller.Visibility = System.Windows.Visibility.Visible;
+
+            var allBtn = ToggleBtn($"All ({inCategory.Count})", _subGroupFilter == "", () => SetSubGroupFilter(""));
+            _subGroupBar.Children.Add(allBtn);
+
+            foreach (var g in subGroups)
+            {
+                int n = inCategory.Count(i => i.SubGroup == g);
+                var btn = ToggleBtn($"{g} ({n})", _subGroupFilter == g, () => SetSubGroupFilter(g));
+                btn.Margin = new Thickness(6, 0, 0, 0);
+                _subGroupBar.Children.Add(btn);
+            }
+        }
+
+        private void SetSubGroupFilter(string key)
+        {
+            _subGroupFilter = key;
+            RebuildSubGroupBar();
             RebuildList();
         }
 
         private bool MatchesFilter(TransferItem i)
         {
             bool catOk = _categoryFilter == "" || i.Category.ToString() == _categoryFilter;
+            bool subOk = string.IsNullOrEmpty(_subGroupFilter) || i.SubGroup == _subGroupFilter;
             bool searchOk = string.IsNullOrEmpty(_searchText) ||
                             i.Name.IndexOf(_searchText, StringComparison.OrdinalIgnoreCase) >= 0;
-            return catOk && searchOk;
+            return catOk && subOk && searchOk;
         }
 
         private void RebuildList()

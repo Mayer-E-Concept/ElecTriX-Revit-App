@@ -108,7 +108,37 @@ namespace METools.ProjectTransfer
             }
             catch { }
 
+            AssignSubGroups(items);
             OnSourceLoaded?.Invoke(items);
+        }
+
+        // Auto-detects a naming prefix within each category (e.g. discipline codes
+        // like "A_", "E_", "S_" on filters: "A_Brandschutz_AUS" -> group "A").
+        // Nothing is hardcoded to any one office's convention — a prefix only
+        // becomes a group if it actually recurs often enough within its category.
+        private static void AssignSubGroups(List<TransferItem> items)
+        {
+            const int MinGroupSize = 3;
+            foreach (var group in items.GroupBy(i => i.Category))
+            {
+                var counts = new Dictionary<string, int>();
+                var prefixOf = new Dictionary<TransferItem, string>();
+                foreach (var item in group)
+                {
+                    var name = item.Name ?? "";
+                    int idx = name.IndexOf('_');
+                    string prefix = (idx > 0 && idx <= 6) ? name.Substring(0, idx) : "";
+                    prefixOf[item] = prefix;
+                    if (!string.IsNullOrEmpty(prefix))
+                        counts[prefix] = counts.GetValueOrDefault(prefix) + 1;
+                }
+                foreach (var item in group)
+                {
+                    var p = prefixOf[item];
+                    item.SubGroup = (!string.IsNullOrEmpty(p) && counts.TryGetValue(p, out var c) && c >= MinGroupSize)
+                        ? p : "";
+                }
+            }
         }
 
         private TransferItem BuildSheetItem(Document doc, ViewSheet s)
