@@ -43,12 +43,18 @@ UninstallDisplayName={#AppName} {#AppVersion}
 [Files]
 Source: "{#DllPath}"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#AddinPath}"; DestDir: "{app}"; DestName: "METools.addin"; Flags: ignoreversion
-; Optional: only if your code reads this from the install folder (usually it does NOT - it lives in %APPDATA%).
-; Source: "{#ProjectDir}\standard_worksets.json"; DestDir: "{app}"; Flags: ignoreversion onlyifdoesntexist
+; Seeds the Settings > Worksets "standard list" on first install. The code reads
+; this from [app]\config\standard_worksets.json (Assembly location + "config"),
+; NOT from %APPDATA% - without this entry a fresh install shows an empty list
+; with no error. onlyifdoesntexist so upgrading never clobbers a customer's own
+; edited list.
+Source: "{#ProjectDir}\standard_worksets.json"; DestDir: "{app}\config"; Flags: ignoreversion onlyifdoesntexist
 
 [UninstallDelete]
 Type: files; Name: "{app}\METools.dll"
 Type: files; Name: "{app}\METools.addin"
+Type: files; Name: "{app}\config\standard_worksets.json"
+Type: dirifempty; Name: "{app}\config"
 
 [Messages]
 WelcomeLabel2=This will install [name/ver] for Autodesk Revit 2025.%n%nPlease close Revit before continuing.
