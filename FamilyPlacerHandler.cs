@@ -99,6 +99,13 @@ namespace METools.FamilyPlacer
             {
                 tx.Start();
 
+                // Fetched once, not per-placed-instance -- GetNearestLevel used to
+                // re-scan every Level in the project on each fallback call inside
+                // this loop, the same N+1 pattern already fixed elsewhere in this
+                // project (Lamp Placer's GetNearestLevel, RevitDatenHelper,
+                // Statistics) once it was found there.
+                var allLevels = new FilteredElementCollector(doc).OfClass(typeof(Level)).Cast<Level>().ToList();
+
                 foreach (var firstInst in captured)
                 {
                     XYZ pt = GetPt(firstInst);
@@ -109,7 +116,7 @@ namespace METools.FamilyPlacer
                     // Use actual level of placed instance
                     Level level = null;
                     try { level = doc.GetElement(firstInst.LevelId) as Level; } catch { }
-                    level = level ?? ResolveLevel(doc, Request.LevelId) ?? GetNearestLevel(doc, pt);
+                    level = level ?? ResolveLevel(doc, Request.LevelId) ?? GetNearestLevel(allLevels, pt);
 
                     var wall    = GetNearestWall(doc, pt);
                     var walkDir = WallDir(wall);
@@ -324,8 +331,8 @@ namespace METools.FamilyPlacer
         private Level ResolveLevel(Document doc, ElementId id)
         { try { return id != null && id != ElementId.InvalidElementId ? doc.GetElement(id) as Level : null; } catch { return null; } }
 
-        private Level GetNearestLevel(Document doc, XYZ pt)
-        { try { return new FilteredElementCollector(doc).OfClass(typeof(Level)).Cast<Level>().OrderBy(l => Math.Abs(l.Elevation - pt.Z)).FirstOrDefault(); } catch { return null; } }
+        private Level GetNearestLevel(List<Level> allLevels, XYZ pt)
+        { try { return allLevels.OrderBy(l => Math.Abs(l.Elevation - pt.Z)).FirstOrDefault(); } catch { return null; } }
 
         private Wall GetNearestWall(Document doc, XYZ pt)
         {

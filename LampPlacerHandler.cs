@@ -118,6 +118,14 @@ namespace METools.LampPlacer
             // Fallback-Level einmal auflösen
             Level fallbackLvl = ResolveFallbackLevel(doc, cfg);
 
+            // Fetched once up front instead of inside the room loop below --
+            // GetNearestLevel(doc, ...) was re-scanning every Level in the
+            // document once per room. Same pattern already used for the grid/
+            // line placement loops further down in this file.
+            var allLevels = fallbackLvl != null
+                ? null
+                : new FilteredElementCollector(doc).OfClass(typeof(Level)).Cast<Level>().ToList();
+
             var plan = new List<Planned>();
             foreach (var room in rooms)
             {
@@ -131,7 +139,7 @@ namespace METools.LampPlacer
                                     ? fallbackLvl.Elevation
                                     : (bb != null ? bb.Max.Z : GetUKD(room)))
                                 - offsetFt;
-                var    level  = fallbackLvl ?? GetNearestLevel(doc, ukdZ);
+                var    level  = fallbackLvl ?? GetNearestLevel(allLevels, ukdZ);
                 if (bb == null) continue;
                 double roomW  = bb.Max.X - bb.Min.X;
                 double roomD  = bb.Max.Y - bb.Min.Y;
@@ -443,6 +451,12 @@ namespace METools.LampPlacer
             var pts = CalcPoints(bb, wallFt, rows, cols, ukdZ);
 
             int placed = 0;
+            // Fetched once, not once per lamp -- TryPlaceOnFace (via PlaceLampInstance)
+            // was re-scanning every View3D in the document on every single placement
+            // whenever "Place on Face" mode was selected. Only bothered with at all
+            // when that mode is actually active, to avoid the collector call entirely
+            // for the (more common) work-plane placement path.
+            View3D v3dForFace = Request.Config.Surface == PlacementSurface.Face ? GetAny3DView(doc) : null;
             using (var tx = new Transaction(doc, "ME-Tools: Refresh Room Lamps"))
             {
                 tx.Start();
@@ -456,7 +470,7 @@ namespace METools.LampPlacer
                 {
                     if (!IsInRoom(room, new XYZ(pt.X, pt.Y, floorZ + 0.5))) continue;
                     FamilyInstance inst = null;
-                    try { inst = PlaceLampInstance(doc, sym, pt, level, room, ukdZ); }
+                    try { inst = PlaceLampInstance(doc, sym, pt, level, room, ukdZ, v3dForFace); }
                     catch { continue; }
                     if (inst == null) continue;
                     doc.Regenerate();
@@ -555,6 +569,9 @@ namespace METools.LampPlacer
             bool skipNear = decision == PlaceDecision.SkipNear;
 
             var placedIds = new List<ElementId>();
+            // Same fix as RefreshRoom above: fetched once for this whole batch,
+            // not once per lamp, and only when face placement is actually selected.
+            View3D v3dForFace = Request.Config.Surface == PlacementSurface.Face ? GetAny3DView(doc) : null;
             using (var tg = new TransactionGroup(doc, "ME-Tools: " + op))
             {
                 tg.Start();
@@ -569,7 +586,7 @@ namespace METools.LampPlacer
                         if (s == null) continue;
                         if (!s.IsActive) { s.Activate(); doc.Regenerate(); }
                         FamilyInstance inst = null;
-                        try { inst = PlaceLampInstance(doc, s, pl.Pt, pl.Lvl, pl.Rm, pl.Ukd); }
+                        try { inst = PlaceLampInstance(doc, s, pl.Pt, pl.Lvl, pl.Rm, pl.Ukd, v3dForFace); }
                         catch { continue; }
                         if (inst == null) continue;
                         doc.Regenerate();
@@ -1358,11 +1375,10 @@ namespace METools.LampPlacer
         }
 
         // ── Host a lamp on the ceiling/floor face above the point ──────────
-        private FamilyInstance TryPlaceOnFace(Document doc, FamilySymbol sym, XYZ pt)
+        private FamilyInstance TryPlaceOnFace(Document doc, FamilySymbol sym, XYZ pt, View3D v3d)
         {
             try
             {
-                var v3d = GetAny3DView(doc);
                 if (v3d == null) return null;
                 var filter = new LogicalOrFilter(
                     new ElementCategoryFilter(BuiltInCategory.OST_Ceilings),
@@ -1380,12 +1396,12 @@ namespace METools.LampPlacer
 
         // ── Lamp placement: pt.Z = ukdZ, kein zusätzlicher Parameter ────────
         private FamilyInstance PlaceLampInstance(Document doc, FamilySymbol sym,
-            XYZ pt, Level level, Room room, double ukdZ)
+            XYZ pt, Level level, Room room, double ukdZ, View3D v3dForFacePlacement)
         {
             // Place on Face (opt-in): host on the ceiling/floor face above the point
             if (Request.Config.Surface == PlacementSurface.Face)
             {
-                var onFace = TryPlaceOnFace(doc, sym, pt);
+                var onFace = TryPlaceOnFace(doc, sym, pt, v3dForFacePlacement);
                 if (onFace != null) { doc.Regenerate(); return onFace; }
                 // no face found -> fall through to work-plane placement below
             }

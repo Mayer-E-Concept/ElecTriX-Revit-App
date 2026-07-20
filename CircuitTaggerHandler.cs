@@ -368,7 +368,17 @@ namespace METools.FamilyPlacer
                                     catch { }
                                 }
                             }
-                            catch { }
+                            catch (Exception ex)
+                            {
+                                // Previously a bare `catch { }` here -- a tag-placement
+                                // failure for one circuit was invisible in the summary,
+                                // even though the identical failure mode for parameter
+                                // writing (the outer loop above) was already tracked.
+                                // Recording it the same way keeps "honest reporting"
+                                // consistent for both, not just one of them.
+                                errors++;
+                                errorMsgs.Add(ex.Message);
+                            }
                         }
                     }
                 }
