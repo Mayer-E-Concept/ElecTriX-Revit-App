@@ -115,7 +115,14 @@ namespace METools.FamilyPlacer
             public string DetailText        { get; set; } = "";
         }
 
-        public static DiagnoseErgebnis ErstelleDiagnose(Document doc)
+        // raeumeVorgefetcht: optional pre-fetched room list (see KonfigViewModel.LadeDaten,
+        // which already needs this same data right after calling this method) -- avoids
+        // this method also calling LeseAlleRaeume internally, which would otherwise be a
+        // second full Rooms+MEPSpaces scan on top of the counting scan just above it.
+        // The counting scan itself (rooms/spaces below) stays separate regardless, since
+        // it needs the raw Room/Space objects for the placed/unplaced breakdown, which
+        // LeseAlleRaeume's already-filtered (Nummer, Name) tuples don't carry.
+        public static DiagnoseErgebnis ErstelleDiagnose(Document doc, List<(string Nummer, string Name)> raeumeVorgefetcht = null)
         {
             var d = new DiagnoseErgebnis();
 
@@ -141,7 +148,7 @@ namespace METools.FamilyPlacer
 
             d.GesamtPlatziert = d.AnzahlRaeume + d.AnzahlMEPSpaces;
 
-            var alle = LeseAlleRaeume(doc);
+            var alle = raeumeVorgefetcht ?? LeseAlleRaeume(doc);
             d.AllesDefaultName = alle.Count > 0
                 && alle.All(r => string.IsNullOrWhiteSpace(r.Name)
                               || r.Name.Equals("Raum", StringComparison.OrdinalIgnoreCase)

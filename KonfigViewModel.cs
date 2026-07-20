@@ -162,8 +162,8 @@ namespace METools.FamilyPlacer
         private void LadeDaten()
         {
             var gespeichert = LadeGespeicherteKonfig();
-            var diag = RevitDatenHelper.ErstelleDiagnose(_doc);
-            var raeumeRoh    = RevitDatenHelper.LeseAlleRaeume(_doc); // fetched once, reused below
+            var raeumeRoh    = RevitDatenHelper.LeseAlleRaeume(_doc); // fetched once, reused below (and passed into ErstelleDiagnose)
+            var diag = RevitDatenHelper.ErstelleDiagnose(_doc, raeumeRoh);
             var raumnummern  = RevitDatenHelper.LeseAlleRaumnummern(raeumeRoh);
             var schema       = SchemaHelper.ErkenneSchema(raumnummern);
             var verteilerDet = RevitDatenHelper.LeseVerteilerDetails(_doc);
