@@ -13,11 +13,20 @@ namespace METools.Comments
     // string-based philosophy CAx_Trassenbezugsebene already uses elsewhere
     // in this project, and is human-readable in the shared file if anyone
     // ever needs to look at it directly.
+    //
+    // ScopeBoxName is stored alongside it because Level names alone can be
+    // genuinely ambiguous -- confirmed via live model inspection that two
+    // different building sections (e.g. Haus 1 / Haus 2) can each have their
+    // own separate "Obergeschoss 1" floor plan view, both reporting the exact
+    // same Associated Level name, distinguished only by which Scope Box each
+    // view is assigned. Without this, "Go There" could jump to the wrong
+    // building section's matching-named level.
     public class ProjectComment
     {
         public string Id { get; set; } = Guid.NewGuid().ToString("N");
         public string Author { get; set; } = "";
         public string LevelName { get; set; } = "";
+        public string ScopeBoxName { get; set; } = "";
         public string Text { get; set; } = "";
         public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
         public CommentStatus Status { get; set; } = CommentStatus.Open;
@@ -33,12 +42,13 @@ namespace METools.Comments
         public List<ProjectComment> Comments { get; set; } = new List<ProjectComment>();
     }
 
-    public enum CommentsAction { Refresh, Add, SetStatus, JumpToLevel }
+    public enum CommentsAction { Refresh, Add, SetStatus, Delete, JumpToLevel }
 
     public class CommentsRequest
     {
         public CommentsAction Action { get; set; }
         public string LevelName { get; set; } = "";
+        public string ScopeBoxName { get; set; } = "";
         public string Text { get; set; } = "";
         public string CommentId { get; set; } = "";
         public CommentStatus NewStatus { get; set; }

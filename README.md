@@ -109,6 +109,17 @@ Live element count and length summary for the active model.
 
 ---
 
+### Comments
+Cross-machine, per-project comment/notification system for team coordination.
+- Comments are tagged to whichever level (and Scope Box, for projects with multiple building sections sharing level names) the active view is on when left
+- Stored on a shared network folder (configured once, shared by the whole team) rather than inside the model — visible to teammates the moment they open the same project, no round-trip through Central required
+- A corner popup notifies other users of new comments relevant to them, with a sound cue (togglable) and one-click **Mark Done** / **Ignore** / **Go There**
+- **Go There** switches the active view straight to the correct level/building-section combination the comment was left on
+- Main window lists every comment, grouped by author then by level, filterable by status (Open / Done / Ignored / All)
+- **Delete** available per comment, with a confirmation step since it can't be undone the way Ignore/Done can (those can always be Reopened)
+
+---
+
 ## Supported Revit Versions
 
 | Version | .NET | Status |

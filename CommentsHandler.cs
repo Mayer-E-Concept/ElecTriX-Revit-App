@@ -3,6 +3,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading.Tasks;
 using Autodesk.Revit.DB;
 using Autodesk.Revit.UI;
 
@@ -14,8 +15,22 @@ namespace METools.Comments
 
         public Action<List<ProjectComment>> OnLoaded;
         public Action<string> OnError;
-        public Action<string> OnCurrentLevel; // reports the active level's name, "" if none
+        public Action<string, string> OnCurrentLevel; // (levelName, scopeBoxName); "" if none
 
+        // Execute runs on Revit's own UI thread (required for any Revit API
+        // access). The project-ID lookup and level/username reads below are
+        // fast, in-memory, and Revit-API-dependent, so they stay synchronous
+        // here. The actual comment file read/write, however, goes over the
+        // shared network drive and can be genuinely slow (confirmed: 15-20s
+        // observed on a real machine) -- if that ran synchronously here, a
+        // slow moment on the network would freeze the ENTIRE Revit UI thread,
+        // not just this feature, for as long as the network call took. That's
+        // offloaded to a background thread below instead; it touches nothing
+        // Revit-API-related, only plain file I/O, so it's safe off-thread.
+        // The callbacks are safe to invoke from that background thread too --
+        // every subscriber already wraps them in Dispatcher.Invoke (see
+        // CommentsWindow's constructor), so the actual UI update still lands
+        // correctly back on the UI thread regardless of which thread raises it.
         public void Execute(UIApplication app)
         {
             var uidoc = app.ActiveUIDocument;
@@ -32,47 +47,104 @@ namespace METools.Comments
                 switch (req.Action)
                 {
                     case CommentsAction.Refresh:
-                        OnLoaded?.Invoke(CommentsStorage.LoadAll(projectId));
-                        OnCurrentLevel?.Invoke(CurrentLevelName(uidoc) ?? "");
+                        OnCurrentLevel?.Invoke(CurrentLevelName(uidoc) ?? "", CurrentScopeBoxName(uidoc) ?? "");
+                        Task.Run(() =>
+                        {
+                            try
+                            {
+                                var list = CommentsStorage.LoadAll(projectId, out string warning);
+                                if (warning != null) OnError?.Invoke(warning);
+                                OnLoaded?.Invoke(list);
+                            }
+                            catch (Exception ex) { OnError?.Invoke(ex.Message); }
+                        });
                         break;
 
                     case CommentsAction.Add:
+                    {
                         string author = SafeUsername(app);
                         string levelName = !string.IsNullOrWhiteSpace(req.LevelName)
                             ? req.LevelName : (CurrentLevelName(uidoc) ?? "(no level)");
-                        bool ok = CommentsStorage.Mutate(projectId, list =>
+                        // Always taken fresh from the current view, paired with
+                        // whichever level was just resolved above -- there's no
+                        // override path for this the way LevelName has, since
+                        // nothing upstream currently needs one.
+                        string scopeBoxName = CurrentScopeBoxName(uidoc) ?? "";
+                        string text = req.Text ?? "";
+                        Task.Run(() =>
                         {
-                            list.Add(new ProjectComment
+                            try
                             {
-                                Author     = author,
-                                LevelName  = levelName,
-                                Text       = req.Text ?? "",
-                                CreatedUtc = DateTime.UtcNow,
-                                Status     = CommentStatus.Open,
-                            });
-                        }, out string err);
-                        if (!ok) OnError?.Invoke(err);
-                        OnLoaded?.Invoke(CommentsStorage.LoadAll(projectId));
+                                bool ok = CommentsStorage.Mutate(projectId, list =>
+                                {
+                                    list.Add(new ProjectComment
+                                    {
+                                        Author       = author,
+                                        LevelName    = levelName,
+                                        ScopeBoxName = scopeBoxName,
+                                        Text         = text,
+                                        CreatedUtc   = DateTime.UtcNow,
+                                        Status       = CommentStatus.Open,
+                                    });
+                                }, out string err);
+                                if (!ok) OnError?.Invoke(err);
+                                OnLoaded?.Invoke(CommentsStorage.LoadAll(projectId));
+                            }
+                            catch (Exception ex) { OnError?.Invoke(ex.Message); }
+                        });
                         break;
+                    }
 
                     case CommentsAction.SetStatus:
+                    {
                         string resolver = SafeUsername(app);
-                        bool ok2 = CommentsStorage.Mutate(projectId, list =>
+                        string commentId = req.CommentId;
+                        var newStatus = req.NewStatus;
+                        Task.Run(() =>
                         {
-                            var c = list.FirstOrDefault(x => x.Id == req.CommentId);
-                            if (c != null)
+                            try
                             {
-                                c.Status      = req.NewStatus;
-                                c.ResolvedBy  = resolver;
-                                c.ResolvedUtc = DateTime.UtcNow;
+                                bool ok = CommentsStorage.Mutate(projectId, list =>
+                                {
+                                    var c = list.FirstOrDefault(x => x.Id == commentId);
+                                    if (c != null)
+                                    {
+                                        c.Status      = newStatus;
+                                        c.ResolvedBy  = resolver;
+                                        c.ResolvedUtc = DateTime.UtcNow;
+                                    }
+                                }, out string err);
+                                if (!ok) OnError?.Invoke(err);
+                                OnLoaded?.Invoke(CommentsStorage.LoadAll(projectId));
                             }
-                        }, out string err2);
-                        if (!ok2) OnError?.Invoke(err2);
-                        OnLoaded?.Invoke(CommentsStorage.LoadAll(projectId));
+                            catch (Exception ex) { OnError?.Invoke(ex.Message); }
+                        });
                         break;
+                    }
+
+                    case CommentsAction.Delete:
+                    {
+                        string commentId = req.CommentId;
+                        Task.Run(() =>
+                        {
+                            try
+                            {
+                                bool ok = CommentsStorage.Mutate(projectId, list =>
+                                {
+                                    list.RemoveAll(x => x.Id == commentId);
+                                }, out string err);
+                                if (!ok) OnError?.Invoke(err);
+                                OnLoaded?.Invoke(CommentsStorage.LoadAll(projectId));
+                            }
+                            catch (Exception ex) { OnError?.Invoke(ex.Message); }
+                        });
+                        break;
+                    }
 
                     case CommentsAction.JumpToLevel:
-                        JumpTo(uidoc, req.LevelName);
+                        // Genuinely Revit-API-only (switching the active view),
+                        // no network I/O involved, so this stays synchronous.
+                        JumpTo(uidoc, req.LevelName, req.ScopeBoxName);
                         break;
                 }
             }
@@ -90,21 +162,57 @@ namespace METools.Comments
             catch { return null; }
         }
 
-        private void JumpTo(UIDocument uidoc, string levelName)
+        // "Scope Box" is a genuine, standard Revit view parameter (confirmed
+        // live: parameter id -1012202, display name "Scope Box") -- this is
+        // the real mechanism Revit itself uses to separate views by building
+        // section. Looked up by display name rather than a hardcoded
+        // BuiltInParameter enum constant so this doesn't depend on getting an
+        // exact enum name right from memory; "Scope Box" is the parameter's
+        // actual, stable UI name for any English-language Revit install.
+        public static string CurrentScopeBoxName(UIDocument uidoc)
+        {
+            try { return uidoc?.ActiveView?.LookupParameter("Scope Box")?.AsValueString(); }
+            catch { return null; }
+        }
+
+        // Confirmed via live model inspection: two different building
+        // sections (e.g. Haus 1 / Haus 2) can each have their own floor plan
+        // view that reports the exact same Level name ("Obergeschoss 1" for
+        // both), distinguished only by which Scope Box each view is assigned.
+        // Matching on level name alone can jump to the wrong building
+        // section's same-named level -- this collects every level and view
+        // that shares the name, then narrows down by Scope Box when we have
+        // one. Older comments saved before this fix won't have a
+        // ScopeBoxName; those fall back to the first matching-level view,
+        // same as before.
+        private void JumpTo(UIDocument uidoc, string levelName, string scopeBoxName)
         {
             if (uidoc == null || string.IsNullOrWhiteSpace(levelName)) return;
             try
             {
                 var doc = uidoc.Document;
-                var level = new FilteredElementCollector(doc).OfClass(typeof(Level))
-                    .Cast<Level>()
-                    .FirstOrDefault(l => string.Equals(l.Name, levelName, StringComparison.OrdinalIgnoreCase));
-                if (level == null) return;
+                var levelIds = new HashSet<ElementId>(
+                    new FilteredElementCollector(doc).OfClass(typeof(Level))
+                        .Cast<Level>()
+                        .Where(l => string.Equals(l.Name, levelName, StringComparison.OrdinalIgnoreCase))
+                        .Select(l => l.Id));
+                if (levelIds.Count == 0) return;
 
-                var plan = new FilteredElementCollector(doc).OfClass(typeof(ViewPlan))
+                var candidatePlans = new FilteredElementCollector(doc).OfClass(typeof(ViewPlan))
                     .Cast<ViewPlan>()
-                    .FirstOrDefault(v => !v.IsTemplate && v.ViewType == ViewType.FloorPlan
-                                         && v.GenLevel != null && v.GenLevel.Id == level.Id);
+                    .Where(v => !v.IsTemplate && v.ViewType == ViewType.FloorPlan
+                                && v.GenLevel != null && levelIds.Contains(v.GenLevel.Id))
+                    .ToList();
+
+                ViewPlan plan = null;
+                if (!string.IsNullOrWhiteSpace(scopeBoxName))
+                {
+                    plan = candidatePlans.FirstOrDefault(v =>
+                        string.Equals(v.LookupParameter("Scope Box")?.AsValueString(), scopeBoxName,
+                                      StringComparison.OrdinalIgnoreCase));
+                }
+                if (plan == null) plan = candidatePlans.FirstOrDefault();
+
                 if (plan != null) uidoc.ActiveView = plan;
             }
             catch { }
@@ -136,7 +244,7 @@ namespace METools.Comments
             _quickEvent.Raise();
         }
 
-        public static void JumpToLevel(string levelName)
+        public static void JumpToLevel(string levelName, string scopeBoxName)
         {
             if (_quickEvent == null)
             {
@@ -147,6 +255,7 @@ namespace METools.Comments
             {
                 Action = CommentsAction.JumpToLevel,
                 LevelName = levelName,
+                ScopeBoxName = scopeBoxName,
             };
             _quickEvent.Raise();
         }

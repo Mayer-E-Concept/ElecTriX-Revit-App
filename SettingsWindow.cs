@@ -201,7 +201,6 @@ namespace METools
         {
             if (MeToolsTheme.Current == theme) return;
             MeToolsTheme.Toggle();
-            ThemeToggleCommand.UpdateButton();
             UpdateToggle(_btnDark,  MeToolsTheme.Current == MeTheme.Dark);
             UpdateToggle(_btnLight, MeToolsTheme.Current == MeTheme.Light);
         }

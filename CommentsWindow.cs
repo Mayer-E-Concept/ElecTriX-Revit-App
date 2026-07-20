@@ -20,6 +20,7 @@ namespace METools.Comments
 
         private List<ProjectComment> _all = new List<ProjectComment>();
         private string _currentLevel = "";
+        private string _currentScopeBox = "";
         private string _statusFilter = "Open"; // "" = All, else CommentStatus.ToString()
 
         private TextBlock  _levelLabel;
@@ -43,13 +44,17 @@ namespace METools.Comments
             _handler  = handler;
             _handler.OnLoaded = list => Dispatcher.Invoke(() => { _all = list; RebuildList(); });
             _handler.OnError  = msg  => Dispatcher.Invoke(() => { if (StatusLeft != null) StatusLeft.Text = msg; });
-            _handler.OnCurrentLevel = lvl => Dispatcher.Invoke(() =>
+            _handler.OnCurrentLevel = (lvl, sb) => Dispatcher.Invoke(() =>
             {
                 _currentLevel = lvl ?? "";
+                _currentScopeBox = sb ?? "";
                 if (_levelLabel != null)
+                {
+                    var combined = CombinedLabel(_currentLevel, _currentScopeBox);
                     _levelLabel.Text = string.IsNullOrEmpty(_currentLevel)
                         ? "Current level: (open a floor plan view to tag a comment to a level)"
-                        : $"Current level: {_currentLevel}";
+                        : $"Current level: {combined}";
+                }
             });
 
             _soundOn = CommentsStorage.GetSoundEnabled();
@@ -164,7 +169,11 @@ namespace METools.Comments
                     if (StatusLeft != null) StatusLeft.Text = "Set a shared folder above first.";
                     return;
                 }
-                _handler.Request = new CommentsRequest { Action = CommentsAction.Add, Text = text, LevelName = _currentLevel };
+                _handler.Request = new CommentsRequest
+                {
+                    Action = CommentsAction.Add, Text = text,
+                    LevelName = _currentLevel, ScopeBoxName = _currentScopeBox,
+                };
                 _extEvent.Raise();
                 _tbNewComment.Text = "";
                 SetPlaceholder(_tbNewComment, "e.g. Need 4 more lamps on this level…");
@@ -197,6 +206,55 @@ namespace METools.Comments
         }
 
         private string SoundLabel() => _soundOn ? "🔊 Notification sound: On" : "🔇 Notification sound: Off";
+
+        // Level names alone can be ambiguous (confirmed live: different
+        // building sections can share an identically-named level), so the
+        // Scope Box is appended wherever a level is shown or grouped by.
+        private static string CombinedLabel(string levelName, string scopeBoxName) =>
+            string.IsNullOrWhiteSpace(scopeBoxName) ? levelName : $"{levelName} ({scopeBoxName})";
+
+        private static string LocationLabel(ProjectComment c) => CombinedLabel(c.LevelName, c.ScopeBoxName);
+
+        // Natural sort: splits each name into text/number runs so "Obergeschoss 10"
+        // sorts after "Obergeschoss 2" instead of before it (plain string sort
+        // compares the "1" before the "2" and gets that backwards). Duplicated
+        // locally rather than shared with StatisticsCommand.cs's identical
+        // helper, matching this project's existing per-file convention (e.g.
+        // SetPlaceholder) for small helpers rather than a new shared utility class.
+        private static List<string> NaturalSortKey(string s)
+        {
+            var parts = new List<string>();
+            var current = new System.Text.StringBuilder();
+            bool? lastWasDigit = null;
+            foreach (var ch in s)
+            {
+                bool isDigit = char.IsDigit(ch);
+                if (lastWasDigit != null && isDigit != lastWasDigit)
+                {
+                    parts.Add(current.ToString());
+                    current.Clear();
+                }
+                current.Append(ch);
+                lastWasDigit = isDigit;
+            }
+            if (current.Length > 0) parts.Add(current.ToString());
+            return parts;
+        }
+
+        private static int CompareNatural(string a, string b)
+        {
+            var pa = NaturalSortKey(a ?? "");
+            var pb = NaturalSortKey(b ?? "");
+            for (int i = 0; i < Math.Min(pa.Count, pb.Count); i++)
+            {
+                bool numA = int.TryParse(pa[i], out int na);
+                bool numB = int.TryParse(pb[i], out int nb);
+                int cmp = (numA && numB) ? na.CompareTo(nb)
+                                          : string.Compare(pa[i], pb[i], StringComparison.OrdinalIgnoreCase);
+                if (cmp != 0) return cmp;
+            }
+            return pa.Count.CompareTo(pb.Count);
+        }
 
         // Simple placeholder behaviour for a plain TextBox -- duplicated locally
         // the same way every other window in this project does it (it's a small
@@ -237,7 +295,6 @@ namespace METools.Comments
         {
             _rowsPanel.Children.Clear();
             var filtered = _all.Where(c => string.IsNullOrEmpty(_statusFilter) || c.Status.ToString() == _statusFilter)
-                                .OrderByDescending(c => c.CreatedUtc)
                                 .ToList();
             _countLabel.Text = $"{filtered.Count} of {_all.Count} total";
 
@@ -251,8 +308,34 @@ namespace METools.Comments
                 return;
             }
 
-            foreach (var c in filtered)
-                _rowsPanel.Children.Add(BuildRow(c));
+            var byAuthor = filtered
+                .GroupBy(c => c.Author, StringComparer.OrdinalIgnoreCase)
+                .OrderBy(g => g.Key, StringComparer.OrdinalIgnoreCase);
+
+            foreach (var authorGroup in byAuthor)
+            {
+                _rowsPanel.Children.Add(new TextBlock
+                {
+                    Text = authorGroup.Key, FontSize = 13, FontWeight = FontWeights.Bold,
+                    Foreground = MeToolsTheme.BrAccent, Margin = new Thickness(0, 14, 0, 6),
+                });
+
+                var byLevel = authorGroup
+                    .GroupBy(c => LocationLabel(c))
+                    .OrderBy(g => g.Key, Comparer<string>.Create(CompareNatural));
+
+                foreach (var levelGroup in byLevel)
+                {
+                    _rowsPanel.Children.Add(new TextBlock
+                    {
+                        Text = levelGroup.Key, FontSize = 11, FontWeight = FontWeights.SemiBold,
+                        Foreground = MeToolsTheme.BrMuted, Margin = new Thickness(4, 0, 0, 6),
+                    });
+
+                    foreach (var c in levelGroup.OrderByDescending(c => c.CreatedUtc))
+                        _rowsPanel.Children.Add(BuildRow(c));
+                }
+            }
         }
 
         private Border BuildRow(ProjectComment c)
@@ -272,7 +355,7 @@ namespace METools.Comments
             var meta = new TextBlock
             {
                 FontSize = 11, Foreground = MeToolsTheme.BrMuted,
-                Text = $"{c.Author}  •  {c.LevelName}  •  {LocalTime(c.CreatedUtc):g}",
+                Text = $"{LocalTime(c.CreatedUtc):g}",
             };
             Grid.SetColumn(meta, 0);
             topRow.Children.Add(meta);
@@ -307,7 +390,11 @@ namespace METools.Comments
 
             var goBtn = MakeBtn("Go There", true, () =>
             {
-                _handler.Request = new CommentsRequest { Action = CommentsAction.JumpToLevel, LevelName = c.LevelName };
+                _handler.Request = new CommentsRequest
+                {
+                    Action = CommentsAction.JumpToLevel,
+                    LevelName = c.LevelName, ScopeBoxName = c.ScopeBoxName,
+                };
                 _extEvent.Raise();
             });
             goBtn.Margin = new Thickness(0, 0, 6, 0);
@@ -329,6 +416,23 @@ namespace METools.Comments
                 var reopenBtn = MakeBtn("Reopen", true, () => SetStatus(c.Id, CommentStatus.Open));
                 btnRow.Children.Add(reopenBtn);
             }
+
+            // Unlike the other actions here, this one can't be undone from
+            // within the app (Ignore/Done can always be Reopened) -- so it's
+            // the one action that gets an explicit confirmation step first.
+            var deleteBtn = MakeBtn("Delete", true, () =>
+            {
+                var result = TaskDialog.Show(
+                    "Delete Comment",
+                    $"Permanently delete this comment by {c.Author}?\n\n\"{c.Text}\"",
+                    TaskDialogCommonButtons.Yes | TaskDialogCommonButtons.No);
+                if (result != TaskDialogResult.Yes) return;
+
+                _handler.Request = new CommentsRequest { Action = CommentsAction.Delete, CommentId = c.Id };
+                _extEvent.Raise();
+            });
+            deleteBtn.Margin = new Thickness(0, 0, 6, 0);
+            btnRow.Children.Add(deleteBtn);
 
             return border;
         }

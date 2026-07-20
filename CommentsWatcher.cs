@@ -47,13 +47,20 @@ namespace METools.Comments
         {
             try
             {
-                var levelName = (e.CurrentActiveView as ViewPlan)?.GenLevel?.Name;
-                CheckFor((sender as UIApplication)?.ActiveUIDocument, levelName);
+                var view = e.CurrentActiveView as ViewPlan;
+                var levelName = view?.GenLevel?.Name;
+                // Same disambiguation as JumpTo/CurrentScopeBoxName: level names
+                // alone can be ambiguous across building sections, so Scope Box
+                // narrows a "new comment on this level" check down to the exact
+                // section actually being viewed, not just any same-named level.
+                string scopeBoxName = null;
+                try { scopeBoxName = view?.LookupParameter("Scope Box")?.AsValueString(); } catch { }
+                CheckFor((sender as UIApplication)?.ActiveUIDocument, levelName, scopeBoxName);
             }
             catch { }
         }
 
-        private static void CheckFor(UIDocument uidoc, string onlyLevelName)
+        private static void CheckFor(UIDocument uidoc, string onlyLevelName, string onlyScopeBoxName = null)
         {
             try
             {
@@ -77,7 +84,17 @@ namespace METools.Comments
                     !_shownIds.Contains(c.Id));
 
                 if (onlyLevelName != null)
+                {
                     candidates = candidates.Where(c => string.Equals(c.LevelName, onlyLevelName, StringComparison.OrdinalIgnoreCase));
+                    // Only narrow by Scope Box when the comment actually has one
+                    // recorded -- older comments saved before this fix won't, and
+                    // should still match on level name alone rather than being
+                    // silently excluded forever.
+                    if (!string.IsNullOrWhiteSpace(onlyScopeBoxName))
+                        candidates = candidates.Where(c =>
+                            string.IsNullOrWhiteSpace(c.ScopeBoxName) ||
+                            string.Equals(c.ScopeBoxName, onlyScopeBoxName, StringComparison.OrdinalIgnoreCase));
+                }
 
                 var toShow = candidates.OrderBy(c => c.CreatedUtc).FirstOrDefault();
                 if (toShow == null) return;

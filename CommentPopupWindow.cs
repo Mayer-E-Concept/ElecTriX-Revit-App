@@ -45,6 +45,8 @@ namespace METools.Comments
             };
         }
 
+        private TextBlock _errorText;
+
         private void BuildUi()
         {
             var root = new StackPanel { Margin = new Thickness(14) };
@@ -58,6 +60,11 @@ namespace METools.Comments
             };
             root.Children.Add(accentBar);
 
+            var headerRow = new Grid();
+            headerRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            headerRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            root.Children.Add(headerRow);
+
             var header = new TextBlock
             {
                 Text = "New comment",
@@ -66,11 +73,30 @@ namespace METools.Comments
                 Foreground = MeToolsTheme.BrAccent,
                 Margin = new Thickness(0, 0, 0, 6),
             };
-            root.Children.Add(header);
+            Grid.SetColumn(header, 0);
+            headerRow.Children.Add(header);
+
+            // Deliberately separate from the action buttons below and does
+            // nothing but Close() -- no ExternalEvent, no Comments logic --
+            // so this always works as a way out even if something else here
+            // is broken.
+            var closeBtn = new Button
+            {
+                Content = "✕", Width = 22, Height = 22, Padding = new Thickness(0),
+                Background = Brushes.Transparent, BorderThickness = new Thickness(0),
+                Foreground = MeToolsTheme.BrMuted, Cursor = Cursors.Hand,
+                HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top,
+            };
+            closeBtn.Click += (s, e) => Close();
+            Grid.SetColumn(closeBtn, 1);
+            headerRow.Children.Add(closeBtn);
 
             var meta = new TextBlock
             {
-                Text = $"{_comment.Author}  •  {_comment.LevelName}",
+                Text = $"{_comment.Author}  •  " +
+                       (string.IsNullOrWhiteSpace(_comment.ScopeBoxName)
+                           ? _comment.LevelName
+                           : $"{_comment.LevelName} ({_comment.ScopeBoxName})"),
                 FontSize = 11.5,
                 Foreground = MeToolsTheme.BrMuted,
                 Margin = new Thickness(0, 0, 0, 8),
@@ -87,12 +113,21 @@ namespace METools.Comments
             };
             root.Children.Add(text);
 
+            // Hidden unless something actually throws -- if it appears, the
+            // text is the real exception message, not a guess.
+            _errorText = new TextBlock
+            {
+                FontSize = 10.5, Foreground = Brushes.IndianRed, TextWrapping = TextWrapping.Wrap,
+                Margin = new Thickness(0, 0, 0, 8), Visibility = Visibility.Collapsed,
+            };
+            root.Children.Add(_errorText);
+
             var btnRow = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
             root.Children.Add(btnRow);
 
             var goBtn = MakeBtn("Go There", isOutline: true, () =>
             {
-                CommentsHandler.JumpToLevel(_comment.LevelName);
+                CommentsHandler.JumpToLevel(_comment.LevelName, _comment.ScopeBoxName);
                 Close();
             });
             goBtn.Margin = new Thickness(0, 0, 8, 0);
@@ -129,7 +164,20 @@ namespace METools.Comments
                 Foreground = isOutline ? MeToolsTheme.BrText : MeToolsTheme.BrOnAccent,
             };
             btn.Template = MeToolsWindowBase.RoundedBtnTemplate();
-            btn.Click += (s, e) => onClick();
+            btn.Click += (s, e) =>
+            {
+                try
+                {
+                    onClick();
+                }
+                catch (Exception ex)
+                {
+                    // Surface the real error instead of leaving the person
+                    // staring at a button that appears to do nothing.
+                    _errorText.Text = $"{ex.GetType().Name}: {ex.Message}";
+                    _errorText.Visibility = Visibility.Visible;
+                }
+            };
             return btn;
         }
     }
