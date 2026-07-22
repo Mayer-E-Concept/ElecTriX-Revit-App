@@ -376,11 +376,29 @@ namespace METools.FamilyPlacer
             var grid = new Grid { Background = MeToolsTheme.BrHeader, MinHeight = 26 };
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(6) });
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(180) });
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(52) });
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(52) });
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(42) });
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(54) });
+
+            // Total column gets a subtle tint so it reads as a summary column,
+            // not a fifth badge in the Sock./Lamp/Sw. sequence.
+            var totalBg = new Border { Background = new SolidColorBrush(Color.FromArgb(18, MeToolsTheme.COrange.R, MeToolsTheme.COrange.G, MeToolsTheme.COrange.B)) };
+            Grid.SetColumn(totalBg, 6); grid.Children.Add(totalBg);
+
+            // Thin vertical dividers between the four numeric columns -- this is
+            // what makes it impossible to miscount which value sits under which
+            // header (the actual cause of the earlier Sock./Sw. mix-up).
+            foreach (int col in new[] { 3, 4, 5, 6 })
+            {
+                var divider = new Border
+                {
+                    Width = 1, Background = MeToolsTheme.BrBorder,
+                    HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 4, 0, 4),
+                };
+                Grid.SetColumn(divider, col); grid.Children.Add(divider);
+            }
 
             var headers = new (int col, string text)[]
             {
@@ -396,6 +414,7 @@ namespace METools.FamilyPlacer
                 {
                     Text = text, FontSize = 9, FontWeight = FontWeights.SemiBold,
                     Foreground = MeToolsTheme.BrMuted, VerticalAlignment = VerticalAlignment.Center,
+                    HorizontalAlignment = col >= 3 ? HorizontalAlignment.Center : HorizontalAlignment.Left,
                     Margin = new Thickness(col >= 3 ? 4 : 8, 0, 4, 0),
                 };
                 Grid.SetColumn(tb, col); grid.Children.Add(tb);
@@ -532,12 +551,25 @@ namespace METools.FamilyPlacer
             var grid = new Grid { MinHeight = 32 };
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(isSubRow ? 20 : 6) });
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(180) });
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(52) });
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(52) });
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(42) });
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(54) });
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });  // clear btn
+
+            // Total column tint + column dividers, matching StatsHeader exactly.
+            var totalBg = new Border { Background = new SolidColorBrush(Color.FromArgb(14, MeToolsTheme.COrange.R, MeToolsTheme.COrange.G, MeToolsTheme.COrange.B)) };
+            Grid.SetColumn(totalBg, 6); grid.Children.Add(totalBg);
+            foreach (int col in new[] { 3, 4, 5, 6 })
+            {
+                var divider = new Border
+                {
+                    Width = 1, Background = MeToolsTheme.BrBorder,
+                    HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 3, 0, 3),
+                };
+                Grid.SetColumn(divider, col); grid.Children.Add(divider);
+            }
 
             UIElement badge = CircuitBadge(stat.CircuitLabel, isSubRow);
             ((FrameworkElement)badge).Margin         = new Thickness(0, 4, 8, 4);
@@ -1285,12 +1317,18 @@ namespace METools.FamilyPlacer
 
         private UIElement CountBadge(int count, Color color)
         {
-            if (count == 0) return TC("--", small: true);
+            if (count == 0)
+            {
+                var dash = TC("--", small: true);
+                dash.HorizontalAlignment = HorizontalAlignment.Center;
+                dash.Margin = new Thickness(0);
+                return dash;
+            }
             return new Border
             {
                 CornerRadius = new CornerRadius(9), Padding = new Thickness(5, 1, 5, 1),
                 Margin = new Thickness(4, 4, 4, 4), VerticalAlignment = VerticalAlignment.Center,
-                HorizontalAlignment = HorizontalAlignment.Left,
+                HorizontalAlignment = HorizontalAlignment.Center,
                 Background = new SolidColorBrush(Color.FromArgb(22, color.R, color.G, color.B)),
                 BorderBrush = new SolidColorBrush(color), BorderThickness = new Thickness(1),
                 Child = new TextBlock { Text = count.ToString(), FontSize = 10,

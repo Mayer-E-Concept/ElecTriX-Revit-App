@@ -10,7 +10,6 @@ namespace METools
     public class App : IExternalApplication
     {
         private const string TAB    = "ElecTriX";
-        private const string PANEL  = "ElecTriX";
         private const string VENDOR = "Mayer E-Concept SRL";
 
         public Result OnStartup(UIControlledApplication app)
@@ -26,7 +25,11 @@ namespace METools
 
             try { app.CreateRibbonTab(TAB); } catch { }
 
-            var panel  = app.CreateRibbonPanel(TAB, PANEL);
+            var panelSetup     = app.CreateRibbonPanel(TAB, "Setup");
+            var panelPlacement = app.CreateRibbonPanel(TAB, "Placement");
+            var panelLevels    = app.CreateRibbonPanel(TAB, "Levels && Structure");
+            var panelCircuits  = app.CreateRibbonPanel(TAB, "Circuits && Reporting");
+            var panelTeam      = app.CreateRibbonPanel(TAB, "Team");
             string dll = Assembly.GetExecutingAssembly().Location;
 
             // -- Settings (Appearance ? Language ? License ? Worksets) -------
@@ -41,11 +44,10 @@ namespace METools
                 Image           = LoadIcon("icon_settings_light_16.png"),
                 LargeImage      = LoadIcon("icon_settings_light_32.png"),
             };
-            var settingsButton = panel.AddItem(stBtn) as PushButton;
+            var settingsButton = panelSetup.AddItem(stBtn) as PushButton;
             if (settingsButton != null)
                 SettingsCommand.RibbonButton = settingsButton;
             RibbonThemeWatcher.Register(settingsButton, "icon_settings");
-            panel.AddSeparator();
 
             // -- Family Placer -----------------------------------------------
             var fpBtn = new PushButtonData(
@@ -57,9 +59,9 @@ namespace METools
                 Image           = LoadIcon("icon_fp_light_16.png"),
                 LargeImage      = LoadIcon("icon_fp_light_32.png"),
             };
-            var fpButton = panel.AddItem(fpBtn) as PushButton;
+            var fpButton = panelPlacement.AddItem(fpBtn) as PushButton;
             RibbonThemeWatcher.Register(fpButton, "icon_fp");
-            panel.AddSeparator();
+            panelPlacement.AddSeparator();
 
             // -- Family Browser ---------------------------------------------
             var fbBtn = new PushButtonData(
@@ -71,9 +73,9 @@ namespace METools
                 Image           = LoadIcon("icon_fb_light_16.png") ?? LoadIcon("icon_fp_light_16.png"),
                 LargeImage      = LoadIcon("icon_fb_light_32.png") ?? LoadIcon("icon_fp_light_32.png"),
             };
-            var fbButton = panel.AddItem(fbBtn) as PushButton;
+            var fbButton = panelPlacement.AddItem(fbBtn) as PushButton;
             RibbonThemeWatcher.Register(fbButton, "icon_fb");
-            panel.AddSeparator();
+            panelPlacement.AddSeparator();
 
             // -- Lamp Placer -------------------------------------------------
             var lpBtn = new PushButtonData(
@@ -85,9 +87,8 @@ namespace METools
                 Image           = LoadIcon("icon_lamp_light_16.png"),
                 LargeImage      = LoadIcon("icon_lamp_light_32.png"),
             };
-            var lpButton = panel.AddItem(lpBtn) as PushButton;
+            var lpButton = panelPlacement.AddItem(lpBtn) as PushButton;
             RibbonThemeWatcher.Register(lpButton, "icon_lamp");
-            panel.AddSeparator();
 
             // -- Fix Level ---------------------------------------------------
             var flBtn = new PushButtonData(
@@ -99,9 +100,9 @@ namespace METools
                 Image           = LoadIcon("icon_fl_fix_light_16.png") ?? LoadIcon("icon_fp_light_16.png"),
                 LargeImage      = LoadIcon("icon_fl_fix_light_32.png") ?? LoadIcon("icon_fp_light_32.png"),
             };
-            var flButton = panel.AddItem(flBtn) as PushButton;
+            var flButton = panelLevels.AddItem(flBtn) as PushButton;
             RibbonThemeWatcher.Register(flButton, "icon_fl_fix");
-            panel.AddSeparator();
+            panelLevels.AddSeparator();
 
             // -- Level Manager ------------------------------------------------
             var lmBtn = new PushButtonData(
@@ -113,9 +114,9 @@ namespace METools
                 Image           = LoadIcon("icon_lm_light_16.png") ?? LoadIcon("icon_fp_light_16.png"),
                 LargeImage      = LoadIcon("icon_lm_light_32.png") ?? LoadIcon("icon_fp_light_32.png"),
             };
-            var lmButton = panel.AddItem(lmBtn) as PushButton;
+            var lmButton = panelLevels.AddItem(lmBtn) as PushButton;
             RibbonThemeWatcher.Register(lmButton, "icon_lm");
-            panel.AddSeparator();
+            panelLevels.AddSeparator();
 
             // -- Project Transfer ---------------------------------------------
             var ptBtn = new PushButtonData(
@@ -127,9 +128,8 @@ namespace METools
                 Image           = LoadIcon("icon_pt_light_16.png") ?? LoadIcon("icon_fp_light_16.png"),
                 LargeImage      = LoadIcon("icon_pt_light_32.png") ?? LoadIcon("icon_fp_light_32.png"),
             };
-            var ptButton = panel.AddItem(ptBtn) as PushButton;
+            var ptButton = panelLevels.AddItem(ptBtn) as PushButton;
             RibbonThemeWatcher.Register(ptButton, "icon_pt");
-            panel.AddSeparator();
 
             // -- Circuit Tagger ---------------------------------------------
             var ctBtn = new PushButtonData(
@@ -146,9 +146,9 @@ namespace METools
                 Image           = LoadIcon("icon_ct_light_16.png"),
                 LargeImage      = LoadIcon("icon_ct_light_32.png"),
             };
-            var ctButton = panel.AddItem(ctBtn) as PushButton;
+            var ctButton = panelCircuits.AddItem(ctBtn) as PushButton;
             RibbonThemeWatcher.Register(ctButton, "icon_ct");
-            panel.AddSeparator();
+            panelCircuits.AddSeparator();
 
             // -- Statistics ------------------------------------------------
             var statsBtn = new PushButtonData(
@@ -160,9 +160,8 @@ namespace METools
                 Image           = LoadIcon("icon_stats_light_16.png"),
                 LargeImage      = LoadIcon("icon_stats_light_32.png"),
             };
-            var statsButton = panel.AddItem(statsBtn) as PushButton;
+            var statsButton = panelCircuits.AddItem(statsBtn) as PushButton;
             RibbonThemeWatcher.Register(statsButton, "icon_stats");
-            panel.AddSeparator();
 
             // -- Comments ----------------------------------------------------
             var cmtBtn = new PushButtonData(
@@ -179,7 +178,7 @@ namespace METools
                 Image           = LoadIcon("icon_comments_light_16.png"),
                 LargeImage      = LoadIcon("icon_comments_light_32.png"),
             };
-            var cmtButton = panel.AddItem(cmtBtn) as PushButton;
+            var cmtButton = panelTeam.AddItem(cmtBtn) as PushButton;
             RibbonThemeWatcher.Register(cmtButton, "icon_comments");
 
             // Apply the correct light/dark icon set right now based on Revit's
