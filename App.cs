@@ -27,10 +27,20 @@ namespace METools
 
             var panelSetup     = app.CreateRibbonPanel(TAB, "Setup");
             var panelPlacement = app.CreateRibbonPanel(TAB, "Placement");
-            var panelLevels    = app.CreateRibbonPanel(TAB, "Levels && Structure");
-            var panelCircuits  = app.CreateRibbonPanel(TAB, "Circuits && Reporting");
+            var panelLevels    = app.CreateRibbonPanel(TAB, "Levels & Structure");
+            var panelCircuits  = app.CreateRibbonPanel(TAB, "Circuits & Reporting");
             var panelTeam      = app.CreateRibbonPanel(TAB, "Team");
             string dll = Assembly.GetExecutingAssembly().Location;
+
+            // Group accent colors -- shades of the ME-Tools petrol brand color
+            // (0x18,0x5f,0x5f), from darkest to lightest, one per panel group.
+            // Drawn as a small bar under each icon (see RibbonThemeWatcher) since
+            // Revit doesn't support coloring the panel title bars themselves.
+            var cSetup     = System.Windows.Media.Color.FromRgb(0x0F, 0x37, 0x37);
+            var cPlacement = System.Windows.Media.Color.FromRgb(0x18, 0x5F, 0x5F);
+            var cLevels    = System.Windows.Media.Color.FromRgb(0x23, 0x7D, 0x7D);
+            var cCircuits  = System.Windows.Media.Color.FromRgb(0x32, 0x9B, 0x9B);
+            var cTeam      = System.Windows.Media.Color.FromRgb(0x46, 0xB9, 0xB9);
 
             // -- Settings (Appearance ? Language ? License ? Worksets) -------
             // Leftmost -- entry point for theme switch, language, license and worksets.
@@ -47,7 +57,7 @@ namespace METools
             var settingsButton = panelSetup.AddItem(stBtn) as PushButton;
             if (settingsButton != null)
                 SettingsCommand.RibbonButton = settingsButton;
-            RibbonThemeWatcher.Register(settingsButton, "icon_settings");
+            RibbonThemeWatcher.Register(settingsButton, "icon_settings", cSetup);
 
             // -- Family Placer -----------------------------------------------
             var fpBtn = new PushButtonData(
@@ -60,7 +70,7 @@ namespace METools
                 LargeImage      = LoadIcon("icon_fp_light_32.png"),
             };
             var fpButton = panelPlacement.AddItem(fpBtn) as PushButton;
-            RibbonThemeWatcher.Register(fpButton, "icon_fp");
+            RibbonThemeWatcher.Register(fpButton, "icon_fp", cPlacement);
             panelPlacement.AddSeparator();
 
             // -- Family Browser ---------------------------------------------
@@ -74,7 +84,7 @@ namespace METools
                 LargeImage      = LoadIcon("icon_fb_light_32.png") ?? LoadIcon("icon_fp_light_32.png"),
             };
             var fbButton = panelPlacement.AddItem(fbBtn) as PushButton;
-            RibbonThemeWatcher.Register(fbButton, "icon_fb");
+            RibbonThemeWatcher.Register(fbButton, "icon_fb", cPlacement);
             panelPlacement.AddSeparator();
 
             // -- Lamp Placer -------------------------------------------------
@@ -88,7 +98,7 @@ namespace METools
                 LargeImage      = LoadIcon("icon_lamp_light_32.png"),
             };
             var lpButton = panelPlacement.AddItem(lpBtn) as PushButton;
-            RibbonThemeWatcher.Register(lpButton, "icon_lamp");
+            RibbonThemeWatcher.Register(lpButton, "icon_lamp", cPlacement);
 
             // -- Fix Level ---------------------------------------------------
             var flBtn = new PushButtonData(
@@ -101,7 +111,7 @@ namespace METools
                 LargeImage      = LoadIcon("icon_fl_fix_light_32.png") ?? LoadIcon("icon_fp_light_32.png"),
             };
             var flButton = panelLevels.AddItem(flBtn) as PushButton;
-            RibbonThemeWatcher.Register(flButton, "icon_fl_fix");
+            RibbonThemeWatcher.Register(flButton, "icon_fl_fix", cLevels);
             panelLevels.AddSeparator();
 
             // -- Level Manager ------------------------------------------------
@@ -115,7 +125,7 @@ namespace METools
                 LargeImage      = LoadIcon("icon_lm_light_32.png") ?? LoadIcon("icon_fp_light_32.png"),
             };
             var lmButton = panelLevels.AddItem(lmBtn) as PushButton;
-            RibbonThemeWatcher.Register(lmButton, "icon_lm");
+            RibbonThemeWatcher.Register(lmButton, "icon_lm", cLevels);
             panelLevels.AddSeparator();
 
             // -- Project Transfer ---------------------------------------------
@@ -129,7 +139,7 @@ namespace METools
                 LargeImage      = LoadIcon("icon_pt_light_32.png") ?? LoadIcon("icon_fp_light_32.png"),
             };
             var ptButton = panelLevels.AddItem(ptBtn) as PushButton;
-            RibbonThemeWatcher.Register(ptButton, "icon_pt");
+            RibbonThemeWatcher.Register(ptButton, "icon_pt", cLevels);
 
             // -- Circuit Tagger ---------------------------------------------
             var ctBtn = new PushButtonData(
@@ -147,7 +157,7 @@ namespace METools
                 LargeImage      = LoadIcon("icon_ct_light_32.png"),
             };
             var ctButton = panelCircuits.AddItem(ctBtn) as PushButton;
-            RibbonThemeWatcher.Register(ctButton, "icon_ct");
+            RibbonThemeWatcher.Register(ctButton, "icon_ct", cCircuits);
             panelCircuits.AddSeparator();
 
             // -- Statistics ------------------------------------------------
@@ -161,7 +171,7 @@ namespace METools
                 LargeImage      = LoadIcon("icon_stats_light_32.png"),
             };
             var statsButton = panelCircuits.AddItem(statsBtn) as PushButton;
-            RibbonThemeWatcher.Register(statsButton, "icon_stats");
+            RibbonThemeWatcher.Register(statsButton, "icon_stats", cCircuits);
 
             // -- Comments ----------------------------------------------------
             var cmtBtn = new PushButtonData(
@@ -179,7 +189,7 @@ namespace METools
                 LargeImage      = LoadIcon("icon_comments_light_32.png"),
             };
             var cmtButton = panelTeam.AddItem(cmtBtn) as PushButton;
-            RibbonThemeWatcher.Register(cmtButton, "icon_comments");
+            RibbonThemeWatcher.Register(cmtButton, "icon_comments", cTeam);
 
             // Apply the correct light/dark icon set right now based on Revit's
             // current theme, and subscribe so it stays in sync if the user

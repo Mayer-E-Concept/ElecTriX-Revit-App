@@ -31,6 +31,7 @@ namespace METools
         {
             public PushButton Button;
             public string     IconKey; // e.g. "icon_fp" -> resolves to icon_fp_light_16.png etc.
+            public System.Windows.Media.Color? GroupTint; // optional accent bar color for panel grouping
         }
 
         private static readonly List<Entry> _entries = new List<Entry>();
@@ -39,11 +40,15 @@ namespace METools
         /// <summary>
         /// Register a ribbon button so its icon follows Revit's active theme.
         /// Call once per button, right after adding it to the panel.
+        /// groupTint (optional): draws a thin colored accent bar under the icon,
+        /// so buttons belonging to the same ribbon panel group are recognizable
+        /// by color at a glance -- since Revit itself doesn't support coloring
+        /// the panel title bars.
         /// </summary>
-        public static void Register(PushButton button, string iconKey)
+        public static void Register(PushButton button, string iconKey, System.Windows.Media.Color? groupTint = null)
         {
             if (button == null || string.IsNullOrEmpty(iconKey)) return;
-            _entries.Add(new Entry { Button = button, IconKey = iconKey });
+            _entries.Add(new Entry { Button = button, IconKey = iconKey, GroupTint = groupTint });
         }
 
         /// <summary>
@@ -181,11 +186,48 @@ namespace METools
                     var img32 = LoadIcon($"{entry.IconKey}_{variant}_32.png");
                     if (img16 == null || img32 == null)
                         LogDiag($"  '{entry.IconKey}': MISSING resource(s) for variant '{variant}' (16={(img16==null?"NULL":"ok")}, 32={(img32==null?"NULL":"ok")})");
+                    if (entry.GroupTint.HasValue)
+                    {
+                        img16 = AddAccentBar(img16, entry.GroupTint.Value, 16);
+                        img32 = AddAccentBar(img32, entry.GroupTint.Value, 32);
+                    }
                     entry.Button.Image      = img16;
                     entry.Button.LargeImage = img32;
                 }
                 catch (Exception ex) { LogDiag($"  '{entry.IconKey}': EXCEPTION {ex.Message}"); }
             }
+        }
+
+        // Draws the icon as-is, then a thin rounded accent bar near the bottom
+        // edge in the group's color -- a fully-supported way (plain WPF drawing,
+        // no ribbon internals) to make panel groups recognizable by color, since
+        // Revit itself doesn't expose a way to color panel title bars.
+        private static System.Windows.Media.ImageSource AddAccentBar(
+            System.Windows.Media.ImageSource baseIcon, System.Windows.Media.Color color, int size)
+        {
+            if (baseIcon == null) return null;
+            try
+            {
+                var visual = new System.Windows.Media.DrawingVisual();
+                using (var dc = visual.RenderOpen())
+                {
+                    dc.DrawImage(baseIcon, new System.Windows.Rect(0, 0, size, size));
+
+                    double barHeight = size <= 16 ? 2.0 : 3.5;
+                    double barMargin = size <= 16 ? 1.0 : 2.0;
+                    var barRect = new System.Windows.Rect(
+                        barMargin, size - barHeight - barMargin,
+                        size - barMargin * 2, barHeight);
+                    var brush = new System.Windows.Media.SolidColorBrush(color);
+                    dc.DrawRoundedRectangle(brush, null, barRect, barHeight / 2, barHeight / 2);
+                }
+                var rtb = new System.Windows.Media.Imaging.RenderTargetBitmap(
+                    size, size, 96, 96, System.Windows.Media.PixelFormats.Pbgra32);
+                rtb.Render(visual);
+                rtb.Freeze();
+                return rtb;
+            }
+            catch { return baseIcon; }
         }
 
         private static System.Windows.Media.ImageSource LoadIcon(string fileName)

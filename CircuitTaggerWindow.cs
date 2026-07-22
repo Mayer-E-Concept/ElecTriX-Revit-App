@@ -375,8 +375,9 @@ namespace METools.FamilyPlacer
         {
             var grid = new Grid { Background = MeToolsTheme.BrHeader, MinHeight = 26 };
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(6) });
-            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(70) });
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(180) });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) }); // empty spacer -- pushes badges to the right edge
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(52) });
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(52) });
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(42) });
@@ -385,12 +386,12 @@ namespace METools.FamilyPlacer
             // Total column gets a subtle tint so it reads as a summary column,
             // not a fifth badge in the Sock./Lamp/Sw. sequence.
             var totalBg = new Border { Background = new SolidColorBrush(Color.FromArgb(18, MeToolsTheme.COrange.R, MeToolsTheme.COrange.G, MeToolsTheme.COrange.B)) };
-            Grid.SetColumn(totalBg, 6); grid.Children.Add(totalBg);
+            Grid.SetColumn(totalBg, 7); grid.Children.Add(totalBg);
 
             // Thin vertical dividers between the four numeric columns -- this is
             // what makes it impossible to miscount which value sits under which
             // header (the actual cause of the earlier Sock./Sw. mix-up).
-            foreach (int col in new[] { 3, 4, 5, 6 })
+            foreach (int col in new[] { 4, 5, 6, 7 })
             {
                 var divider = new Border
                 {
@@ -403,10 +404,10 @@ namespace METools.FamilyPlacer
             var headers = new (int col, string text)[]
             {
                 (2, "Circuit / Vorsicherung"),
-                (3, "Sock."),
-                (4, "Lamp"),
-                (5, "Sw."),
-                (6, "Total"),
+                (4, "Sock."),
+                (5, "Lamp"),
+                (6, "Sw."),
+                (7, "Total"),
             };
             foreach (var (col, text) in headers)
             {
@@ -414,8 +415,8 @@ namespace METools.FamilyPlacer
                 {
                     Text = text, FontSize = 9, FontWeight = FontWeights.SemiBold,
                     Foreground = MeToolsTheme.BrMuted, VerticalAlignment = VerticalAlignment.Center,
-                    HorizontalAlignment = col >= 3 ? HorizontalAlignment.Center : HorizontalAlignment.Left,
-                    Margin = new Thickness(col >= 3 ? 4 : 8, 0, 4, 0),
+                    HorizontalAlignment = col >= 4 ? HorizontalAlignment.Center : HorizontalAlignment.Left,
+                    Margin = new Thickness(col >= 4 ? 4 : 8, 0, 4, 0),
                 };
                 Grid.SetColumn(tb, col); grid.Children.Add(tb);
             }
@@ -550,8 +551,9 @@ namespace METools.FamilyPlacer
         {
             var grid = new Grid { MinHeight = 32 };
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(isSubRow ? 20 : 6) });
-            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(70) });
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(180) });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) }); // empty spacer -- matches header
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(52) });
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(52) });
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(42) });
@@ -560,8 +562,8 @@ namespace METools.FamilyPlacer
 
             // Total column tint + column dividers, matching StatsHeader exactly.
             var totalBg = new Border { Background = new SolidColorBrush(Color.FromArgb(14, MeToolsTheme.COrange.R, MeToolsTheme.COrange.G, MeToolsTheme.COrange.B)) };
-            Grid.SetColumn(totalBg, 6); grid.Children.Add(totalBg);
-            foreach (int col in new[] { 3, 4, 5, 6 })
+            Grid.SetColumn(totalBg, 7); grid.Children.Add(totalBg);
+            foreach (int col in new[] { 4, 5, 6, 7 })
             {
                 var divider = new Border
                 {
@@ -574,6 +576,7 @@ namespace METools.FamilyPlacer
             UIElement badge = CircuitBadge(stat.CircuitLabel, isSubRow);
             ((FrameworkElement)badge).Margin         = new Thickness(0, 4, 8, 4);
             ((FrameworkElement)badge).VerticalAlignment = VerticalAlignment.Center;
+            ((FrameworkElement)badge).HorizontalAlignment = HorizontalAlignment.Left;
             Grid.SetColumn(badge, 1); grid.Children.Add(badge);
 
             var vs = TC(stat.Vorsicherung, small: true);
@@ -583,10 +586,10 @@ namespace METools.FamilyPlacer
             var cb2 = CountBadge(stat.CountLamps,     MeToolsTheme.CBlue);
             var cb3 = CountBadge(stat.CountSwitches,  MeToolsTheme.CGreen);
             var cb4 = CountBadge(stat.Total,          MeToolsTheme.COrange);
-            Grid.SetColumn(cb1, 3); grid.Children.Add(cb1);
-            Grid.SetColumn(cb2, 4); grid.Children.Add(cb2);
-            Grid.SetColumn(cb3, 5); grid.Children.Add(cb3);
-            Grid.SetColumn(cb4, 6); grid.Children.Add(cb4);
+            Grid.SetColumn(cb1, 4); grid.Children.Add(cb1);
+            Grid.SetColumn(cb2, 5); grid.Children.Add(cb2);
+            Grid.SetColumn(cb3, 6); grid.Children.Add(cb3);
+            Grid.SetColumn(cb4, 7); grid.Children.Add(cb4);
 
             // Clear button -- always visible on the right
             var capturedLabel = stat.CircuitLabel;
@@ -603,7 +606,7 @@ namespace METools.FamilyPlacer
                 Template = RoundedBtnTemplate(),
             };
             clearBtn.Click += (s, e) => OnClearCircuitData(capturedLabel);
-            Grid.SetColumn(clearBtn, 7); grid.Children.Add(clearBtn);
+            Grid.SetColumn(clearBtn, 8); grid.Children.Add(clearBtn);
 
             var row = new Border
             {
