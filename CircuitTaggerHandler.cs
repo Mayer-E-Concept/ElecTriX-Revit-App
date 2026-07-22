@@ -156,6 +156,7 @@ namespace METools.FamilyPlacer
             int written = 0, tagged = 0, errors = 0;
             var errorMsgs = new List<string>();
             var groups = new Dictionary<string, List<TagPlacementInfo>>();
+            var missingParams = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
             using (var tx = new Transaction(doc, "ME-Tools: Write Circuit Params + Tags"))
             {
@@ -177,12 +178,12 @@ namespace METools.FamilyPlacer
                         var el = doc.GetElement(id);
                         if (el == null) continue;
 
-                        WriteParam(el, PARAM_VORSICHERUNG,      req.Vorsicherung);
-                        WriteParam(el, PARAM_FI,                req.FI);
-                        WriteParam(el, PARAM_STROMKREIS,        fullLabel);
-                        WriteParam(el, PARAM_BELEUCHTUNGSKREIS, req.Beleuchtungskreis);
-                        WriteParam(el, PARAM_APARTMENT,         req.Apartment);
-                        WriteParam(el, PARAM_BUILDING,          req.Building);
+                        if (!WriteParam(el, PARAM_VORSICHERUNG,      req.Vorsicherung))      missingParams.Add(PARAM_VORSICHERUNG);
+                        if (!WriteParam(el, PARAM_FI,                req.FI))                missingParams.Add(PARAM_FI);
+                        if (!WriteParam(el, PARAM_STROMKREIS,        fullLabel))              missingParams.Add(PARAM_STROMKREIS);
+                        if (!WriteParam(el, PARAM_BELEUCHTUNGSKREIS, req.Beleuchtungskreis))  missingParams.Add(PARAM_BELEUCHTUNGSKREIS);
+                        if (!WriteParam(el, PARAM_APARTMENT,         req.Apartment))          missingParams.Add(PARAM_APARTMENT);
+                        if (!WriteParam(el, PARAM_BUILDING,          req.Building))           missingParams.Add(PARAM_BUILDING);
                         written++;
 
                         if (canTag && (view is ViewPlan || view is ViewSection))
@@ -390,6 +391,8 @@ namespace METools.FamilyPlacer
             var summary = $"Done. {written} elements updated";
             if (tagged > 0) summary += $", {tagged} tags placed";
             if (!canTag)    summary += $" -- tag family '{TAG_FAMILY_NAME}' not loaded, no tags placed";
+            if (missingParams.Count > 0)
+                summary += $" -- NOT bound to this category, values not written: {string.Join(", ", missingParams)}";
             if (errors > 0) summary += $", {errors} errors: " + errorMsgs.FirstOrDefault();
             Report(summary);
             OnDone?.Invoke();
@@ -428,16 +431,20 @@ namespace METools.FamilyPlacer
                 : (dir.X >= 0 ? "E" : "W");
         }
 
-        private static void WriteParam(Element el, string paramName, string value)
+        private static bool WriteParam(Element el, string paramName, string value)
         {
-            if (string.IsNullOrEmpty(value)) return;
+            if (string.IsNullOrEmpty(value)) return true; // nothing requested for this field -- not a failure
             try
             {
                 var p = el.LookupParameter(paramName);
                 if (p != null && !p.IsReadOnly && p.StorageType == StorageType.String)
+                {
                     p.Set(value);
+                    return true;
+                }
             }
             catch { }
+            return false;
         }
 
         private static XYZ GetElementCenter(Element el)
