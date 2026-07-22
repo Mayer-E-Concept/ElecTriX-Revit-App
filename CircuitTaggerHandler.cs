@@ -389,6 +389,7 @@ namespace METools.FamilyPlacer
 
             var summary = $"Done. {written} elements updated";
             if (tagged > 0) summary += $", {tagged} tags placed";
+            if (!canTag)    summary += $" -- tag family '{TAG_FAMILY_NAME}' not loaded, no tags placed";
             if (errors > 0) summary += $", {errors} errors: " + errorMsgs.FirstOrDefault();
             Report(summary);
             OnDone?.Invoke();

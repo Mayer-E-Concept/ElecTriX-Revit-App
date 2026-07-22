@@ -490,7 +490,7 @@ namespace METools
             return b;
         }
 
-        protected static System.Windows.Controls.ControlTemplate RoundedBtnTemplate()
+        internal static System.Windows.Controls.ControlTemplate RoundedBtnTemplate()
         {
             var f = new System.Windows.FrameworkElementFactory(typeof(Border));
             f.SetBinding(Border.BackgroundProperty, new System.Windows.Data.Binding("Background")
