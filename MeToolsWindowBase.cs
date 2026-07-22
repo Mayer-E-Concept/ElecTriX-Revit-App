@@ -1,5 +1,5 @@
-// MeToolsWindowBase.cs ? EINZIGE Datei für alle Fenster-Darstellung
-// Mayer E-Concept SRL ? Hier ändern = überall gleich
+// MeToolsWindowBase.cs — EINZIGE Datei für alle Fenster-Darstellung
+// Mayer E-Concept SRL — Hier ändern = überall gleich
 using System;
 using System.Windows;
 using System.Windows.Controls;
@@ -13,7 +13,7 @@ namespace METools
 {
     public class MeToolsWindowBase : Window
     {
-        // ?? Öffentliche UI-Refs ???????????????????????????????????????????
+        // ── Öffentliche UI-Refs ───────────────────────────────────────────
         protected DockPanel  RootDock;
         protected Grid       StatusBarGrid;
         protected TextBlock  StatusLeft;
@@ -23,12 +23,11 @@ namespace METools
         private Action      _themeHandler;
         private bool        _isDialog;
         private Border      _outerBorder;
-        private Border      _themeAccentLine;
 
         // Revit main window handle (set by commands) -> keeps windows above Revit.
         public static System.IntPtr RevitHandle = System.IntPtr.Zero;
 
-        // ?? Fenster initialisieren ????????????????????????????????????????
+        // ── Fenster initialisieren ────────────────────────────────────────
         protected void InitWindow(string title, double width = 480, bool isDialog = false)
         {
             _isDialog             = isDialog;
@@ -41,12 +40,21 @@ namespace METools
             var _wa = System.Windows.SystemParameters.WorkArea;
             Left = _wa.Right - Width - 24;
             Top  = _wa.Top + 40;
-            // Keep the window fully on-screen both when it first opens AND whenever
-            // its rendered size changes afterwards (e.g. switching to a taller tab
-            // like Worksets, which used to grow the window down past the bottom of
-            // the screen because only Loaded repositioned it).
-            Loaded      += (s, e) => KeepInWorkArea();
-            SizeChanged += (s, e) => KeepInWorkArea();
+            Loaded += (s, e) =>
+            {
+                var wa = System.Windows.SystemParameters.WorkArea;
+                Left = wa.Right - ActualWidth - 24;
+                Top  = wa.Top + System.Math.Max(0, (wa.Height - ActualHeight) / 2);
+
+                // Freeze the content-derived height and hand full control back to the
+                // user. Leaving SizeToContent=Height active together with
+                // ResizeMode.CanResizeWithGrip is what caused the resize-grip glitch /
+                // snap-to-right-edge bug: WPF's auto-size engine kept re-solving the
+                // window bounds against this Loaded-time right-anchor math on every
+                // resize pass. Locking Height + switching to Manual stops that fight.
+                Height        = ActualHeight;
+                SizeToContent = SizeToContent.Manual;
+            };
             FontFamily            = new FontFamily("Segoe UI");
             FontSize              = 12;
 
@@ -61,7 +69,7 @@ namespace METools
             };
             System.Windows.Shell.WindowChrome.SetWindowChrome(this, chrome);
 
-            // Äußerer Container ? abgerundete Ecken
+            // Äußerer Container — abgerundete Ecken
             _outerBorder = new Border
             {
                 CornerRadius = new CornerRadius(8),
@@ -80,8 +88,6 @@ namespace METools
             {
                 Background = new SolidColorBrush(MeToolsTheme.CPetrolDark);
                 _outerBorder.Background = MeToolsTheme.BrBg;
-                if (_themeAccentLine != null)
-                    _themeAccentLine.Background = MeToolsTheme.BrAccent;
                 if (StatusBarGrid != null)
                     StatusBarGrid.Background = MeToolsTheme.BrStatusBar;
                 OnThemeChanged();
@@ -89,49 +95,13 @@ namespace METools
             MeToolsTheme.ThemeChanged += _themeHandler;
             Closed += (s, e) => MeToolsTheme.ThemeChanged -= _themeHandler;
 
-            // Keep window above Revit without making it an "owner" relationship.
-            // Using Owner = RevitHandle causes Revit to minimize when the tool window
-            // is closed or minimized. Instead we use SetWindowLongPtr to set the
-            // owner at the Win32 level for Z-ordering only, combined with
-            // ShowInTaskbar = false to keep it off the taskbar.
+            // Glue to Revit: stays above the Revit window, minimizes/restores with it,
+            // but remains a separate, movable window.
             if (RevitHandle != System.IntPtr.Zero)
-            {
-                try
-                {
-                    // Set the WS_EX_NOACTIVATE style so closing doesn't affect owner
-                    var helper = new System.Windows.Interop.WindowInteropHelper(this);
-                    helper.EnsureHandle();
-                    // Use Owner for Z-order but intercept minimize via OnStateChanged
-                    new System.Windows.Interop.WindowInteropHelper(this).Owner = RevitHandle;
-                }
-                catch { }
-            }
+                try { new System.Windows.Interop.WindowInteropHelper(this).Owner = RevitHandle; } catch { }
         }
 
-        // Keeps the window fully inside the current work area: re-anchored to the
-        // right edge horizontally, centered vertically if it fits, pinned to the
-        // top if it doesn't, and never allowed to hang off the bottom or top edge.
-        // Called on Loaded and on every SizeChanged, since SizeToContent means a
-        // tab switch can change ActualHeight well after the window was first shown.
-        private void KeepInWorkArea()
-        {
-            var wa = System.Windows.SystemParameters.WorkArea;
-            double w = ActualWidth  > 0 ? ActualWidth  : Width;
-            double h = ActualHeight;
-
-            double left = System.Math.Max(wa.Left, wa.Right - w - 24);
-
-            double top = (h > 0 && h < wa.Height)
-                ? wa.Top + System.Math.Max(0, (wa.Height - h) / 2)
-                : wa.Top;
-            if (h > 0) top = System.Math.Min(top, System.Math.Max(wa.Top, wa.Bottom - h));
-            top = System.Math.Max(top, wa.Top);
-
-            Left = left;
-            Top  = top;
-        }
-
-        // ?? Titelleiste (immer gleich für ALLE Fenster) ???????????????????
+        // ── Titelleiste (immer gleich für ALLE Fenster) ───────────────────
         private void BuildTitleBar(string title)
         {
             var bar = new Grid
@@ -200,17 +170,17 @@ namespace METools
 
             var minBtn = TitleBtn(new TextBlock
             {
-                Text = "\u2012", FontSize = 14, FontWeight = FontWeights.Bold,
+                Text = "─", FontSize = 14, FontWeight = FontWeights.Bold,
                 Foreground = Brushes.White,
                 HorizontalAlignment = HorizontalAlignment.Center,
                 VerticalAlignment   = VerticalAlignment.Center,
             }, false);
-            minBtn.Click += (s, e) => Hide(); // Hide instead of minimize to avoid propagating to Revit owner
+            minBtn.Click += (s, e) => WindowState = WindowState.Minimized;
             btns.Children.Add(minBtn);
 
             var closeBtn = TitleBtn(new TextBlock
             {
-                Text = "\u2715", FontSize = 12, FontWeight = FontWeights.Bold,
+                Text = "✕", FontSize = 12, FontWeight = FontWeights.Bold,
                 Foreground = Brushes.White,
                 HorizontalAlignment = HorizontalAlignment.Center,
                 VerticalAlignment   = VerticalAlignment.Center,
@@ -223,20 +193,14 @@ namespace METools
 
             DockPanel.SetDock(bar, Dock.Top);
             RootDock.Children.Add(bar);
-
-            // Thin accent underline - a small nod to the circuit-trace lines on
-            // the me-concept.ro site, present on every ME-Tools window.
-            var accentLine = new Border { Height = 2, Background = MeToolsTheme.BrAccent };
-            DockPanel.SetDock(accentLine, Dock.Top);
-            RootDock.Children.Add(accentLine);
-            _themeAccentLine = accentLine;
         }
 
-        // ?? Schließen-Logik (für Dialog- und normale Fenster) ?????????????
+        // ── Schließen-Logik (für Dialog- und normale Fenster) ─────────────
         protected virtual void OnCloseClicked()
         {
             if (_isDialog)
             {
+                // Nur setzen wenn Fenster noch offen ist
                 if (IsLoaded && IsVisible)
                 {
                     try { DialogResult = false; } catch { }
@@ -245,27 +209,7 @@ namespace METools
             Close();
         }
 
-        // Prevent window state changes from propagating to Revit owner.
-        // When owner is Revit, minimizing this window can minimize Revit too.
-        protected override void OnStateChanged(EventArgs e)
-        {
-            base.OnStateChanged(e);
-            // If minimized, restore immediately and just hide instead
-            if (WindowState == WindowState.Minimized)
-                WindowState = WindowState.Normal;
-        }
-
-        // Intercept Alt+F4 / native close -- route through OnCloseClicked
-        // so dialog result is handled correctly and we never rely on native close
-        // which would propagate to the Revit owner window.
-        protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
-        {
-            // Don't cancel -- let Close() proceed normally.
-            // This override exists to ensure we don't get double-close issues.
-            base.OnClosing(e);
-        }
-
-        // ?? StatusBar (immer gleich) ???????????????????????????????????????
+        // ── StatusBar (immer gleich) ───────────────────────────────────────
         protected void BuildStatusBar(string left = "", string right = "Revit 2025")
         {
             StatusBarGrid = new Grid
@@ -298,10 +242,10 @@ namespace METools
             RootDock.Children.Add(StatusBarGrid);
         }
 
-        // ?? Theme-Hook für Unterklassen ???????????????????????????????????
+        // ── Theme-Hook für Unterklassen ───────────────────────────────────
         protected virtual void OnThemeChanged() { }
 
-        // ?? App-Switcher (title dropdown) ?????????????????????????
+        // ── App-Switcher (title dropdown) ─────────────────────────
         // Override in a window to enable the title dropdown (null = no switcher).
         protected virtual string AppKey => null;
 
@@ -370,7 +314,7 @@ namespace METools
         }
 
 
-        // ?? Styled ComboBox via XAML-String (einzig zuverlässige Methode) ??????
+        // ── Styled ComboBox via XAML-String (einzig zuverlässige Methode) ──────
         public static System.Windows.Controls.ComboBox StyledCombo(int height = 28, int fontSize = 12)
         {
             var cb = new System.Windows.Controls.ComboBox
@@ -387,12 +331,12 @@ namespace METools
             if (cb == null) return;
 
             bool dark   = MeToolsTheme.Current == MeTheme.Dark;
-            string bg   = dark ? "#FF0D2626" : "#FFFFFFFF";
-            string fg   = dark ? "#FFE9F4F3" : "#FF1E2528";
-            string bdr  = dark ? "#FF244A49" : "#FFD0D5D9";
-            string hov  = dark ? "#FF0A3533" : "#FFE0F0F0";
-            string hfg  = dark ? "#FF54DBD3" : "#FF0D3D3D";
-            string pbg  = dark ? "#FF102B2B" : "#FFFFFFFF";
+            string bg   = dark ? "#FF282828" : "#FFFFFFFF";
+            string fg   = dark ? "#FFE8E8E8" : "#FF1E2528";
+            string bdr  = dark ? "#FF444444" : "#FFD0D5D9";
+            string hov  = dark ? "#FF0F3535" : "#FFE0F0F0";
+            string hfg  = dark ? "#FF5DCAA5" : "#FF0D3D3D";
+            string pbg  = dark ? "#FF2A2A2A" : "#FFFFFFFF";
 
             string xaml = $@"
 <Style xmlns=""http://schemas.microsoft.com/winfx/2006/xaml/presentation""
@@ -473,9 +417,9 @@ namespace METools
 
 
 
-        // ?????????????????????????????????????????????????????????????????
+        // ═════════════════════════════════════════════════════════════════
         // GEMEINSAME UI-HELPERS (alle Fenster benutzen genau diese Methoden)
-        // ?????????????????????????????????????????????????????????????????
+        // ═════════════════════════════════════════════════════════════════
 
         // Titelleisten-Button
         private Button TitleBtn(UIElement content, bool isClose)
@@ -494,7 +438,7 @@ namespace METools
             return b;
         }
 
-        // Section-Label "?? TEXT ??????????"
+        // Section-Label "── TEXT ──────────"
         protected FrameworkElement Sec(string text)
         {
             var sp = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 6) };
@@ -536,7 +480,7 @@ namespace METools
             {
                 Content = label, Height = 30, MinWidth = 80, FontSize = 12,
                 Background  = active ? MeToolsTheme.BrActiveBg : MeToolsTheme.BrBtnBg,
-                BorderBrush = active ? MeToolsTheme.BrAccent    : MeToolsTheme.BrBtnBorder,
+                BorderBrush = active ? MeToolsTheme.BrPetrol    : MeToolsTheme.BrBtnBorder,
                 BorderThickness = new Thickness(1),
                 Foreground  = active ? MeToolsTheme.BrActiveFg  : MeToolsTheme.BrMuted,
                 Cursor = Cursors.Hand,
@@ -546,7 +490,7 @@ namespace METools
             return b;
         }
 
-        public static System.Windows.Controls.ControlTemplate RoundedBtnTemplate()
+        protected static System.Windows.Controls.ControlTemplate RoundedBtnTemplate()
         {
             var f = new System.Windows.FrameworkElementFactory(typeof(Border));
             f.SetBinding(Border.BackgroundProperty, new System.Windows.Data.Binding("Background")
@@ -555,13 +499,10 @@ namespace METools
                 { RelativeSource = new System.Windows.Data.RelativeSource(System.Windows.Data.RelativeSourceMode.TemplatedParent) });
             f.SetBinding(Border.BorderThicknessProperty, new System.Windows.Data.Binding("BorderThickness")
                 { RelativeSource = new System.Windows.Data.RelativeSource(System.Windows.Data.RelativeSourceMode.TemplatedParent) });
-            f.SetValue(Border.CornerRadiusProperty, new CornerRadius(5));
+            f.SetValue(Border.CornerRadiusProperty, new CornerRadius(4));
             var cp = new System.Windows.FrameworkElementFactory(typeof(ContentPresenter));
             cp.SetValue(ContentPresenter.HorizontalAlignmentProperty, HorizontalAlignment.Center);
             cp.SetValue(ContentPresenter.VerticalAlignmentProperty, VerticalAlignment.Center);
-            // Bind padding from the button so it actually applies
-            cp.SetBinding(ContentPresenter.MarginProperty, new System.Windows.Data.Binding("Padding")
-                { RelativeSource = new System.Windows.Data.RelativeSource(System.Windows.Data.RelativeSourceMode.TemplatedParent) });
             f.AppendChild(cp);
             return new System.Windows.Controls.ControlTemplate(typeof(Button)) { VisualTree = f };
         }
@@ -571,7 +512,7 @@ namespace METools
         {
             if (b == null) return;
             b.Background  = active ? MeToolsTheme.BrActiveBg : MeToolsTheme.BrBtnBg;
-            b.BorderBrush = active ? MeToolsTheme.BrAccent    : MeToolsTheme.BrBtnBorder;
+            b.BorderBrush = active ? MeToolsTheme.BrPetrol    : MeToolsTheme.BrBtnBorder;
             b.Foreground  = active ? MeToolsTheme.BrActiveFg  : MeToolsTheme.BrMuted;
             if (b.Template == null) b.Template = RoundedBtnTemplate();
         }
@@ -579,13 +520,13 @@ namespace METools
         // Aktions-Button (Place / Multi-Place)
         protected Button ActionBtn(string label, bool outline, Action onClick)
         {
-            var bgNorm = outline ? MeToolsTheme.BrBtnBg       : MeToolsTheme.BrAccent;
-            var bgHov  = outline ? MeToolsTheme.BrActiveBg    : MeToolsTheme.BrAccentHover;
-            var fg     = outline ? (MeToolsTheme.Current == MeTheme.Dark ? Brushes.White : MeToolsTheme.BrPetrol) : MeToolsTheme.BrOnAccent;
+            var bgNorm = outline ? MeToolsTheme.BrBtnBg       : MeToolsTheme.BrPetrol;
+            var bgHov  = outline ? MeToolsTheme.BrActiveBg    : MeToolsTheme.BrPetrolDark;
+            var fg     = outline ? (MeToolsTheme.Current == MeTheme.Dark ? Brushes.White : MeToolsTheme.BrPetrol) : Brushes.White;
             var b = new Button
             {
                 Content = label, Height = 36, FontSize = 13, FontWeight = FontWeights.SemiBold,
-                Background = bgNorm, BorderBrush = MeToolsTheme.BrAccent,
+                Background = bgNorm, BorderBrush = MeToolsTheme.BrPetrol,
                 BorderThickness = new Thickness(1.5), Foreground = fg, Cursor = Cursors.Hand,
             };
             b.Template = RoundedBtnTemplate();
@@ -598,15 +539,15 @@ namespace METools
         // Footer-Button (Abbrechen / Speichern)
         protected Button FooterBtn(string label, bool primary, Action onClick)
         {
-            var bgNorm = primary ? MeToolsTheme.BrAccent      : MeToolsTheme.BrBtnBg;
-            var bgHov  = primary ? MeToolsTheme.BrAccentHover : MeToolsTheme.BrActiveBg;
-            var fg     = primary ? MeToolsTheme.BrOnAccent    : MeToolsTheme.BrText;
+            var bgNorm = primary ? MeToolsTheme.BrPetrol    : MeToolsTheme.BrBtnBg;
+            var bgHov  = primary ? MeToolsTheme.BrPetrolDark : MeToolsTheme.BrActiveBg;
+            var fg     = primary ? Brushes.White              : MeToolsTheme.BrText;
             var b = new Button
             {
-                Content = label, Height = 32, Padding = new Thickness(20, 0, 20, 0),
+                Content = label, Height = 32, Padding = new Thickness(16, 0, 16, 0),
                 FontSize = 12, FontWeight = primary ? FontWeights.SemiBold : FontWeights.Normal,
                 Background = bgNorm,
-                BorderBrush = primary ? MeToolsTheme.BrAccent : MeToolsTheme.BrBtnBorder,
+                BorderBrush = primary ? MeToolsTheme.BrPetrol : MeToolsTheme.BrBtnBorder,
                 BorderThickness = new Thickness(1), Foreground = fg, Cursor = Cursors.Hand,
             };
             b.MouseEnter += (s, e) => b.Background = bgHov;
