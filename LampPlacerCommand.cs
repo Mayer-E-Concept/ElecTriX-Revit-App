@@ -38,9 +38,6 @@ namespace METools.LampPlacer
             // Load levels (sorted low → high)
             var levels = LoadLevels(doc);
 
-            // Load detail line styles (subcategories of Lines)
-            var lineStyles = LoadLineStyles(doc);
-
             // Get active view level as default reference level
             ElementId defaultLevelId = ElementId.InvalidElementId;
             try
@@ -53,7 +50,7 @@ namespace METools.LampPlacer
             var handler  = new LampPlacerHandler();
             var extEvent = ExternalEvent.Create(handler);
 
-            _window = new LampPlacerWindow(extEvent, handler, families, levels, defaultLevelId, lineStyles);
+            _window = new LampPlacerWindow(extEvent, handler, families, levels, defaultLevelId);
             _window.Closed += (s, e) => _window = null;
             _window.Show();
         }
@@ -116,22 +113,6 @@ namespace METools.LampPlacer
                     .ToList();
             }
             catch { return new List<LevelInfo>(); }
-        }
-
-        private static List<string> LoadLineStyles(Document doc)
-        {
-            var names = new List<string>();
-            try
-            {
-                var lineCat = doc.Settings.Categories.get_Item(BuiltInCategory.OST_Lines);
-                if (lineCat != null)
-                    foreach (Category sub in lineCat.SubCategories)
-                        if (sub != null && !string.IsNullOrWhiteSpace(sub.Name))
-                            names.Add(sub.Name);
-            }
-            catch { }
-            names.Sort();
-            return names;
         }
     }
 }

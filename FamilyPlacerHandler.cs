@@ -17,6 +17,12 @@ namespace METools.FamilyPlacer
         public Action<string>       OnStatus    { get; set; }
         public Action<int>          OnPlaced    { get; set; }
 
+        // Names of ParamOverrides entries that didn't resolve on the placed
+        // instance (not found, read-only, or wrong type) -- reset per batch,
+        // surfaced in the final status message so a bad override name isn't
+        // silently swallowed the way it used to be.
+        private readonly HashSet<string> _failedOverrideParams = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
         public void Execute(UIApplication app)
         {
             PlaceNative(app.ActiveUIDocument, app.ActiveUIDocument.Document);
@@ -27,6 +33,7 @@ namespace METools.FamilyPlacer
         // ── Core: always PromptForFamilyInstancePlacement → Spacebar works ──
         private void PlaceNative(UIDocument uidoc, Document doc)
         {
+            _failedOverrideParams.Clear();
             var slots = Request.Slots
                 .Where(s => !string.IsNullOrEmpty(s.FamilyName)).ToList();
             if (!slots.Any()) { OnStatus?.Invoke("No families configured."); return; }
@@ -228,7 +235,10 @@ namespace METools.FamilyPlacer
                 tx.Commit();
             }
 
-            OnStatus?.Invoke($"Done: {captured.Count} position(s) × {slots.Count} = {total} families.");
+            var summary = $"Done: {captured.Count} position(s) × {slots.Count} = {total} families.";
+            if (_failedOverrideParams.Count > 0)
+                summary += $" -- parameter override(s) not applied (not found, read-only, or wrong value type): {string.Join(", ", _failedOverrideParams)}";
+            OnStatus?.Invoke(summary);
             OnPlaced?.Invoke(total);
         }
 
@@ -286,20 +296,21 @@ namespace METools.FamilyPlacer
         {
             if (slot?.ParamOverrides == null) return;
             foreach (var kv in slot.ParamOverrides)
-                SetParamGeneric(inst, kv.Key, kv.Value);
+                if (!SetParamGeneric(inst, kv.Key, kv.Value))
+                    _failedOverrideParams.Add(kv.Key);
         }
 
-        private void SetParamGeneric(FamilyInstance inst, string name, string raw)
+        private bool SetParamGeneric(FamilyInstance inst, string name, string raw)
         {
             try
             {
                 var p = inst.LookupParameter(name);
-                if (p == null || p.IsReadOnly) return;
+                if (p == null || p.IsReadOnly) return false;
                 switch (p.StorageType)
                 {
                     case StorageType.Integer:
-                        if (int.TryParse(raw, out int iv)) p.Set(iv);
-                        break;
+                        if (int.TryParse(raw, out int iv)) { p.Set(iv); return true; }
+                        return false;
                     case StorageType.Double:
                         if (double.TryParse(raw, out double dv))
                         {
@@ -312,14 +323,17 @@ namespace METools.FamilyPlacer
                             }
                             catch { }
                             p.Set(isLen ? UnitUtils.ConvertToInternalUnits(dv, UnitTypeId.Millimeters) : dv);
+                            return true;
                         }
-                        break;
+                        return false;
                     case StorageType.String:
                         p.Set(raw);
-                        break;
+                        return true;
+                    default:
+                        return false;
                 }
             }
-            catch { }
+            catch { return false; }
         }
 
         private XYZ GetPt(FamilyInstance fi)

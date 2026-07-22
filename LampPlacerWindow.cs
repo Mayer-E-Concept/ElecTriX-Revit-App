@@ -26,10 +26,9 @@ namespace METools.LampPlacer
         readonly List<LampFamilyInfo> _fams;
         readonly List<LevelInfo>      _levels;
         readonly ElementId            _defaultLevelId;
-        readonly List<string>         _lineStyles;
         LampConfig _cfg = new LampConfig();
 
-        ComboBox   _famCmb, _typCmb, _lvlCmb, _lineStyleCmb;
+        ComboBox   _famCmb, _typCmb, _lvlCmb;
         ComboBox   _presetCmb;
         StackPanel _presetSp, _presetEntriesHost;
         TextBox    _presetNameTb;
@@ -51,16 +50,13 @@ namespace METools.LampPlacer
         // Alle theming-relevanten Elemente
         ScrollViewer _scroll;
         StackPanel   _body;
-        Border       _infoBox;
 
         public LampPlacerWindow(ExternalEvent evt, LampPlacerHandler h,
                                 List<LampFamilyInfo> fams,
                                 List<LevelInfo> levels,
-                                ElementId defaultLevelId,
-                                List<string> lineStyles)
+                                ElementId defaultLevelId)
         {
             _evt = evt; _h = h; _fams = fams;
-            _lineStyles     = lineStyles      ?? new List<string>();
             _levels         = levels          ?? new List<LevelInfo>();
             _defaultLevelId = defaultLevelId  ?? ElementId.InvalidElementId;
 
@@ -323,7 +319,6 @@ namespace METools.LampPlacer
             if (_famCmb    != null) METools.MeToolsWindowBase.ApplyComboStyle(_famCmb);
             if (_typCmb    != null) METools.MeToolsWindowBase.ApplyComboStyle(_typCmb);
             if (_lvlCmb    != null) METools.MeToolsWindowBase.ApplyComboStyle(_lvlCmb);
-            if (_lineStyleCmb != null) METools.MeToolsWindowBase.ApplyComboStyle(_lineStyleCmb);
             if (_infoTb    != null) _infoTb.Foreground    = MeToolsTheme.BrMuted;
             if (_lvlHelpTb != null) _lvlHelpTb.Foreground = MeToolsTheme.BrMuted;
             SetDist(_cfg.Distribution);
@@ -949,7 +944,6 @@ namespace METools.LampPlacer
             _cfg.ManualCols  = int.TryParse(_colsTb?.Text,          out int c)     ? c  : 2;
             _cfg.LineSpacing = double.TryParse(_lineSpacingTb?.Text, out double ls) ? ls : 2000;
             _cfg.LineCount   = int.TryParse(_lineCountTb?.Text,      out int lc)    ? lc : 4;
-            _cfg.LineStyleName = _lineStyleCmb?.SelectedItem as string ?? "";
 
             // Reference level (fallback) aktuell aus der Combo
             _cfg.FallbackLevelId = (_lvlCmb?.SelectedItem as ComboBoxItem)?.Tag as ElementId

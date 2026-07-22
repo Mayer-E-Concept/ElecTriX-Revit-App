@@ -32,6 +32,10 @@ namespace METools
                     TryOpen("METools.StatisticsCommand", app);
                 else if (Target == "Comments")
                     METools.Comments.CommentsCommand.Open(app);
+                else if (Target == "ProjectHealthCheck")
+                    TryOpen("METools.ProjectHealthCheckCommand", app);
+                else if (Target == "ActivityLog")
+                    METools.ActivityLog.ActivityLogCommand.Open(app);
             }
             catch { }
         }
@@ -75,6 +79,8 @@ namespace METools
                 ("CircuitTagger", "Circuit Tagger"),
                 ("Statistics",    "Statistics"),
                 ("Comments",      "Comments"),
+                ("ProjectHealthCheck", "Project Health Check"),
+                ("ActivityLog",   "Activity Log"),
             };
 
         private static AppSwitchHandler _handler;

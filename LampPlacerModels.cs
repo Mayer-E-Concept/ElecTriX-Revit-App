@@ -43,7 +43,6 @@ namespace METools.LampPlacer
         public double           LineSpacing  { get; set; } = 2000.0;  // mm between lamps
         public int              LineCount    { get; set; } = 4;       // number of lamps on line
         public LineRotation     LineRotation { get; set; } = LineRotation.AlongLine;
-        public string           LineStyleName{ get; set; } = "";    // guide detail-line style
 
         public double           WallMargin   { get; set; } = 1500.0;
         public RotationMode     Rotation     { get; set; } = RotationMode.Deg0;

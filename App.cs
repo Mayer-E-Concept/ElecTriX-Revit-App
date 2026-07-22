@@ -23,6 +23,10 @@ namespace METools
             // folder is configured in the Comments tool's own settings) --------
             METools.Comments.CommentsWatcher.Register(app);
 
+            // -- Activity Log background tracker (Added/Modified/Deleted per
+            // user, shared folder same as Comments) -------------------------
+            METools.ActivityLog.ActivityLogWatcher.Register(app);
+
             try { app.CreateRibbonTab(TAB); } catch { }
 
             var panelSetup     = app.CreateRibbonPanel(TAB, "Setup");
@@ -48,6 +52,22 @@ namespace METools
             if (settingsButton != null)
                 SettingsCommand.RibbonButton = settingsButton;
             RibbonThemeWatcher.Register(settingsButton, "icon_settings");
+
+            // -- Project Health Check -----------------------------------------
+            var hcBtn = new PushButtonData(
+                "ProjectHealthCheck", "Project\nHealth Check", dll,
+                "METools.ProjectHealthCheckCommand")
+            {
+                ToolTip         = "Checks the ME-Tools_CircuitTag family and Circuit Tagger's shared-parameter bindings in this project.",
+                LongDescription = $"Project Health Check -- {VENDOR}\n\nOn a new or detached project that didn't inherit the full company template, Circuit Tagger can silently degrade -- writing parameters but placing no tags, or writing nothing at all -- because either:\n\n" +
+                                  "* The 'ME-Tools_CircuitTag' Multi-Category Tag family isn't loaded\n" +
+                                  "* One or more of the 6 shared parameters (Vorsicherung, FI-Kreis, Stromkreis Tag, Schaltkreis, CAx_Apartment, CAx_Building) aren't bound to all 8 electrical categories\n\n" +
+                                  "This checks both, in a few seconds, instead of debugging it by hand.",
+                Image           = LoadIcon("icon_healthcheck_light_16.png") ?? LoadIcon("icon_settings_light_16.png"),
+                LargeImage      = LoadIcon("icon_healthcheck_light_32.png") ?? LoadIcon("icon_settings_light_32.png"),
+            };
+            var hcButton = panelSetup.AddItem(hcBtn) as PushButton;
+            RibbonThemeWatcher.Register(hcButton, "icon_healthcheck");
 
             // -- Family Placer -----------------------------------------------
             var fpBtn = new PushButtonData(
@@ -180,6 +200,23 @@ namespace METools
             };
             var cmtButton = panelTeam.AddItem(cmtBtn) as PushButton;
             RibbonThemeWatcher.Register(cmtButton, "icon_comments");
+
+            // -- Activity Log --------------------------------------------------
+            var alBtn = new PushButtonData(
+                "ActivityLog", "Activity\nLog", dll,
+                "METools.ActivityLog.ActivityLogCommand")
+            {
+                ToolTip         = "See who added, modified, or deleted which electrical/MEP elements, and when.",
+                LongDescription = $"Activity Log -- {VENDOR}\n\nTracks Added/Modified/Deleted elements across the electrical/MEP categories ElecTriX works with, per user, per session.\n\n" +
+                                  "* Uses the same shared folder as Comments -- nothing extra to configure if that's already set up\n" +
+                                  "* Filter by user, action, or a text search (category/family/type/element id)\n" +
+                                  "* Export to CSV\n\n" +
+                                  "Deleted elements show what they WERE (category, family, type, level) even though the element itself is already gone by the time it's logged.",
+                Image           = LoadIcon("icon_activitylog_light_16.png") ?? LoadIcon("icon_comments_light_16.png"),
+                LargeImage      = LoadIcon("icon_activitylog_light_32.png") ?? LoadIcon("icon_comments_light_32.png"),
+            };
+            var alButton = panelTeam.AddItem(alBtn) as PushButton;
+            RibbonThemeWatcher.Register(alButton, "icon_activitylog");
 
             // Apply the correct light/dark icon set right now based on Revit's
             // current theme, and subscribe so it stays in sync if the user

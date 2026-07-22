@@ -95,83 +95,33 @@ namespace METools
             try
             {
                 var theme = Autodesk.Windows.ComponentManager.CurrentTheme;
-                if (theme == null)
-                {
-                    LogDiag("Theme object is NULL -- defaulting to light icons");
-                    return false;
-                }
+                if (theme == null) return false; // default to light icons if theme can't be detected
 
                 var type = theme.GetType();
-                LogDiag($"Theme runtime type: {type.FullName}");
 
-                // Dump every readable public property/field so we can see what's
-                // actually available (Name, DisplayName, a background Color, etc.)
-                // instead of guessing again.
-                foreach (var prop in type.GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance))
-                {
-                    try
-                    {
-                        var val = prop.GetValue(theme);
-                        LogDiag($"  prop {prop.Name} ({prop.PropertyType.Name}) = {val}");
-                    }
-                    catch (Exception ex) { LogDiag($"  prop {prop.Name}: <error reading: {ex.Message}>"); }
-                }
-                foreach (var fld in type.GetFields(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance))
-                {
-                    try
-                    {
-                        var val = fld.GetValue(theme);
-                        LogDiag($"  field {fld.Name} ({fld.FieldType.Name}) = {val}");
-                    }
-                    catch (Exception ex) { LogDiag($"  field {fld.Name}: <error reading: {ex.Message}>"); }
-                }
-
-                // Best-effort heuristics using whatever we find above. Try a "Name"
-                // or similar string property first; these usually say "Dark"/"Light"
+                // "Name"/"DisplayName"/"ThemeName"/"Id" usually say "Dark"/"Light"
                 // directly even when ToString() itself isn't overridden.
                 foreach (var propName in new[] { "Name", "DisplayName", "ThemeName", "Id" })
                 {
                     var p = type.GetProperty(propName);
                     if (p == null) continue;
                     var val = p.GetValue(theme)?.ToString() ?? "";
-                    if (val.IndexOf("Dark", StringComparison.OrdinalIgnoreCase) >= 0)
-                    { LogDiag($"Matched dark via property '{propName}'='{val}'"); return true; }
-                    if (val.IndexOf("Light", StringComparison.OrdinalIgnoreCase) >= 0)
-                    { LogDiag($"Matched light via property '{propName}'='{val}'"); return false; }
+                    if (val.IndexOf("Dark", StringComparison.OrdinalIgnoreCase) >= 0) return true;
+                    if (val.IndexOf("Light", StringComparison.OrdinalIgnoreCase) >= 0) return false;
                 }
 
-                LogDiag("No Name/DisplayName/ThemeName/Id match found -- defaulting to light icons. See property dump above.");
-                return false;
+                return false; // no match -- default to light icons
             }
-            catch (Exception ex)
+            catch
             {
-                LogDiag($"Theme detection FAILED: {ex.Message} -- defaulting to light icons");
                 return false; // default to light icons if theme can't be detected
             }
-        }
-
-        // Writes a one-line diagnostic to %APPDATA%\METools\theme-debug.log so we
-        // can see exactly what's happening without needing to attach a debugger.
-        // Safe to delete this method (and its two call sites) once icons are
-        // confirmed working correctly.
-        private static void LogDiag(string msg)
-        {
-            try
-            {
-                var dir = System.IO.Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "METools");
-                System.IO.Directory.CreateDirectory(dir);
-                var path = System.IO.Path.Combine(dir, "theme-debug.log");
-                System.IO.File.AppendAllText(path, $"{DateTime.Now:HH:mm:ss}  {msg}\r\n");
-            }
-            catch { }
         }
 
         private static void ApplyCurrentTheme()
         {
             bool dark = IsDarkTheme();
             string variant = dark ? "dark" : "light";
-            LogDiag($"Applying variant='{variant}' to {_entries.Count} button(s)");
 
             foreach (var entry in _entries)
             {
@@ -179,12 +129,10 @@ namespace METools
                 {
                     var img16 = LoadIcon($"{entry.IconKey}_{variant}_16.png");
                     var img32 = LoadIcon($"{entry.IconKey}_{variant}_32.png");
-                    if (img16 == null || img32 == null)
-                        LogDiag($"  '{entry.IconKey}': MISSING resource(s) for variant '{variant}' (16={(img16==null?"NULL":"ok")}, 32={(img32==null?"NULL":"ok")})");
                     entry.Button.Image      = img16;
                     entry.Button.LargeImage = img32;
                 }
-                catch (Exception ex) { LogDiag($"  '{entry.IconKey}': EXCEPTION {ex.Message}"); }
+                catch { }
             }
         }
 
