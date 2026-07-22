@@ -32,16 +32,6 @@ namespace METools
             var panelTeam      = app.CreateRibbonPanel(TAB, "Team");
             string dll = Assembly.GetExecutingAssembly().Location;
 
-            // Group accent colors -- shades of the ME-Tools petrol brand color
-            // (0x18,0x5f,0x5f), from darkest to lightest, one per panel group.
-            // Drawn as a small bar under each icon (see RibbonThemeWatcher) since
-            // Revit doesn't support coloring the panel title bars themselves.
-            var cSetup     = System.Windows.Media.Color.FromRgb(0x0F, 0x37, 0x37);
-            var cPlacement = System.Windows.Media.Color.FromRgb(0x18, 0x5F, 0x5F);
-            var cLevels    = System.Windows.Media.Color.FromRgb(0x23, 0x7D, 0x7D);
-            var cCircuits  = System.Windows.Media.Color.FromRgb(0x32, 0x9B, 0x9B);
-            var cTeam      = System.Windows.Media.Color.FromRgb(0x46, 0xB9, 0xB9);
-
             // -- Settings (Appearance ? Language ? License ? Worksets) -------
             // Leftmost -- entry point for theme switch, language, license and worksets.
             var stBtn = new PushButtonData(
@@ -57,7 +47,7 @@ namespace METools
             var settingsButton = panelSetup.AddItem(stBtn) as PushButton;
             if (settingsButton != null)
                 SettingsCommand.RibbonButton = settingsButton;
-            RibbonThemeWatcher.Register(settingsButton, "icon_settings", cSetup);
+            RibbonThemeWatcher.Register(settingsButton, "icon_settings");
 
             // -- Family Placer -----------------------------------------------
             var fpBtn = new PushButtonData(
@@ -70,7 +60,7 @@ namespace METools
                 LargeImage      = LoadIcon("icon_fp_light_32.png"),
             };
             var fpButton = panelPlacement.AddItem(fpBtn) as PushButton;
-            RibbonThemeWatcher.Register(fpButton, "icon_fp", cPlacement);
+            RibbonThemeWatcher.Register(fpButton, "icon_fp");
             panelPlacement.AddSeparator();
 
             // -- Family Browser ---------------------------------------------
@@ -84,7 +74,7 @@ namespace METools
                 LargeImage      = LoadIcon("icon_fb_light_32.png") ?? LoadIcon("icon_fp_light_32.png"),
             };
             var fbButton = panelPlacement.AddItem(fbBtn) as PushButton;
-            RibbonThemeWatcher.Register(fbButton, "icon_fb", cPlacement);
+            RibbonThemeWatcher.Register(fbButton, "icon_fb");
             panelPlacement.AddSeparator();
 
             // -- Lamp Placer -------------------------------------------------
@@ -98,7 +88,7 @@ namespace METools
                 LargeImage      = LoadIcon("icon_lamp_light_32.png"),
             };
             var lpButton = panelPlacement.AddItem(lpBtn) as PushButton;
-            RibbonThemeWatcher.Register(lpButton, "icon_lamp", cPlacement);
+            RibbonThemeWatcher.Register(lpButton, "icon_lamp");
 
             // -- Fix Level ---------------------------------------------------
             var flBtn = new PushButtonData(
@@ -111,7 +101,7 @@ namespace METools
                 LargeImage      = LoadIcon("icon_fl_fix_light_32.png") ?? LoadIcon("icon_fp_light_32.png"),
             };
             var flButton = panelLevels.AddItem(flBtn) as PushButton;
-            RibbonThemeWatcher.Register(flButton, "icon_fl_fix", cLevels);
+            RibbonThemeWatcher.Register(flButton, "icon_fl_fix");
             panelLevels.AddSeparator();
 
             // -- Level Manager ------------------------------------------------
@@ -125,7 +115,7 @@ namespace METools
                 LargeImage      = LoadIcon("icon_lm_light_32.png") ?? LoadIcon("icon_fp_light_32.png"),
             };
             var lmButton = panelLevels.AddItem(lmBtn) as PushButton;
-            RibbonThemeWatcher.Register(lmButton, "icon_lm", cLevels);
+            RibbonThemeWatcher.Register(lmButton, "icon_lm");
             panelLevels.AddSeparator();
 
             // -- Project Transfer ---------------------------------------------
@@ -139,7 +129,7 @@ namespace METools
                 LargeImage      = LoadIcon("icon_pt_light_32.png") ?? LoadIcon("icon_fp_light_32.png"),
             };
             var ptButton = panelLevels.AddItem(ptBtn) as PushButton;
-            RibbonThemeWatcher.Register(ptButton, "icon_pt", cLevels);
+            RibbonThemeWatcher.Register(ptButton, "icon_pt");
 
             // -- Circuit Tagger ---------------------------------------------
             var ctBtn = new PushButtonData(
@@ -157,7 +147,7 @@ namespace METools
                 LargeImage      = LoadIcon("icon_ct_light_32.png"),
             };
             var ctButton = panelCircuits.AddItem(ctBtn) as PushButton;
-            RibbonThemeWatcher.Register(ctButton, "icon_ct", cCircuits);
+            RibbonThemeWatcher.Register(ctButton, "icon_ct");
             panelCircuits.AddSeparator();
 
             // -- Statistics ------------------------------------------------
@@ -171,7 +161,7 @@ namespace METools
                 LargeImage      = LoadIcon("icon_stats_light_32.png"),
             };
             var statsButton = panelCircuits.AddItem(statsBtn) as PushButton;
-            RibbonThemeWatcher.Register(statsButton, "icon_stats", cCircuits);
+            RibbonThemeWatcher.Register(statsButton, "icon_stats");
 
             // -- Comments ----------------------------------------------------
             var cmtBtn = new PushButtonData(
@@ -189,12 +179,25 @@ namespace METools
                 LargeImage      = LoadIcon("icon_comments_light_32.png"),
             };
             var cmtButton = panelTeam.AddItem(cmtBtn) as PushButton;
-            RibbonThemeWatcher.Register(cmtButton, "icon_comments", cTeam);
+            RibbonThemeWatcher.Register(cmtButton, "icon_comments");
 
             // Apply the correct light/dark icon set right now based on Revit's
             // current theme, and subscribe so it stays in sync if the user
             // switches Revit's theme later without restarting.
             RibbonThemeWatcher.Init();
+
+            // EXPERIMENTAL: attempt to color each panel using undocumented
+            // internal Revit UI classes -- see RibbonPanelColorizer.cs for the
+            // full explanation and the exact risk involved. Not guaranteed to
+            // do anything; check %APPDATA%\METools\ribbon-color-debug.log
+            // either way. Safe to delete this block + RibbonPanelColorizer.cs
+            // entirely if it doesn't pan out -- nothing else depends on it.
+            RibbonPanelColorizer.TryColor(panelSetup,     System.Windows.Media.Color.FromRgb(0x0F, 0x37, 0x37));
+            RibbonPanelColorizer.TryColor(panelPlacement, System.Windows.Media.Color.FromRgb(0x18, 0x5F, 0x5F));
+            RibbonPanelColorizer.TryColor(panelLevels,    System.Windows.Media.Color.FromRgb(0x23, 0x7D, 0x7D));
+            RibbonPanelColorizer.TryColor(panelCircuits,  System.Windows.Media.Color.FromRgb(0x32, 0x9B, 0x9B));
+            RibbonPanelColorizer.TryColor(panelTeam,      System.Windows.Media.Color.FromRgb(0x46, 0xB9, 0xB9));
+            RibbonPanelColorizer.Init(app);
 
             return Result.Succeeded;
         }

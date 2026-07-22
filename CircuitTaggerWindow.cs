@@ -382,6 +382,7 @@ namespace METools.FamilyPlacer
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(52) });
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(42) });
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(54) });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(45) }); // unused -- matches the row grid's Clear-button column exactly
 
             // Total column gets a subtle tint so it reads as a summary column,
             // not a fifth badge in the Sock./Lamp/Sw. sequence.
@@ -558,7 +559,7 @@ namespace METools.FamilyPlacer
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(52) });
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(42) });
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(54) });
-            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });  // clear btn
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(45) });  // clear btn -- fixed, must match the empty spacer column added to the header
 
             // Total column tint + column dividers, matching StatsHeader exactly.
             var totalBg = new Border { Background = new SolidColorBrush(Color.FromArgb(14, MeToolsTheme.COrange.R, MeToolsTheme.COrange.G, MeToolsTheme.COrange.B)) };
