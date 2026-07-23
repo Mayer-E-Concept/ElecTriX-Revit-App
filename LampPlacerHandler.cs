@@ -31,7 +31,6 @@ namespace METools.LampPlacer
         public Action<int>    OnPlaced  { get; set; }
         public Action<bool>   OnWaiting { get; set; }  // true=waiting for input, false=done
         public Func<double, double?> OnPromptSpacing { get; set; }  // mm in -> mm out (null = cancel)
-        public Func<int, int?> OnPromptCount { get; set; }           // suggested count in -> confirmed count out (null = cancel)
         public Func<double, double?> OnPromptWallOffset { get; set; } // mm in -> mm out (null = cancel)
         private double? _wallOffsetFt;                                // set for wall-mounted lamps off a floor reference
         public Func<string> OnPromptPreset { get; set; }              // returns preset name | "" (use current family) | null (cancel)
@@ -1182,53 +1181,28 @@ namespace METools.LampPlacer
             }
             else // BySpacing
             {
-                // Both branches below reduce to the same centered-subdivision
-                // placement as By Count (see above) -- "spacing" here just
-                // decides what COUNT to subdivide into, rather than being an
-                // anchor point to step from. This is what removes every issue
-                // reported with the old flow: no first-lamp click to anchor
-                // from (so the first lamp is never stuck wherever you
-                // happened to click), no overshoot past the line's end
-                // (impossible by construction -- centered subdivision only
-                // ever places within [0, L]), and no second spacing prompt
-                // (the side panel's spacing value already suggests a count;
-                // only that count needs confirming, not the spacing itself).
+                // Reduces to the same centered-subdivision placement as By
+                // Count (see above) -- "spacing" here just decides what COUNT
+                // to subdivide the line into, computed directly from line
+                // length / spacing, with no prompt at all. This is what
+                // removes every issue reported with the old flow: no
+                // first-lamp click to anchor from (so the first lamp is
+                // never stuck wherever you happened to click), no overshoot
+                // past the line's end (impossible by construction -- centered
+                // subdivision only ever places within [0, L]), and no
+                // interruption asking to confirm a count or re-enter spacing --
+                // it just places as many as fit.
                 double spacingFt = ToFeet(cfg.LineSpacing);
                 if (spacingFt <= 0) spacingFt = ToFeet(2000.0); // defensive fallback, shouldn't normally hit
 
-                if (polylines.Count == 1)
+                foreach (var chain in polylines)
                 {
-                    var path = polylines[0];
-                    double L = PolylineLength(path);
-                    int suggested = Math.Max(1, (int)Math.Round(L / spacingFt));
-
-                    int? confirmed = OnPromptCount?.Invoke(suggested);
-                    if (confirmed != null && confirmed.Value > 0)
-                    {
-                        int n = confirmed.Value;
-                        double d = L / n;
-                        for (int i = 0; i < n; i++)
-                        { double tan; XYZ p = PointAtArcLength(path, d * (i + 0.5), out tan);
-                          spots.Add(new KeyValuePair<XYZ, double>(p, tan)); }
-                    }
-                    else OnStatus?.Invoke("Cancelled - no count entered.");
-                }
-                else
-                {
-                    // Multiple lines: each gets its own count computed from ITS
-                    // OWN length so the actual spacing stays close to what was
-                    // asked for on every segment, without prompting once per
-                    // line (which would be tedious for anything beyond two or
-                    // three lines).
-                    foreach (var chain in polylines)
-                    {
-                        double L = PolylineLength(chain);
-                        int n = Math.Max(1, (int)Math.Round(L / spacingFt));
-                        double d = L / n;
-                        for (int i = 0; i < n; i++)
-                        { double tan; XYZ p = PointAtArcLength(chain, d * (i + 0.5), out tan);
-                          spots.Add(new KeyValuePair<XYZ, double>(p, tan)); }
-                    }
+                    double L = PolylineLength(chain);
+                    int n = Math.Max(1, (int)Math.Round(L / spacingFt));
+                    double d = L / n;
+                    for (int i = 0; i < n; i++)
+                    { double tan; XYZ p = PointAtArcLength(chain, d * (i + 0.5), out tan);
+                      spots.Add(new KeyValuePair<XYZ, double>(p, tan)); }
                 }
             }
 

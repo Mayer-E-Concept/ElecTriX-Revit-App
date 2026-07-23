@@ -150,18 +150,17 @@ Cross-machine, per-project comment/notification system for team coordination.
 
 | Version | .NET | Status |
 |---------|------|--------|
-| Revit 2024 | .NET Framework 4.8 | ✅ Supported |
 | Revit 2025 | .NET 8.0 | ✅ Supported |
 | Revit 2026 | .NET 8.0 (same binary as 2025) | ✅ Supported |
 
-`METools.csproj` multi-targets `net48;net8.0-windows` — these are genuinely different compiled binaries, not one DLL that happens to run everywhere. A handful of Revit API members changed between the 2024 and 2025/2026 API surfaces (see **Revit API version differences** below); anything touching those needs to compile cleanly on both targets.
+`METools.csproj` targets `net8.0-windows` only. (Revit 2024 support was dropped -- that ran on .NET Framework 4.8, a genuinely different runtime that needed its own separate compiled binary; not worth maintaining two builds for one legacy version.)
 
 ---
 
 ## Installation (end users)
 
 1. Download `setup_metools_vX.X.X.exe`
-2. Run the installer and select which Revit version(s) to install for (2024 / 2025 / 2026 — any combination)
+2. Run the installer and select which Revit version(s) to install for (2025 / 2026 — any combination)
 3. Restart Revit
 4. The **ElecTriX** tab appears in the Revit ribbon, organized into 5 panels: **Setup** (Settings, Project Health Check), **Placement** (Family Placer, Family Browser, Lamp Placer), **Levels & Structure** (Fix Level, Level Manager, Project Transfer), **Circuits & Reporting** (Circuit Tagger, Statistics), **Team** (Comments, Activity Log)
 
@@ -198,16 +197,14 @@ Ribbon panel *backgrounds* cannot be colored through the public Revit API — co
 ### Repository
 - **GitHub:** `https://github.com/Mayer-E-Concept/ElecTriX-Revit-App`
 - **Local:** `X:\02_sabloane\01_Revit\ElecTriX-Revit-App\`
-- **Auto-deploy (Debug):** `C:\ProgramData\Autodesk\Revit\Addins\2024\`, `\2025\`, `\2026\` (whichever you're actively building/testing against)
+- **Auto-deploy (Debug):** `C:\ProgramData\Autodesk\Revit\Addins\2025\`, `\2026\` (whichever you're actively building/testing against)
 
 ### Build
 ```
 # Daily development (auto-deploys to Revit add-ins folder)
 Build → Debug
 
-# Release (for installer only) -- build BOTH net48 and net8.0-windows
-# configurations before compiling the installer; it packages whichever
-# Revit-version tasks the end user selects from either one.
+# Release (for installer only)
 Build → Release
 ```
 
@@ -345,13 +342,13 @@ ElecTriX-Revit-App/
 - **Honest reporting:** a batch operation's success count must reflect what actually succeeded, not just "did we attempt it." Two real bugs this shape were found and fixed — Circuit Tagger reporting "Done" when the tag family wasn't loaded or a shared parameter wasn't bound, and Family Placer silently ignoring a bad parameter-override name in a saved template. Both now surface the failure in the status message instead of looking like success.
 - **Level detection for CAx family instances:** never trust plain `Element.LevelId` alone — it's frequently `InvalidElementId` for these families even when they have a perfectly good, user-meaningful level. Always check `BuiltInParameter.INSTANCE_SCHEDULE_ONLY_LEVEL_PARAM` first (the same "Schedule Level" parameter Lamp Placer sets post-placement and Fix Level exists to repair), falling back to `Element.LevelId` only if that's unset. See `FixLevelCommand.CurrentLevelId(FamilyInstance)` for the reference implementation; Activity Log's `ResolveLevel` was fixed to match it after shipping with the naive version first.
 - **Unit awareness:** Auxalia CAx family parameters are LENGTH type in internal feet — never assume millimetres
-- **Revit API version differences (2024 vs 2025/2026):** a few API members present in Revit 2024 (net48) were fully removed, not just deprecated, by 2025/2026 (net8.0-windows) — code touching these needs the newer replacement to compile on both targets:
-  - `DisplayUnitType` → `UnitTypeId` (e.g. `UnitTypeId.Millimeters`)
-  - `BuiltInParameterGroup` → `GroupTypeId` (e.g. `GroupTypeId.Data`, used in `BindingMap.Insert`/`ReInsert`)
+- **Revit API notes (2025/2026):**
+  - Use `UnitTypeId` (e.g. `UnitTypeId.Millimeters`), not the older `DisplayUnitType` -- removed entirely as of 2025/2026's API, not just deprecated (this bit when the project still targeted Revit 2024 too; the modern API is simply correct now)
+  - Use `GroupTypeId` (e.g. `GroupTypeId.Data`, for `BindingMap.Insert`/`ReInsert`), not `BuiltInParameterGroup` -- same story
   - `ElementIntersectsGeometryFilter` requires a separate assembly → use `BoundingBoxIntersectsFilter`
   - `NewOpening(Wall, …)` removed → use `Level.Create(doc, elevation)` for new levels
   - `ColorSelectionDialog.SelectedColor` is read-only
-  - `System.Windows.Controls.ComboBox`/`TextBox`/`Grid`/`Button`/`Color`/`Ellipse`/`Image`/`Brushes`/`Visibility` all collide with same-named types in `Autodesk.Revit.UI` — always alias (`using Grid = System.Windows.Controls.Grid;` etc.) in any file that imports both `System.Windows.Controls`/`System.Windows.Media` and `Autodesk.Revit.UI`; only alias the ones a given file actually uses as bare type names
+- **WPF vs. Revit.UI namespace collisions:** `System.Windows.Controls.ComboBox`/`TextBox`/`Grid`/`Button`/`Color`/`Ellipse`/`Image`/`Brushes`/`Visibility` all collide with same-named types in `Autodesk.Revit.UI` — always alias (`using Grid = System.Windows.Controls.Grid;` etc.) in any file that imports both `System.Windows.Controls`/`System.Windows.Media` and `Autodesk.Revit.UI`; only alias the ones a given file actually uses as bare type names
 - **External Events for all model writes** — never run transactions directly from WPF click handlers (causes "outside API context" error). One established exception: a modeless window that already holds a `UIApplication` reference can call `Selection.PickObject`/`PickObjects` directly from its own button-click handler by calling `Hide()` first and `Show()` after — no ExternalEvent round-trip needed just to capture a selection (see `CircuitTaggerWindow.OnSelectClicked`, `CommentsWindow.OnReferenceItemClicked`)
 - **Cross-document copy** (Project Transfer): `ElementTransformUtils.CopyElements(sourceDoc, ids, targetDoc, Transform.Identity, options)` works well for Filters, Schedules, Drafting Views/Legends and Sheets between two open documents; Plan/Section/Elevation/3D views don't transfer meaningfully since they're tied to their own project's Levels/Grids
 - **DockPanel fill order matters:** in `MeToolsWindowBase`, whichever element is added to `RootDock.Children` **last** gets the remaining space, regardless of its own `Dock` value (`LastChildFill = true`). Always call `BuildStatusBar()` **before** building the main content panel, or the status bar silently steals the content area's layout space

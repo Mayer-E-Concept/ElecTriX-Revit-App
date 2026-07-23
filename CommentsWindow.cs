@@ -9,7 +9,6 @@ using System.Windows.Input;
 using System.Windows.Media;
 using Autodesk.Revit.UI;
 using Button   = System.Windows.Controls.Button;
-using ComboBox = System.Windows.Controls.ComboBox;
 using TextBox  = System.Windows.Controls.TextBox;
 
 namespace METools.Comments
@@ -36,7 +35,7 @@ namespace METools.Comments
         private string _pendingRefElementId = "";
         private string _pendingRefSummary = "";
         private StackPanel _refChipHost;
-        private ComboBox _assignCombo;
+        private TextBox _assignBox;
 
         // Settings row (kept inline in this window rather than in the shared
         // Settings window, since the shared folder + sound toggle are specific
@@ -195,10 +194,15 @@ namespace METools.Comments
                 Text = "Assign to (optional):", FontSize = 11, Foreground = MeToolsTheme.BrMuted,
                 VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 0),
             });
-            _assignCombo = MeToolsWindowBase.StyledCombo(26, 11);
-            _assignCombo.Width = 200;
-            _assignCombo.IsEditable = true;
-            assignRow.Children.Add(_assignCombo);
+            _assignBox = new TextBox
+            {
+                Height = 26, FontSize = 11, Width = 200,
+                Background = MeToolsTheme.BrInput, Foreground = MeToolsTheme.BrText,
+                BorderBrush = MeToolsTheme.BrBorder, BorderThickness = new Thickness(1),
+                Padding = new Thickness(6, 0, 6, 0), VerticalContentAlignment = VerticalAlignment.Center,
+                ToolTip = "Type a name",
+            };
+            assignRow.Children.Add(_assignBox);
             root.Children.Add(assignRow);
 
             var addBtn = MakeBtn("+ Add Comment", false, () =>
@@ -216,14 +220,14 @@ namespace METools.Comments
                     LevelName = _currentLevel, ScopeBoxName = _currentScopeBox,
                     ReferencedElementId = _pendingRefElementId,
                     ReferencedSummary   = _pendingRefSummary,
-                    AssignedTo = (_assignCombo.Text ?? "").Trim(),
+                    AssignedTo = (_assignBox.Text ?? "").Trim(),
                 };
                 _extEvent.Raise();
                 _tbNewComment.Text = "";
                 SetPlaceholder(_tbNewComment, "e.g. Need 4 more lamps on this level…");
                 _pendingRefElementId = "";
                 _pendingRefSummary = "";
-                _assignCombo.Text = "";
+                _assignBox.Text = "";
                 RenderRefChip();
             });
             addBtn.HorizontalAlignment = HorizontalAlignment.Left;
@@ -348,14 +352,13 @@ namespace METools.Comments
         // window never grows once the real comments arrive a moment later.
         private void PopulateAssignCombo()
         {
-            if (_assignCombo == null) return;
-            var typed = _assignCombo.Text;
+            if (_assignBox == null) return;
             var names = _all.Select(x => x.Author).Concat(_all.Select(x => x.AssignedTo))
                 .Where(n => !string.IsNullOrWhiteSpace(n))
                 .Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(n => n).ToList();
-            _assignCombo.Items.Clear();
-            foreach (var n in names) _assignCombo.Items.Add(n);
-            _assignCombo.Text = typed; // preserve whatever the user was already typing
+            _assignBox.ToolTip = names.Count == 0
+                ? "Type a name"
+                : "Type a name. Previously used: " + string.Join(", ", names);
         }
 
         private void ResizeToFitContent()

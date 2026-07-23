@@ -201,6 +201,18 @@ namespace METools
                 UpdateLayout();
                 Height = ActualHeight;
                 SizeToContent = SizeToContent.Manual;
+
+                // The window's vertical position was set once, centered on
+                // whichever tab loaded first (usually Appearance -- short).
+                // Growing taller for a tab like Worksets only extends the
+                // bottom edge, since Top never moves -- so a sufficiently
+                // tall tab can run off the bottom of the screen. Pull Top up
+                // to compensate whenever that would happen, clamped so it
+                // never goes above the screen's own top edge either.
+                var wa = System.Windows.SystemParameters.WorkArea;
+                double bottom = Top + ActualHeight;
+                if (bottom > wa.Bottom)
+                    Top = System.Math.Max(wa.Top, Top - (bottom - wa.Bottom));
             }
             catch { }
         }

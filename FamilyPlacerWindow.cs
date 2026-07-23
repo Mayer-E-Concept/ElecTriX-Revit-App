@@ -14,6 +14,7 @@ using Color      = System.Windows.Media.Color;
 using Grid       = System.Windows.Controls.Grid;
 using ComboBox   = System.Windows.Controls.ComboBox;
 using TextBox    = System.Windows.Controls.TextBox;
+using Popup      = System.Windows.Controls.Primitives.Popup;
 using Visibility = System.Windows.Visibility;
 
 namespace METools.FamilyPlacer
@@ -820,7 +821,11 @@ namespace METools.FamilyPlacer
         private readonly List<FamilyTypeInfo> _all;
         private readonly Action<string, string, Action<List<FamilyParamInfo>>> _requestParams;
         private readonly Action<string, Action<double?>> _requestNiveau;
-        private ComboBox   _familyCmb, _typeCmb;
+        private ComboBox   _typeCmb;
+        private TextBox    _familyText;
+        private Popup      _familyPopup;
+        private StackPanel _familyPopupList;
+        private bool       _suppressFamilyTextChanged;
         private TextBox    _heightTxt, _offXTxt, _offYTxt;
         private TextBlock  _idxBadge;
         private int        _index;
@@ -936,26 +941,7 @@ namespace METools.FamilyPlacer
 
             // Family + Type stacked vertically
             var famType = new StackPanel { Margin = new Thickness(4, 0, 0, 0) };
-
-            _familyCmb = new ComboBox
-            {
-                Height = 24, FontSize = 11, Background = METools.MeToolsTheme.BrInput,
-                Foreground = METools.MeToolsTheme.BrText, BorderBrush = METools.MeToolsTheme.BrBorder,
-                BorderThickness = new Thickness(1), IsEditable = true, IsTextSearchEnabled = false,
-            };
-            _familyCmb.Template = METools.MeToolsWindowBase.MakeComboBoxTemplate();
-            METools.MeToolsWindowBase.ApplyComboStyle(_familyCmb);
-            _familyCmb.SelectionChanged += FamilyChanged;
-            _familyCmb.AddHandler(System.Windows.Controls.Primitives.TextBoxBase.TextChangedEvent,
-                new TextChangedEventHandler(FamilySearchTextChanged));
-            _familyCmb.DropDownClosed += (s, e) =>
-            {
-                PopulateFamilyCombo(""); // restore the full grouped list for next time
-                SyncFamilyComboText();
-            };
-            famType.Children.Add(_familyCmb);
-            PopulateFamilyCombo("");
-            SyncFamilyComboText();
+            BuildFamilyPicker(famType);
 
             _typeCmb = new ComboBox { Height = 22, FontSize = 10, Margin = new Thickness(0, 2, 0, 0), Background = METools.MeToolsTheme.BrInput, Foreground = METools.MeToolsTheme.BrText, BorderBrush = METools.MeToolsTheme.BrBorder, BorderThickness = new Thickness(1) };
             RefreshTypes();
@@ -1280,7 +1266,21 @@ namespace METools.FamilyPlacer
         public void ApplyTheme()
         {
             if (Container != null) { Container.Background = METools.MeToolsTheme.BrSurface; Container.BorderBrush = METools.MeToolsTheme.BrBorder; }
-            if (_familyCmb != null) METools.MeToolsWindowBase.ApplyComboStyle(_familyCmb);
+            if (_familyText != null)
+            {
+                _familyText.Background = METools.MeToolsTheme.BrInput;
+                _familyText.BorderBrush = METools.MeToolsTheme.BrBorder;
+                _familyText.Foreground = string.IsNullOrEmpty(Slot.FamilyName) ? METools.MeToolsTheme.BrMuted : METools.MeToolsTheme.BrText;
+            }
+            if (_familyPopupList != null)
+            {
+                var popupBorder = _familyPopup?.Child as Border;
+                if (popupBorder != null)
+                {
+                    popupBorder.Background = METools.MeToolsTheme.BrSurface;
+                    popupBorder.BorderBrush = METools.MeToolsTheme.BrBorder;
+                }
+            }
             if (_typeCmb   != null) METools.MeToolsWindowBase.ApplyComboStyle(_typeCmb);
             if (_heightTxt != null) { _heightTxt.Background = METools.MeToolsTheme.BrInput; _heightTxt.Foreground = METools.MeToolsTheme.BrText; _heightTxt.BorderBrush = METools.MeToolsTheme.BrBorder; _heightTxt.CaretBrush = METools.MeToolsTheme.BrText; }
             if (_offXTxt != null) { _offXTxt.Background = METools.MeToolsTheme.BrInput; _offXTxt.Foreground = METools.MeToolsTheme.BrText; _offXTxt.BorderBrush = METools.MeToolsTheme.BrBorder; _offXTxt.CaretBrush = METools.MeToolsTheme.BrText; }
@@ -1300,9 +1300,7 @@ namespace METools.FamilyPlacer
         private void RefreshTypes()
         {
             _typeCmb.Items.Clear();
-            // SelectedItem is now a ComboBoxItem -- read Tag for family name
-            var selectedItem = _familyCmb.SelectedItem as ComboBoxItem;
-            var family = selectedItem?.Tag as string;
+            var family = Slot.FamilyName;
             if (string.IsNullOrEmpty(family)) return;
 
             foreach (var t in FamilyLoader.GetTypeNames(_all, family))
@@ -1329,22 +1327,106 @@ namespace METools.FamilyPlacer
             });
         }
 
-        // Rebuilds _familyCmb's items, optionally filtered by a typed
-        // substring (case-insensitive, matched against family name). Category
-        // headers are only shown in the unfiltered view -- once searching,
-        // a flat matching list is clearer than repeated single-item groups.
-        // preserveText: true while the user is actively typing to search --
-        // must NOT touch SelectedIndex/SelectedItem in that case, since doing
-        // so resyncs the editable Text to whatever item that resolves to,
-        // overwriting what they just typed. Only touched (to restore the
-        // real current selection) when explicitly not searching.
-        private void PopulateFamilyCombo(string filter, bool preserveText = false)
+        // Builds the family selector: a plain TextBox styled to match the old
+        // combo, backed by a Popup containing manually-built clickable rows.
+        // Deliberately NOT a ComboBox with IsEditable=true -- that approach
+        // (tried twice) kept breaking in ways traceable to WPF's internal
+        // Popup/StaysOpen/focus timing for editable combos, which isn't
+        // reliably controllable from here without live testing. This gives
+        // full explicit control over every step: opening, filtering,
+        // committing a pick, and reverting on blur, in a known order.
+        private void BuildFamilyPicker(StackPanel famType)
         {
-            string previouslySelected = (_familyCmb.SelectedItem as ComboBoxItem)?.Tag as string ?? Slot.FamilyName;
-            _familyCmb.SelectionChanged -= FamilyChanged; // don't fire FamilyChanged while we rebuild items
-            _familyCmb.Items.Clear();
-            _familyCmb.Items.Add(new ComboBoxItem { Content = "-- No Selection --", Tag = "" });
+            _familyText = new TextBox
+            {
+                Height = 24, FontSize = 11, Background = METools.MeToolsTheme.BrInput,
+                Foreground = METools.MeToolsTheme.BrText, BorderBrush = METools.MeToolsTheme.BrBorder,
+                BorderThickness = new Thickness(1), Padding = new Thickness(6, 0, 6, 0),
+                VerticalContentAlignment = VerticalAlignment.Center,
+            };
 
+            _familyPopupList = new StackPanel();
+            var scroller = new ScrollViewer
+            {
+                MaxHeight = 200, VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                Content = _familyPopupList,
+            };
+            var popupBorder = new Border
+            {
+                Background = METools.MeToolsTheme.BrSurface, BorderBrush = METools.MeToolsTheme.BrBorder,
+                BorderThickness = new Thickness(1), Child = scroller,
+            };
+            _familyPopup = new Popup
+            {
+                PlacementTarget = _familyText, Placement = PlacementMode.Bottom,
+                StaysOpen = true, // we close it ourselves (on blur/pick/Escape) -- see why below
+                Child = popupBorder,
+            };
+
+            SyncFamilyText();
+            RenderFamilyPopupList("");
+
+            _familyText.GotFocus += (s, e) =>
+            {
+                _familyPopup.Width = _familyText.ActualWidth > 0 ? _familyText.ActualWidth : 200;
+                RenderFamilyPopupList("");
+                _familyPopup.IsOpen = true;
+                _familyText.Dispatcher.BeginInvoke(new Action(() => _familyText.SelectAll()),
+                    System.Windows.Threading.DispatcherPriority.Input);
+            };
+            _familyText.TextChanged += (s, e) =>
+            {
+                if (_suppressFamilyTextChanged) return;
+                if (!_familyPopup.IsOpen) _familyPopup.IsOpen = true;
+                RenderFamilyPopupList(_familyText.Text ?? "");
+            };
+            _familyText.LostFocus += (s, e) =>
+            {
+                // Deferred to Background priority so a MouseLeftButtonDown on
+                // a popup row (which commits a pick synchronously, at normal
+                // priority) always finishes first, regardless of exactly how
+                // focus transitions between the two controls.
+                _familyText.Dispatcher.BeginInvoke(new Action(() =>
+                {
+                    _familyPopup.IsOpen = false;
+                    SyncFamilyText();
+                }), System.Windows.Threading.DispatcherPriority.Background);
+            };
+            _familyText.PreviewKeyDown += (s, e) =>
+            {
+                if (e.Key == Key.Escape)
+                {
+                    _familyPopup.IsOpen = false;
+                    SyncFamilyText();
+                    Keyboard.ClearFocus();
+                    e.Handled = true;
+                }
+            };
+
+            famType.Children.Add(_familyText);
+        }
+
+        // Forces the text to match the real current selection -- called on
+        // blur (no new pick made) and right after a pick commits, so a
+        // half-typed search term never lingers as if it were the selection.
+        private void SyncFamilyText()
+        {
+            _suppressFamilyTextChanged = true;
+            try
+            {
+                _familyText.Text = string.IsNullOrEmpty(Slot.FamilyName) ? "-- No Selection --" : Slot.FamilyName;
+                _familyText.Foreground = string.IsNullOrEmpty(Slot.FamilyName)
+                    ? METools.MeToolsTheme.BrMuted : METools.MeToolsTheme.BrText;
+            }
+            finally { _suppressFamilyTextChanged = false; }
+        }
+
+        // Rebuilds the popup's clickable rows, optionally filtered by a typed
+        // substring (case-insensitive, matched against family name). Category
+        // headers only show in the unfiltered view.
+        private void RenderFamilyPopupList(string filter)
+        {
+            _familyPopupList.Children.Clear();
             bool searching = !string.IsNullOrWhiteSpace(filter);
             var matches = searching
                 ? _all.Where(f => f.FamilyName.IndexOf(filter, StringComparison.OrdinalIgnoreCase) >= 0)
@@ -1356,70 +1438,56 @@ namespace METools.FamilyPlacer
             {
                 if (!searching && info.CategoryGroup != lastGroup)
                 {
-                    _familyCmb.Items.Add(new ComboBoxItem
+                    _familyPopupList.Children.Add(new TextBlock
                     {
-                        Content   = info.CategoryGroup,
-                        IsEnabled = false,
-                        FontWeight = FontWeights.Bold,
-                        FontStyle  = FontStyles.Italic,
-                        Foreground = MeToolsTheme.BrPetrol,
-                        FontSize   = 10,
-                        Padding    = new Thickness(2, 3, 0, 1),
+                        Text = info.CategoryGroup, FontWeight = FontWeights.Bold, FontStyle = FontStyles.Italic,
+                        Foreground = MeToolsTheme.BrPetrol, FontSize = 10, Margin = new Thickness(6, 4, 0, 1),
                     });
                     lastGroup = info.CategoryGroup;
                 }
-                if (seen.Add(info.FamilyName)) // only first occurrence
+                if (seen.Add(info.FamilyName))
                 {
-                    _familyCmb.Items.Add(new ComboBoxItem
+                    var row = new Border
                     {
-                        Content = info.FamilyName,
-                        Tag     = info.FamilyName,
-                        Padding = new Thickness(searching ? 4 : 10, 1, 0, 1),
-                    });
+                        Padding = new Thickness(searching ? 6 : 14, 3, 6, 3),
+                        Cursor = Cursors.Hand, Background = Brushes.Transparent,
+                    };
+                    row.Child = new TextBlock { Text = info.FamilyName, FontSize = 11, Foreground = MeToolsTheme.BrText };
+                    row.MouseEnter += (s, e) => row.Background = MeToolsTheme.BrActiveBg;
+                    row.MouseLeave += (s, e) => row.Background = Brushes.Transparent;
+                    var capturedName = info.FamilyName;
+                    row.MouseLeftButtonDown += (s, e) => { PickFamily(capturedName); e.Handled = true; };
+                    _familyPopupList.Children.Add(row);
                 }
             }
 
-            if (!preserveText)
+            var noSel = new Border { Padding = new Thickness(searching ? 6 : 14, 3, 6, 3), Cursor = Cursors.Hand, Background = Brushes.Transparent };
+            noSel.Child = new TextBlock { Text = "-- No Selection --", FontSize = 11, Foreground = MeToolsTheme.BrMuted };
+            noSel.MouseEnter += (s, e) => noSel.Background = MeToolsTheme.BrActiveBg;
+            noSel.MouseLeave += (s, e) => noSel.Background = Brushes.Transparent;
+            noSel.MouseLeftButtonDown += (s, e) => { PickFamily(""); e.Handled = true; };
+            _familyPopupList.Children.Insert(0, noSel);
+
+            if (searching && _familyPopupList.Children.Count == 1) // only the "No Selection" row exists
             {
-                _familyCmb.SelectedIndex = 0;
-                if (!string.IsNullOrEmpty(previouslySelected))
+                _familyPopupList.Children.Add(new TextBlock
                 {
-                    foreach (ComboBoxItem item in _familyCmb.Items)
-                        if (item.Tag as string == previouslySelected)
-                        { _familyCmb.SelectedItem = item; break; }
-                }
+                    Text = "No matches.", FontSize = 10.5, FontStyle = FontStyles.Italic,
+                    Foreground = MeToolsTheme.BrMuted, Margin = new Thickness(8, 4, 8, 4),
+                });
             }
-            // else: leave SelectedIndex/Text untouched -- the user is mid-search,
-            // only the dropdown's candidate list should change right now.
-
-            _familyCmb.SelectionChanged += FamilyChanged;
         }
 
-        // Forces the editable text to match the real current selection --
-        // used after the dropdown closes without a new pick being made (e.g.
-        // the user searched, then clicked away), so a half-typed search term
-        // never lingers as if it were the actual selection.
-        private bool _suppressFamilyTextSync;
-        private void SyncFamilyComboText()
+        // Commits a pick, synchronously, at normal input priority -- always
+        // finishes before the LostFocus-triggered SyncFamilyText (deferred to
+        // Background priority) runs, regardless of focus-transition timing.
+        private void PickFamily(string familyName)
         {
-            _suppressFamilyTextSync = true;
-            try { _familyCmb.Text = string.IsNullOrEmpty(Slot.FamilyName) ? "-- No Selection --" : Slot.FamilyName; }
-            finally { _suppressFamilyTextSync = false; }
-        }
-
-        private void FamilySearchTextChanged(object sender, TextChangedEventArgs e)
-        {
-            if (_suppressFamilyTextSync) return;
-            if (!_familyCmb.IsDropDownOpen) _familyCmb.IsDropDownOpen = true;
-            PopulateFamilyCombo(_familyCmb.Text ?? "", preserveText: true);
-        }
-
-        private void FamilyChanged(object s, SelectionChangedEventArgs e)
-        {
-            var item = _familyCmb.SelectedItem as ComboBoxItem;
-            Slot.FamilyName = item?.Tag as string ?? "";
-            Slot.ParamOverrides.Clear();   // different family -> different param set
+            Slot.FamilyName = familyName ?? "";
+            Slot.ParamOverrides.Clear(); // different family -> different param set
             _paramsBuiltKey = null;
+            _familyPopup.IsOpen = false;
+            SyncFamilyText();
             UpdateGearDot();
             RefreshTypes();
             AutoFillHeight();

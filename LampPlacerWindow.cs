@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
 using Autodesk.Revit.DB;
@@ -15,6 +16,7 @@ using Autodesk.Revit.UI;
 using Grid       = System.Windows.Controls.Grid;
 using ComboBox   = System.Windows.Controls.ComboBox;
 using TextBox    = System.Windows.Controls.TextBox;
+using Popup      = System.Windows.Controls.Primitives.Popup;
 using Visibility = System.Windows.Visibility;
 
 namespace METools.LampPlacer
@@ -28,7 +30,11 @@ namespace METools.LampPlacer
         readonly ElementId            _defaultLevelId;
         LampConfig _cfg = new LampConfig();
 
-        ComboBox   _famCmb, _typCmb, _lvlCmb;
+        ComboBox   _typCmb, _lvlCmb;
+        TextBox    _famText;
+        Popup      _famPopup;
+        StackPanel _famPopupList;
+        bool       _suppressFamTextChanged;
         ComboBox   _presetCmb;
         StackPanel _presetSp, _presetEntriesHost;
         TextBox    _presetNameTb;
@@ -64,7 +70,6 @@ namespace METools.LampPlacer
             h.OnPlaced  = n => Dispatcher.Invoke(() => { StatusLeft.Text = $"Done: {n} lamps placed."; SetWaiting(false); });
             h.OnWaiting = w => Dispatcher.Invoke(() => SetWaiting(w));
             h.OnPromptSpacing    = def => ShowSpacingDialog(def);
-            h.OnPromptCount      = def => ShowCountDialog(def);
             h.OnPromptWallOffset = def => ShowOffsetDialog(def);
             h.OnPromptPreset     = ()  => ShowPresetChooser();
 
@@ -98,20 +103,7 @@ namespace METools.LampPlacer
 
             // FAMILY
             _body.Children.Add(Sec(S.Get("lamp.lighting_family")));
-            _famCmb = METools.MeToolsWindowBase.StyledCombo(28, 12);
-            _famCmb.Margin = new Thickness(0, 0, 0, 6);
-            _famCmb.IsEditable = true;
-            _famCmb.IsTextSearchEnabled = false;
-            RebuildFamilyCombo();   // mode-aware + grouped (Lighting / Fire Alarm), wires FamChanged
-            _famCmb.AddHandler(System.Windows.Controls.Primitives.TextBoxBase.TextChangedEvent,
-                new TextChangedEventHandler(FamilySearchTextChanged));
-            _famCmb.DropDownClosed += (s, e) =>
-            {
-                RebuildFamilyCombo(""); // restore the full grouped list for next time
-                SyncFamilyComboText();
-            };
-            _body.Children.Add(_famCmb);
-            SyncFamilyComboText();
+            BuildFamilyPicker();
 
             _typCmb = METools.MeToolsWindowBase.StyledCombo(28, 12); _typCmb.Margin = new Thickness(0, 0, 0, 14);
             _body.Children.Add(_typCmb);
@@ -328,7 +320,17 @@ namespace METools.LampPlacer
                 tb.BorderBrush = MeToolsTheme.BrBorder;
                 tb.CaretBrush  = MeToolsTheme.BrText;
             }
-            if (_famCmb    != null) METools.MeToolsWindowBase.ApplyComboStyle(_famCmb);
+            if (_famText  != null)
+            {
+                _famText.Background  = MeToolsTheme.BrInput;
+                _famText.BorderBrush = MeToolsTheme.BrBorder;
+                _famText.Foreground  = string.IsNullOrEmpty(_cfg.FamilyName) ? MeToolsTheme.BrMuted : MeToolsTheme.BrText;
+            }
+            if (_famPopup?.Child is Border famPopupBorder)
+            {
+                famPopupBorder.Background  = MeToolsTheme.BrSurface;
+                famPopupBorder.BorderBrush = MeToolsTheme.BrBorder;
+            }
             if (_typCmb    != null) METools.MeToolsWindowBase.ApplyComboStyle(_typCmb);
             if (_lvlCmb    != null) METools.MeToolsWindowBase.ApplyComboStyle(_lvlCmb);
             if (_infoTb    != null) _infoTb.Foreground    = MeToolsTheme.BrMuted;
@@ -341,42 +343,131 @@ namespace METools.LampPlacer
             UpdatePlacementDetection();
         }
 
-        // Rebuilds the family dropdown: grouped into Lighting / Fire Alarm headers, and Fire Alarm
-        // families are listed only in Area-based mode. Preserves the current selection when possible.
-        // filter (optional): case-insensitive substring match against family name, from the search box.
-        // preserveText: true while the user is actively typing to search -- must
-        // NOT touch SelectedItem/SelectedIndex in that case (editable combo
-        // resyncs Text to match on any such assignment, overwriting what they typed).
-        void RebuildFamilyCombo(string filter = "", bool preserveText = false)
+        // Builds the family selector: a plain TextBox styled to match the old
+        // combo, backed by a Popup containing manually-built clickable rows.
+        // Deliberately NOT a ComboBox with IsEditable=true -- see
+        // FamilyPlacerWindow.cs's SlotRow.BuildFamilyPicker for the full
+        // reasoning (two earlier rounds using ComboBox's editable machinery
+        // broke in ways traceable to WPF's internal Popup/StaysOpen/focus
+        // timing, not reliably controllable without live testing).
+        void BuildFamilyPicker()
         {
-            if (_famCmb == null) return;
-            _famCmb.SelectionChanged -= FamChanged;
+            _famText = new TextBox
+            {
+                Height = 28, FontSize = 12, Margin = new Thickness(0, 0, 0, 6),
+                Background = METools.MeToolsTheme.BrInput, Foreground = METools.MeToolsTheme.BrText,
+                BorderBrush = METools.MeToolsTheme.BrBorder, BorderThickness = new Thickness(1),
+                Padding = new Thickness(6, 0, 6, 0), VerticalContentAlignment = VerticalAlignment.Center,
+            };
 
-            string current = _cfg.FamilyName;
-            bool   area    = _cfg.Distribution == DistributionMode.AreaBased;
-            bool   selValid = false;
+            _famPopupList = new StackPanel();
+            var scroller = new ScrollViewer
+            {
+                MaxHeight = 220, VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                Content = _famPopupList,
+            };
+            var popupBorder = new Border
+            {
+                Background = METools.MeToolsTheme.BrSurface, BorderBrush = METools.MeToolsTheme.BrBorder,
+                BorderThickness = new Thickness(1), Child = scroller,
+            };
+            _famPopup = new Popup
+            {
+                PlacementTarget = _famText, Placement = PlacementMode.Bottom,
+                StaysOpen = true, // closed explicitly ourselves -- see BuildFamilyPicker's counterpart in FamilyPlacerWindow.cs
+                Child = popupBorder,
+            };
+
+            SyncFamilyText();
+            RenderFamilyPopupList("");
+
+            _famText.GotFocus += (s, e) =>
+            {
+                _famPopup.Width = _famText.ActualWidth > 0 ? _famText.ActualWidth : 200;
+                RenderFamilyPopupList("");
+                _famPopup.IsOpen = true;
+                _famText.Dispatcher.BeginInvoke(new Action(() => _famText.SelectAll()),
+                    System.Windows.Threading.DispatcherPriority.Input);
+            };
+            _famText.TextChanged += (s, e) =>
+            {
+                if (_suppressFamTextChanged) return;
+                if (!_famPopup.IsOpen) _famPopup.IsOpen = true;
+                RenderFamilyPopupList(_famText.Text ?? "");
+            };
+            _famText.LostFocus += (s, e) =>
+            {
+                _famText.Dispatcher.BeginInvoke(new Action(() =>
+                {
+                    _famPopup.IsOpen = false;
+                    SyncFamilyText();
+                }), System.Windows.Threading.DispatcherPriority.Background);
+            };
+            _famText.PreviewKeyDown += (s, e) =>
+            {
+                if (e.Key == Key.Escape)
+                {
+                    _famPopup.IsOpen = false;
+                    SyncFamilyText();
+                    Keyboard.ClearFocus();
+                    e.Handled = true;
+                }
+            };
+
+            _body.Children.Add(_famText);
+        }
+
+        void SyncFamilyText()
+        {
+            _suppressFamTextChanged = true;
+            try
+            {
+                _famText.Text = string.IsNullOrEmpty(_cfg.FamilyName) ? S.Get("lamp.select_family_dropdown") : _cfg.FamilyName;
+                _famText.Foreground = string.IsNullOrEmpty(_cfg.FamilyName) ? MeToolsTheme.BrMuted : MeToolsTheme.BrText;
+            }
+            finally { _suppressFamTextChanged = false; }
+        }
+
+        // Rebuilds the popup's clickable rows: grouped into Lighting / Fire
+        // Alarm headers (Fire Alarm only in Area-based mode), optionally
+        // filtered by a typed substring. If the current selection is no
+        // longer valid under the active mode/filter, clears it -- same
+        // behavior the old RebuildFamilyCombo had.
+        void RenderFamilyPopupList(string filter)
+        {
+            _famPopupList.Children.Clear();
+            string current   = _cfg.FamilyName;
+            bool   area      = _cfg.Distribution == DistributionMode.AreaBased;
             bool   searching = !string.IsNullOrWhiteSpace(filter);
-
-            _famCmb.Items.Clear();
-            _famCmb.Items.Add(new ComboBoxItem { Content = S.Get("lamp.select_family_dropdown"), Tag = "" });
+            bool   selValid  = false;
 
             void AddGroup(string header, System.Collections.Generic.IEnumerable<string> fams)
             {
                 var list = fams.ToList();
                 if (searching) list = list.Where(f => f.IndexOf(filter, System.StringComparison.OrdinalIgnoreCase) >= 0).ToList();
                 if (list.Count == 0) return;
-                _famCmb.Items.Add(new ComboBoxItem
+                if (!searching)
                 {
-                    Content    = header,
-                    Tag        = null,
-                    IsEnabled  = false,
-                    FontWeight = FontWeights.Bold,
-                    Foreground = MeToolsTheme.BrMuted,
-                });
+                    _famPopupList.Children.Add(new TextBlock
+                    {
+                        Text = header, FontWeight = FontWeights.Bold, Foreground = MeToolsTheme.BrMuted,
+                        FontSize = 10, Margin = new Thickness(6, 4, 0, 1),
+                    });
+                }
                 foreach (var fam in list)
                 {
-                    _famCmb.Items.Add(new ComboBoxItem { Content = "    " + fam, Tag = fam });
                     if (fam == current) selValid = true;
+                    var row = new Border
+                    {
+                        Padding = new Thickness(searching ? 6 : 14, 3, 6, 3),
+                        Cursor = Cursors.Hand, Background = Brushes.Transparent,
+                    };
+                    row.Child = new TextBlock { Text = fam, FontSize = 11, Foreground = MeToolsTheme.BrText };
+                    row.MouseEnter += (s, e) => row.Background = MeToolsTheme.BrActiveBg;
+                    row.MouseLeave += (s, e) => row.Background = Brushes.Transparent;
+                    var captured = fam;
+                    row.MouseLeftButtonDown += (s, e) => { PickFamily(captured); e.Handled = true; };
+                    _famPopupList.Children.Add(row);
                 }
             }
 
@@ -388,19 +479,27 @@ namespace METools.LampPlacer
                                             .Select(f => f.FamilyName).Distinct()
                                             .OrderBy(x => x, System.StringComparer.OrdinalIgnoreCase));
 
-            if (preserveText)
+            if (searching && _famPopupList.Children.Count == 0)
             {
-                // Mid-search: only the candidate list changes, selection state
-                // (and therefore the editable Text) stays exactly as typed.
+                _famPopupList.Children.Add(new TextBlock
+                {
+                    Text = "No matches.", FontSize = 10.5, FontStyle = FontStyles.Italic,
+                    Foreground = MeToolsTheme.BrMuted, Margin = new Thickness(8, 4, 8, 4),
+                });
             }
-            else if (selValid)
+
+            var noSel = new Border { Padding = new Thickness(searching ? 6 : 14, 3, 6, 3), Cursor = Cursors.Hand, Background = Brushes.Transparent };
+            noSel.Child = new TextBlock { Text = S.Get("lamp.select_family_dropdown"), FontSize = 11, Foreground = MeToolsTheme.BrMuted };
+            noSel.MouseEnter += (s, e) => noSel.Background = MeToolsTheme.BrActiveBg;
+            noSel.MouseLeave += (s, e) => noSel.Background = Brushes.Transparent;
+            noSel.MouseLeftButtonDown += (s, e) => { PickFamily(""); e.Handled = true; };
+            _famPopupList.Children.Insert(0, noSel);
+
+            if (!searching && !selValid && !string.IsNullOrEmpty(current))
             {
-                foreach (var it in _famCmb.Items)
-                    if (it is ComboBoxItem ci && (ci.Tag as string) == current) { _famCmb.SelectedItem = ci; break; }
-            }
-            else if (!searching)
-            {
-                _famCmb.SelectedIndex = 0;
+                // Current selection no longer valid under the active mode
+                // (e.g. switched away from Area-based, hiding Fire Alarm) --
+                // clear it, same as the old RebuildFamilyCombo did.
                 _cfg.FamilyName = "";
                 _cfg.TypeName   = "";
                 if (_typCmb != null)
@@ -410,45 +509,21 @@ namespace METools.LampPlacer
                     _typCmb.SelectionChanged += TypChanged;
                 }
                 UpdatePlacementDetection();
+                SyncFamilyText();
             }
-            else
-            {
-                // Searching and the current selection just isn't in the
-                // filtered results right now -- leave _cfg alone, just show
-                // the placeholder row selected until they pick something or
-                // clear the search.
-                _famCmb.SelectedIndex = 0;
-            }
-
-            _famCmb.SelectionChanged += FamChanged;
         }
 
-        // Forces the editable text to match the real current selection -- used
-        // after the dropdown closes without a new pick being made, so a
-        // half-typed search term never lingers as if it were the actual
-        // selection.
-        bool _suppressFamilyTextSync;
-        void SyncFamilyComboText()
+        // Commits a pick, synchronously, at normal input priority -- always
+        // finishes before the LostFocus-triggered SyncFamilyText (deferred to
+        // Background priority) runs, regardless of focus-transition timing.
+        void PickFamily(string name)
         {
-            _suppressFamilyTextSync = true;
-            try { _famCmb.Text = string.IsNullOrEmpty(_cfg.FamilyName) ? S.Get("lamp.select_family_dropdown") : _cfg.FamilyName; }
-            finally { _suppressFamilyTextSync = false; }
-        }
-
-        void FamilySearchTextChanged(object sender, TextChangedEventArgs e)
-        {
-            if (_suppressFamilyTextSync) return;
-            if (!_famCmb.IsDropDownOpen) _famCmb.IsDropDownOpen = true;
-            RebuildFamilyCombo(_famCmb.Text ?? "", preserveText: true);
-        }
-
-        void FamChanged(object s, SelectionChangedEventArgs e)
-        {
-            var name = (_famCmb.SelectedItem as ComboBoxItem)?.Tag as string ?? "";
-            _cfg.FamilyName = name;
+            _cfg.FamilyName = name ?? "";
+            _famPopup.IsOpen = false;
+            SyncFamilyText();
             _typCmb.SelectionChanged -= TypChanged;
             _typCmb.Items.Clear();
-            foreach (var t in _fams.Where(f => f.FamilyName == name).OrderBy(f => f.TypeName))
+            foreach (var t in _fams.Where(f => f.FamilyName == _cfg.FamilyName).OrderBy(f => f.TypeName))
                 _typCmb.Items.Add(t.TypeName);
             if (_typCmb.Items.Count > 0) { _typCmb.SelectedIndex = 0; _cfg.TypeName = _typCmb.Items[0] as string ?? ""; }
             _typCmb.SelectionChanged += TypChanged;
@@ -746,7 +821,7 @@ namespace METools.LampPlacer
         void SetDist(DistributionMode m)
         {
             _cfg.Distribution = m;
-            RebuildFamilyCombo();   // Fire Alarm families only show in Area-based mode
+            RenderFamilyPopupList("");   // Fire Alarm families only show in Area-based mode
             UpdateToggle(_btnArea, m == DistributionMode.AreaBased);
             UpdateToggle(_btnGrid, m == DistributionMode.ManualGrid);
             UpdateToggle(_btnLine, m == DistributionMode.Line);
@@ -843,59 +918,6 @@ namespace METools.LampPlacer
                     _infoTb.Text = $"→ {n} lamps evenly distributed along the line";
                 }
             }
-        }
-
-        // Small themed modal asking for the lamp spacing (mm). Returns null if cancelled.
-        // Prompt for how many lamps to place on a line, pre-filled with a
-        // suggestion computed from the line's actual length and the spacing
-        // entered in the side panel -- replaces the old flow that asked for
-        // spacing a second time after the line was already selected.
-        public int? ShowCountDialog(int defaultCount)
-        {
-            int? result = null;
-            var dlg = new Window
-            {
-                Title = "How many lamps?",
-                Width = 300, SizeToContent = SizeToContent.Height,
-                ResizeMode = ResizeMode.NoResize, WindowStyle = WindowStyle.ToolWindow,
-                WindowStartupLocation = WindowStartupLocation.CenterOwner,
-                Background = MeToolsTheme.BrSurface, Owner = this
-            };
-            var sp = new StackPanel { Margin = new Thickness(16) };
-            sp.Children.Add(new TextBlock
-            {
-                Text = "Number of lamps on this line:",
-                Foreground = MeToolsTheme.BrText, Margin = new Thickness(0, 0, 0, 4),
-            });
-            sp.Children.Add(new TextBlock
-            {
-                Text = "Suggested from the line's length and your spacing setting -- change it if you want a different count.",
-                Foreground = MeToolsTheme.BrMuted, FontSize = 10.5, TextWrapping = TextWrapping.Wrap,
-                Margin = new Thickness(0, 0, 0, 8),
-            });
-            var tb = Num(Math.Max(1, defaultCount).ToString()); tb.Width = 120;
-            sp.Children.Add(tb);
-            var row = new StackPanel { Orientation = Orientation.Horizontal,
-                HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 14, 0, 0) };
-            var ok = new Button { Content = "OK", Width = 72, Margin = new Thickness(0, 0, 6, 0),
-                IsDefault = true, Background = MeToolsTheme.BrPetrol, Foreground = Brushes.White,
-                BorderBrush = MeToolsTheme.BrPetrol, Padding = new Thickness(0, 4, 0, 4),
-                Cursor = Cursors.Hand, Template = RoundedBtnTemplate() };
-            var cancel = new Button { Content = "Cancel", Width = 72, IsCancel = true,
-                Background = MeToolsTheme.BrInput, Foreground = MeToolsTheme.BrText,
-                BorderBrush = MeToolsTheme.BrBorder, Padding = new Thickness(0, 4, 0, 4),
-                Cursor = Cursors.Hand, Template = RoundedBtnTemplate() };
-            ok.Click += (s, e) =>
-            {
-                if (int.TryParse(tb.Text, out int v) && v > 0) { result = v; dlg.DialogResult = true; }
-                else { tb.Focus(); tb.SelectAll(); }
-            };
-            row.Children.Add(ok); row.Children.Add(cancel);
-            sp.Children.Add(row);
-            dlg.Content = sp;
-            dlg.Loaded += (s, e) => { tb.Focus(); tb.SelectAll(); };
-            dlg.ShowDialog();
-            return result;
         }
 
         public double? ShowSpacingDialog(double defaultMm)

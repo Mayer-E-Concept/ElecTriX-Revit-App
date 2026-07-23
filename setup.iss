@@ -1,25 +1,22 @@
-; setup.iss -- ME-Tools installer (Revit 2024 / 2025 / 2026)
+; setup.iss -- ME-Tools installer (Revit 2025 / 2026)
 ; Mayer E-Concept SRL
 ; Build the installer:  open in Inno Setup 6 -> Compile   (or run ISCC.exe setup.iss)
 ;
-; Revit 2024 runs on .NET Framework 4.8; Revit 2025 and 2026 both run on .NET 8.
-; These are genuinely different compiled binaries (see METools.csproj's
-; <TargetFrameworks>net48;net8.0-windows</TargetFrameworks>), so this script
-; installs whichever one(s) match the Revit version(s) the user selects below.
-; Build BOTH configurations in Release before compiling this (or just the ones
-; you're about to ship) -- the net8.0-windows one covers 2025 and 2026 both.
+; Revit 2025 and 2026 both run on .NET 8 and share one compiled binary (see
+; METools.csproj's <TargetFramework>net8.0-windows</TargetFramework>) -- this
+; script installs it into whichever version(s) the user selects below.
+; Build Release before compiling this.
 ;
 ; NOTE: every Source/DestDir entry is a SINGLE line (Inno requirement).
 
 #define AppName     "ME-Tools"
-#define AppVersion  "1.6.0"
+#define AppVersion  "1.5.0"
 #define Publisher   "Mayer E-Concept SRL"
 
 ; --- adjust this absolute path to your machine if it differs ------------------
 #define ProjectDir "X:\02_sabloane\01_Revit\ElecTriX-Revit-App"
 #define OutDir      ProjectDir + "\installer_output"
-; net48 = Revit 2024; net8.0-windows = Revit 2025 AND 2026 (same binary, used twice)
-#define Dll2024Path ProjectDir + "\bin\Release\net48\METools.dll"
+; net8.0-windows -> Revit 2025 AND 2026 (same binary, installed twice below)
 #define Dll2025Path ProjectDir + "\bin\Release\net8.0-windows\METools.dll"
 ; --------------------------------------------------------------------------------
 
@@ -52,22 +49,16 @@ RestartApplications=no
 UninstallDisplayName={#AppName} {#AppVersion}
 
 [Tasks]
-Name: "rvt2024"; Description: "Autodesk Revit 2024"; GroupDescription: "Install ME-Tools for:"
 Name: "rvt2025"; Description: "Autodesk Revit 2025"; GroupDescription: "Install ME-Tools for:"
 Name: "rvt2026"; Description: "Autodesk Revit 2026"; GroupDescription: "Install ME-Tools for:"
 
 [Files]
-; -- Revit 2024 (.NET Framework build) --------------------------------------
-Source: "{#Dll2024Path}"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2024"; Flags: ignoreversion; Tasks: rvt2024
-Source: "{#ProjectDir}\METools_2024.addin"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2024"; DestName: "METools.addin"; Flags: ignoreversion; Tasks: rvt2024
-; Seeds the Settings > Worksets "standard list" on first install (the code reads
-; this from [install folder]\config\standard_worksets.json, NOT %APPDATA%).
-; onlyifdoesntexist so upgrading never overwrites a customer's own edited list.
-Source: "{#ProjectDir}\standard_worksets.json"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2024\config"; Flags: ignoreversion onlyifdoesntexist; Tasks: rvt2024
-
 ; -- Revit 2025 (.NET 8 build) -----------------------------------------------
 Source: "{#Dll2025Path}"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2025"; Flags: ignoreversion; Tasks: rvt2025
 Source: "{#ProjectDir}\METools_2025.addin"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2025"; DestName: "METools.addin"; Flags: ignoreversion; Tasks: rvt2025
+; Seeds the Settings > Worksets "standard list" on first install (the code reads
+; this from [install folder]\config\standard_worksets.json, NOT %APPDATA%).
+; onlyifdoesntexist so upgrading never overwrites a customer's own edited list.
 Source: "{#ProjectDir}\standard_worksets.json"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2025\config"; Flags: ignoreversion onlyifdoesntexist; Tasks: rvt2025
 
 ; -- Revit 2026 (same .NET 8 build as 2025, installed a second time) --------
@@ -93,10 +84,6 @@ Source: "{#ProjectDir}\Resources\ME-Tools_CircuitTag.rfa"; DestDir: "{commonappd
 Source: "{#ProjectDir}\Resources\METools_SharedParameters.txt"; DestDir: "{commonappdata}\METools\Resources"; Flags: ignoreversion
 
 [UninstallDelete]
-Type: files; Name: "{commonappdata}\Autodesk\Revit\Addins\2024\METools.dll"
-Type: files; Name: "{commonappdata}\Autodesk\Revit\Addins\2024\METools.addin"
-Type: files; Name: "{commonappdata}\Autodesk\Revit\Addins\2024\config\standard_worksets.json"
-Type: dirifempty; Name: "{commonappdata}\Autodesk\Revit\Addins\2024\config"
 Type: files; Name: "{commonappdata}\Autodesk\Revit\Addins\2025\METools.dll"
 Type: files; Name: "{commonappdata}\Autodesk\Revit\Addins\2025\METools.addin"
 Type: files; Name: "{commonappdata}\Autodesk\Revit\Addins\2025\config\standard_worksets.json"
