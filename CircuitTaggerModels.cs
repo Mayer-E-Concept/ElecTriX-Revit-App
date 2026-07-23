@@ -28,6 +28,11 @@ namespace METools.FamilyPlacer
         public int    CountSwitches     { get; set; }
         public int    CountOther        { get; set; }
         public int    Total             { get { return CountSockets + CountLamps + CountSwitches + CountOther; } }
+
+        // The actual tagged elements in this circuit -- used by the Stats
+        // tab's expandable per-level breakdown. Not exported/serialized
+        // anywhere, just carried alongside the aggregate counts for display.
+        public List<ExportRow> Elements { get; set; } = new List<ExportRow>();
     }
 
     public class ExportRow
@@ -43,6 +48,7 @@ namespace METools.FamilyPlacer
         public int    CategoryId        { get; set; } // BuiltInCategory int ID -- locale-independent
         public string FamilyName        { get; set; }
         public string Room              { get; set; }
+        public string LevelName         { get; set; } // "" if none could be resolved
         public string ElementId         { get; set; }
     }
 

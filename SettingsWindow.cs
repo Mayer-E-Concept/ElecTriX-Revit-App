@@ -188,6 +188,13 @@ namespace METools
         // original fix, just re-applied per tab instead of once at startup.
         private void ResizeToFitActiveTab()
         {
+            if (!IsLoaded) return; // constructor-time call (via Build() -> ShowTab) runs before
+                                    // the window actually has a screen presence -- UpdateLayout/
+                                    // ActualHeight are unreliable then, and locking in whatever
+                                    // they produce is what caused the tiny-sliver-on-open bug.
+                                    // The base class's Loaded handler does the correct first
+                                    // measure once the window is genuinely shown; this only
+                                    // needs to run for real tab switches after that.
             try
             {
                 SizeToContent = SizeToContent.Height;

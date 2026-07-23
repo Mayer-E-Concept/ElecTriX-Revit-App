@@ -486,6 +486,7 @@ namespace METools.FamilyPlacer
                             CountSockets = sockets + other,
                             CountLamps   = lamps,
                             CountSwitches = switches,
+                            Elements     = allEl,
                         };
                         _statsList.Children.Add(BuildStatsRow(stat));
 
@@ -509,6 +510,7 @@ namespace METools.FamilyPlacer
                                 CountSockets  = ss + so,
                                 CountLamps    = sl,
                                 CountSwitches = sw,
+                                Elements      = subEl,
                             };
                             _statsList.Children.Add(BuildStatsRow(sub, isSubRow: true));
                         }
@@ -548,7 +550,7 @@ namespace METools.FamilyPlacer
             };
         }
 
-        private Border BuildStatsRow(CircuitStatRow stat, bool isSubRow = false)
+        private FrameworkElement BuildStatsRow(CircuitStatRow stat, bool isSubRow = false)
         {
             var grid = new Grid { MinHeight = 32 };
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(isSubRow ? 20 : 6) });
@@ -574,11 +576,21 @@ namespace METools.FamilyPlacer
                 Grid.SetColumn(divider, col); grid.Children.Add(divider);
             }
 
+            // Circuit label + expand/collapse toggle, side by side.
+            var labelRow = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+            var expandArrow = new TextBlock
+            {
+                Text = "\u25B8", FontSize = 10, Foreground = MeToolsTheme.BrMuted,
+                Margin = new Thickness(0, 0, 4, 0), VerticalAlignment = VerticalAlignment.Center,
+                Cursor = Cursors.Hand,
+            };
+            labelRow.Children.Add(expandArrow);
             UIElement badge = CircuitBadge(stat.CircuitLabel, isSubRow);
             ((FrameworkElement)badge).Margin         = new Thickness(0, 4, 8, 4);
             ((FrameworkElement)badge).VerticalAlignment = VerticalAlignment.Center;
             ((FrameworkElement)badge).HorizontalAlignment = HorizontalAlignment.Left;
-            Grid.SetColumn(badge, 1); grid.Children.Add(badge);
+            labelRow.Children.Add(badge);
+            Grid.SetColumn(labelRow, 1); grid.Children.Add(labelRow);
 
             var vs = TC(stat.Vorsicherung, small: true);
             Grid.SetColumn(vs, 2); grid.Children.Add(vs);
@@ -618,7 +630,74 @@ namespace METools.FamilyPlacer
             row.MouseEnter += (s, e) => row.Background = MeToolsTheme.BrActiveBg;
             row.MouseLeave += (s, e) => row.Background = isSubRow ? MeToolsTheme.BrBg : MeToolsTheme.BrRow;
             _allRows.Add(row);
-            return row;
+
+            // Collapsible per-level breakdown, built lazily the first time it's
+            // expanded (most rows will never be opened in a given session).
+            Border detailPanel = null;
+            bool expanded = false, built = false;
+            expandArrow.MouseLeftButtonUp += (s, e) =>
+            {
+                expanded = !expanded;
+                expandArrow.Text = expanded ? "\u25BE" : "\u25B8";
+                if (expanded && !built)
+                {
+                    detailPanel.Child = BuildLevelBreakdown(stat.Elements, isSubRow);
+                    built = true;
+                }
+                detailPanel.Visibility = expanded ? Visibility.Visible : Visibility.Collapsed;
+                e.Handled = true;
+            };
+
+            detailPanel = new Border { Visibility = Visibility.Collapsed };
+
+            var wrapper = new StackPanel();
+            wrapper.Children.Add(row);
+            wrapper.Children.Add(detailPanel);
+            return wrapper;
+        }
+
+        // Groups a circuit's tagged elements by level, for the Stats tab's
+        // expandable detail view: circuit -> level sub-heading -> individual
+        // items. LevelName comes from CircuitTaggerHandler.GetLevelName,
+        // which checks INSTANCE_SCHEDULE_ONLY_LEVEL_PARAM before falling back
+        // to Element.LevelId -- same method Fix Level and Activity Log use,
+        // since plain Element.LevelId is frequently blank for these families.
+        private FrameworkElement BuildLevelBreakdown(List<ExportRow> elements, bool isSubRow)
+        {
+            var panel = new StackPanel { Margin = new Thickness(isSubRow ? 44 : 30, 4, 10, 8) };
+            if (elements == null || elements.Count == 0)
+            {
+                panel.Children.Add(new TextBlock
+                {
+                    Text = "No element details available.", FontSize = 10.5,
+                    Foreground = MeToolsTheme.BrMuted, FontStyle = FontStyles.Italic,
+                });
+                return panel;
+            }
+
+            var byLevel = elements
+                .GroupBy(e => string.IsNullOrEmpty(e.LevelName) ? "(No Level)" : e.LevelName)
+                .OrderBy(g => g.Key);
+
+            foreach (var lvlGrp in byLevel)
+            {
+                panel.Children.Add(new TextBlock
+                {
+                    Text = lvlGrp.Key, FontSize = 10.5, FontWeight = FontWeights.SemiBold,
+                    Foreground = MeToolsTheme.BrPetrol, Margin = new Thickness(0, 6, 0, 2),
+                });
+                foreach (var el in lvlGrp.OrderBy(e => e.FamilyName))
+                {
+                    string desc = string.IsNullOrEmpty(el.Room) ? el.FamilyName : $"{el.FamilyName}  ({el.Room})";
+                    panel.Children.Add(new TextBlock
+                    {
+                        Text = $"{desc}  \u2022  ID {el.ElementId}", FontSize = 10,
+                        Foreground = MeToolsTheme.BrMuted, Margin = new Thickness(10, 0, 0, 1),
+                        TextWrapping = TextWrapping.Wrap,
+                    });
+                }
+            }
+            return panel;
         }
 
         private void OnClearCircuitData(string circuitLabel)

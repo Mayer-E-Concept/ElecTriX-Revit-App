@@ -621,6 +621,7 @@ namespace METools.FamilyPlacer
                             CategoryId        = fi.Category?.Id?.IntegerValue ?? 0,
                             FamilyName        = fi.Symbol?.Family?.Name ?? fi.Name ?? "",
                             Room              = GetRoomName(doc, fi, phase),
+                            LevelName         = GetLevelName(doc, fi),
                             ElementId         = fi.Id.IntegerValue.ToString(),
                         });
                     }
@@ -628,6 +629,35 @@ namespace METools.FamilyPlacer
                 catch { }
             }
             return rows;
+        }
+
+        // Same method as FixLevelCommand.CurrentLevelId(FamilyInstance) / Activity
+        // Log's ResolveLevel: INSTANCE_SCHEDULE_ONLY_LEVEL_PARAM first, since
+        // plain Element.LevelId is frequently InvalidElementId for these CAx
+        // families even when a perfectly good Schedule Level is set.
+        private static string GetLevelName(Document doc, FamilyInstance fi)
+        {
+            try
+            {
+                ElementId levelId = ElementId.InvalidElementId;
+                try
+                {
+                    var p = fi.get_Parameter(BuiltInParameter.INSTANCE_SCHEDULE_ONLY_LEVEL_PARAM);
+                    var id = p?.AsElementId();
+                    if (id != null && id != ElementId.InvalidElementId) levelId = id;
+                }
+                catch { }
+
+                if (levelId == ElementId.InvalidElementId)
+                {
+                    try { levelId = fi.LevelId ?? ElementId.InvalidElementId; }
+                    catch { levelId = ElementId.InvalidElementId; }
+                }
+
+                if (levelId == ElementId.InvalidElementId) return "";
+                return (doc.GetElement(levelId) as Level)?.Name ?? "";
+            }
+            catch { return ""; }
         }
 
         private static string GetRoomName(Document doc, FamilyInstance fi, Phase phase)

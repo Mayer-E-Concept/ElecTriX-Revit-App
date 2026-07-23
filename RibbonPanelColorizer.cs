@@ -74,6 +74,17 @@ namespace METools
                 ColorOne(p.Panel, p.Color);
         }
 
+        // Candidate names for a title-text-color override, tried on both the
+        // panel object itself and its Source (RibbonPanelSource) sub-object --
+        // the earlier full member dump only covered the panel object itself,
+        // never recursed into Source, so if the real property lives there
+        // this is the first attempt to actually find it.
+        private static readonly string[] TitleTextCandidates =
+        {
+            "CustomPanelTitleBarForeground", "CustomTitleBarForeground", "CustomTitleForeground",
+            "TitleBarForeground", "TitleForeground", "CustomTextColor", "TitleTextColor",
+        };
+
         private static void ColorOne(Autodesk.Revit.UI.RibbonPanel panel, Color color)
         {
             string name = "?";
@@ -90,15 +101,75 @@ namespace METools
 
                 var brush = new SolidColorBrush(color);
                 brush.Freeze();
+                var white = new SolidColorBrush(Colors.White);
+                white.Freeze();
 
                 // Title strip only -- CustomPanelBackground intentionally NOT
                 // set, so the icon/button area keeps Revit's normal look.
                 TrySetProperty(internalPanel, "CustomPanelTitleBarBackground", brush, name);
+
+                // Text color: try the panel object first, then its Source
+                // sub-object. Log a full dump either way so if none of these
+                // hit, the real property name (if any) is visible without
+                // guessing a third time.
+                bool textHit = false;
+                foreach (var candidate in TitleTextCandidates)
+                    if (TrySetProperty(internalPanel, candidate, white, name + " (panel text)")) { textHit = true; break; }
+
+                if (!textHit)
+                {
+                    object source = null;
+                    try
+                    {
+                        var sourceProp = internalPanel.GetType().GetProperty("Source", BindingFlags.Public | BindingFlags.Instance);
+                        source = sourceProp?.GetValue(internalPanel);
+                    }
+                    catch (Exception ex) { Log($"'{name}': reading Source failed: {ex.Message}"); }
+
+                    if (source != null)
+                    {
+                        foreach (var candidate in TitleTextCandidates)
+                            if (TrySetProperty(source, candidate, white, name + " (Source text)")) { textHit = true; break; }
+
+                        if (!textHit)
+                        {
+                            Log($"'{name}': no text-color candidate matched on panel or Source -- dumping Source's members below.");
+                            DumpMembers(source, name + "/Source");
+                        }
+                    }
+                    else
+                    {
+                        Log($"'{name}': Source was null -- can't check it for a text-color property.");
+                    }
+                }
             }
             catch (Exception ex)
             {
                 Log($"'{name}': EXCEPTION {ex.Message}");
             }
+        }
+
+        // Dumps every public property (name, type, current value, writability)
+        // so the real member names are visible directly in the log instead of
+        // guessing a third time.
+        private static void DumpMembers(object obj, string label)
+        {
+            try
+            {
+                var type = obj.GetType();
+                Log($"'{label}': ---- member dump for {type.FullName} ----");
+                foreach (var p in type.GetProperties(BindingFlags.Public | BindingFlags.Instance))
+                {
+                    try
+                    {
+                        var val = p.CanRead ? (p.GetValue(obj)?.ToString() ?? "null") : "<write-only>";
+                        Log($"  {p.Name} ({p.PropertyType.Name})  CanWrite={p.CanWrite}  value={val}");
+                    }
+                    catch (Exception ex) { Log($"  {p.Name}: <error reading: {ex.Message}>"); }
+                }
+                Log($"'{label}': ---- end dump ----");
+            }
+            catch (Exception ex) { Log($"DumpMembers EXCEPTION: {ex.Message}"); }
         }
 
         private static bool TrySetProperty(object obj, string propName, object value, string label)
