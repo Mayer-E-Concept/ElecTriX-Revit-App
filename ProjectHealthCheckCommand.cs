@@ -220,8 +220,10 @@ namespace METools
             // to this operation -- save whatever the user already had set and
             // restore it afterward, so this doesn't quietly redirect their
             // shared-parameter file for unrelated work later in the session.
-            string previousFile = null;
-            try { previousFile = doc.Application.SharedParametersFilename; } catch { }
+            string previousFile = "";
+            bool capturedPrevious = false;
+            try { previousFile = doc.Application.SharedParametersFilename; capturedPrevious = true; }
+            catch { /* if we can't even read it, we genuinely don't know what to restore -- skip restoring rather than guess */ }
 
             try
             {
@@ -266,7 +268,7 @@ namespace METools
                             }
                             if (changed)
                             {
-                                doc.ParameterBindings.ReInsert(definition, existing, BuiltInParameterGroup.PG_DATA);
+                                doc.ParameterBindings.ReInsert(definition, existing, GroupTypeId.Data);
                                 messages.Add($"'{paramName}': added the missing categories to its existing binding.");
                             }
                             else
@@ -277,7 +279,7 @@ namespace METools
                         else
                         {
                             var binding = new InstanceBinding(categorySet);
-                            bool inserted = doc.ParameterBindings.Insert(definition, binding, BuiltInParameterGroup.PG_DATA);
+                            bool inserted = doc.ParameterBindings.Insert(definition, binding, GroupTypeId.Data);
                             messages.Add(inserted ? $"'{paramName}': bound to all 8 categories." : $"'{paramName}': Insert reported failure.");
                         }
                     }
@@ -287,7 +289,7 @@ namespace METools
             catch (Exception ex) { messages.Add("Shared parameters: EXCEPTION " + ex.Message); }
             finally
             {
-                try { if (previousFile != null) doc.Application.SharedParametersFilename = previousFile; } catch { }
+                try { if (capturedPrevious) doc.Application.SharedParametersFilename = previousFile; } catch { }
             }
         }
     }

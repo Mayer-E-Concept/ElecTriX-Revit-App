@@ -12,7 +12,7 @@
 ; NOTE: every Source/DestDir entry is a SINGLE line (Inno requirement).
 
 #define AppName     "ME-Tools"
-#define AppVersion  "1.5.0"
+#define AppVersion  "1.6.0"
 #define Publisher   "Mayer E-Concept SRL"
 
 ; --- adjust this absolute path to your machine if it differs ------------------
@@ -81,6 +81,17 @@ Source: "{#ProjectDir}\standard_worksets.json"; DestDir: "{commonappdata}\Autode
 ; customized path (e.g. if a specific person needs a different folder).
 Source: "{#ProjectDir}\comments-settings-default.json"; DestDir: "{userappdata}\METools"; DestName: "comments-settings.json"; Flags: ignoreversion onlyifdoesntexist
 
+; -- Project Health Check: bundled tag family + shared-parameter definitions,
+; so "Fix All" can load the ME-Tools_CircuitTag family and bind the 6 Circuit
+; Tagger parameters on a project that never had them, with one click, instead
+; of a manual per-project setup. One shared copy for all Revit versions
+; (installed regardless of which rvtXXXX tasks are selected). These ARE
+; overwritten on every install/update (no onlyifdoesntexist) since they're
+; app-owned assets, not user data -- if the family or parameter file is ever
+; updated, everyone should get the new copy.
+Source: "{#ProjectDir}\Resources\ME-Tools_CircuitTag.rfa"; DestDir: "{commonappdata}\METools\Resources"; Flags: ignoreversion
+Source: "{#ProjectDir}\Resources\METools_SharedParameters.txt"; DestDir: "{commonappdata}\METools\Resources"; Flags: ignoreversion
+
 [UninstallDelete]
 Type: files; Name: "{commonappdata}\Autodesk\Revit\Addins\2024\METools.dll"
 Type: files; Name: "{commonappdata}\Autodesk\Revit\Addins\2024\METools.addin"
@@ -95,6 +106,10 @@ Type: files; Name: "{commonappdata}\Autodesk\Revit\Addins\2026\METools.addin"
 Type: files; Name: "{commonappdata}\Autodesk\Revit\Addins\2026\config\standard_worksets.json"
 Type: dirifempty; Name: "{commonappdata}\Autodesk\Revit\Addins\2026\config"
 Type: files; Name: "{userappdata}\METools\comments-settings.json"
+Type: files; Name: "{commonappdata}\METools\Resources\ME-Tools_CircuitTag.rfa"
+Type: files; Name: "{commonappdata}\METools\Resources\METools_SharedParameters.txt"
+Type: dirifempty; Name: "{commonappdata}\METools\Resources"
+Type: dirifempty; Name: "{commonappdata}\METools"
 
 [Messages]
 WelcomeLabel2=This will install [name/ver] for Autodesk Revit.%n%nPlease close Revit before continuing.

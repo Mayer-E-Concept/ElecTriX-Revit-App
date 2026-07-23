@@ -169,6 +169,33 @@ namespace METools
 
             if (idx == 3) { LoadWorksetsIntoList(); LoadCurrentProjectWorksets(); }
             if (idx == 4) LoadHeightsIntoList();
+
+            ResizeToFitActiveTab();
+        }
+
+        // InitWindow's Loaded handler (see MeToolsWindowBase.cs) measures the
+        // window once via SizeToContent, then freezes it to a fixed Height so
+        // the resize grip doesn't fight WPF's auto-sizing (that fix is what
+        // solved the earlier resize-glitch/snap-to-right-edge bug). The
+        // tradeoff: that freeze happens while whichever tab is shown FIRST is
+        // visible -- so a later tab with more content (License, Worksets)
+        // never gets to grow the window, and looks cut off until the user
+        // manually drags it bigger. This re-measures on every tab switch:
+        // briefly go back to SizeToContent so WPF computes the new tab's
+        // natural height, force that layout pass to happen immediately
+        // (UpdateLayout, rather than waiting for the next dispatcher cycle),
+        // then re-freeze to Manual at the new size -- same reasoning as the
+        // original fix, just re-applied per tab instead of once at startup.
+        private void ResizeToFitActiveTab()
+        {
+            try
+            {
+                SizeToContent = SizeToContent.Height;
+                UpdateLayout();
+                Height = ActualHeight;
+                SizeToContent = SizeToContent.Manual;
+            }
+            catch { }
         }
 
         private void StyleTabBtn(Button b, bool active)
