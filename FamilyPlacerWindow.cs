@@ -937,50 +937,25 @@ namespace METools.FamilyPlacer
             // Family + Type stacked vertically
             var famType = new StackPanel { Margin = new Thickness(4, 0, 0, 0) };
 
-            _familyCmb = new ComboBox { Height = 24, FontSize = 11, Background = METools.MeToolsTheme.BrInput, Foreground = METools.MeToolsTheme.BrText, BorderBrush = METools.MeToolsTheme.BrBorder, BorderThickness = new Thickness(1) };
-            _familyCmb.Items.Add(new ComboBoxItem { Content = "-- No Selection --", Tag = "" });
-
-            // Deduplicated: show each FamilyName once per CategoryGroup
-            string lastGroup = null;
-            var seen = new System.Collections.Generic.HashSet<string>();
-            foreach (var info in _all.OrderBy(f => f.CategoryGroup).ThenBy(f => f.FamilyName))
+            _familyCmb = new ComboBox
             {
-                if (info.CategoryGroup != lastGroup)
-                {
-                    _familyCmb.Items.Add(new ComboBoxItem
-                    {
-                        Content   = info.CategoryGroup,
-                        IsEnabled = false,
-                        FontWeight = FontWeights.Bold,
-                        FontStyle  = FontStyles.Italic,
-                        Foreground = MeToolsTheme.BrPetrol,
-                        FontSize   = 10,
-                        Padding    = new Thickness(2, 3, 0, 1),
-                    });
-                    lastGroup = info.CategoryGroup;
-                }
-                if (seen.Add(info.FamilyName)) // only first occurrence
-                {
-                    _familyCmb.Items.Add(new ComboBoxItem
-                    {
-                        Content = info.FamilyName,
-                        Tag     = info.FamilyName,
-                        Padding = new Thickness(10, 1, 0, 1),
-                    });
-                }
-            }
-
-            _familyCmb.SelectedIndex = 0;
-            if (!string.IsNullOrEmpty(Slot.FamilyName))
-            {
-                foreach (ComboBoxItem item in _familyCmb.Items)
-                    if (item.Tag as string == Slot.FamilyName)
-                    { _familyCmb.SelectedItem = item; break; }
-            }
+                Height = 24, FontSize = 11, Background = METools.MeToolsTheme.BrInput,
+                Foreground = METools.MeToolsTheme.BrText, BorderBrush = METools.MeToolsTheme.BrBorder,
+                BorderThickness = new Thickness(1), IsEditable = true, IsTextSearchEnabled = false,
+            };
             _familyCmb.Template = METools.MeToolsWindowBase.MakeComboBoxTemplate();
             METools.MeToolsWindowBase.ApplyComboStyle(_familyCmb);
             _familyCmb.SelectionChanged += FamilyChanged;
+            _familyCmb.AddHandler(System.Windows.Controls.Primitives.TextBoxBase.TextChangedEvent,
+                new TextChangedEventHandler(FamilySearchTextChanged));
+            _familyCmb.DropDownClosed += (s, e) =>
+            {
+                PopulateFamilyCombo(""); // restore the full grouped list for next time
+                SyncFamilyComboText();
+            };
             famType.Children.Add(_familyCmb);
+            PopulateFamilyCombo("");
+            SyncFamilyComboText();
 
             _typeCmb = new ComboBox { Height = 22, FontSize = 10, Margin = new Thickness(0, 2, 0, 0), Background = METools.MeToolsTheme.BrInput, Foreground = METools.MeToolsTheme.BrText, BorderBrush = METools.MeToolsTheme.BrBorder, BorderThickness = new Thickness(1) };
             RefreshTypes();
@@ -1067,7 +1042,7 @@ namespace METools.FamilyPlacer
             if (!Slot.ParamOverrides.ContainsKey("Y_Versatz_gleich_Rahmen") && yFrameDef)
                 Slot.ParamOverrides["Y_Versatz_gleich_Rahmen"] = "1";
             yFrameCb.Checked   += (s, e) => { Slot.ParamOverrides["Y_Versatz_gleich_Rahmen"] = "1"; UpdateGearDot(); OnChanged?.Invoke(); };
-            yFrameCb.Unchecked += (s, e) => { Slot.ParamOverrides.Remove("Y_Versatz_gleich_Rahmen"); UpdateGearDot(); OnChanged?.Invoke(); };
+            yFrameCb.Unchecked += (s, e) => { Slot.ParamOverrides["Y_Versatz_gleich_Rahmen"] = "0"; UpdateGearDot(); OnChanged?.Invoke(); };
             oySp.Children.Add(yFrameCb);
             Grid.SetColumn(oySp, 8); g.Children.Add(oySp);
 
@@ -1352,6 +1327,91 @@ namespace METools.FamilyPlacer
                     if (_heightTxt != null) _heightTxt.Text = eff.Value.ToString("F0");
                 }
             });
+        }
+
+        // Rebuilds _familyCmb's items, optionally filtered by a typed
+        // substring (case-insensitive, matched against family name). Category
+        // headers are only shown in the unfiltered view -- once searching,
+        // a flat matching list is clearer than repeated single-item groups.
+        // preserveText: true while the user is actively typing to search --
+        // must NOT touch SelectedIndex/SelectedItem in that case, since doing
+        // so resyncs the editable Text to whatever item that resolves to,
+        // overwriting what they just typed. Only touched (to restore the
+        // real current selection) when explicitly not searching.
+        private void PopulateFamilyCombo(string filter, bool preserveText = false)
+        {
+            string previouslySelected = (_familyCmb.SelectedItem as ComboBoxItem)?.Tag as string ?? Slot.FamilyName;
+            _familyCmb.SelectionChanged -= FamilyChanged; // don't fire FamilyChanged while we rebuild items
+            _familyCmb.Items.Clear();
+            _familyCmb.Items.Add(new ComboBoxItem { Content = "-- No Selection --", Tag = "" });
+
+            bool searching = !string.IsNullOrWhiteSpace(filter);
+            var matches = searching
+                ? _all.Where(f => f.FamilyName.IndexOf(filter, StringComparison.OrdinalIgnoreCase) >= 0)
+                : _all.AsEnumerable();
+
+            string lastGroup = null;
+            var seen = new System.Collections.Generic.HashSet<string>();
+            foreach (var info in matches.OrderBy(f => f.CategoryGroup).ThenBy(f => f.FamilyName))
+            {
+                if (!searching && info.CategoryGroup != lastGroup)
+                {
+                    _familyCmb.Items.Add(new ComboBoxItem
+                    {
+                        Content   = info.CategoryGroup,
+                        IsEnabled = false,
+                        FontWeight = FontWeights.Bold,
+                        FontStyle  = FontStyles.Italic,
+                        Foreground = MeToolsTheme.BrPetrol,
+                        FontSize   = 10,
+                        Padding    = new Thickness(2, 3, 0, 1),
+                    });
+                    lastGroup = info.CategoryGroup;
+                }
+                if (seen.Add(info.FamilyName)) // only first occurrence
+                {
+                    _familyCmb.Items.Add(new ComboBoxItem
+                    {
+                        Content = info.FamilyName,
+                        Tag     = info.FamilyName,
+                        Padding = new Thickness(searching ? 4 : 10, 1, 0, 1),
+                    });
+                }
+            }
+
+            if (!preserveText)
+            {
+                _familyCmb.SelectedIndex = 0;
+                if (!string.IsNullOrEmpty(previouslySelected))
+                {
+                    foreach (ComboBoxItem item in _familyCmb.Items)
+                        if (item.Tag as string == previouslySelected)
+                        { _familyCmb.SelectedItem = item; break; }
+                }
+            }
+            // else: leave SelectedIndex/Text untouched -- the user is mid-search,
+            // only the dropdown's candidate list should change right now.
+
+            _familyCmb.SelectionChanged += FamilyChanged;
+        }
+
+        // Forces the editable text to match the real current selection --
+        // used after the dropdown closes without a new pick being made (e.g.
+        // the user searched, then clicked away), so a half-typed search term
+        // never lingers as if it were the actual selection.
+        private bool _suppressFamilyTextSync;
+        private void SyncFamilyComboText()
+        {
+            _suppressFamilyTextSync = true;
+            try { _familyCmb.Text = string.IsNullOrEmpty(Slot.FamilyName) ? "-- No Selection --" : Slot.FamilyName; }
+            finally { _suppressFamilyTextSync = false; }
+        }
+
+        private void FamilySearchTextChanged(object sender, TextChangedEventArgs e)
+        {
+            if (_suppressFamilyTextSync) return;
+            if (!_familyCmb.IsDropDownOpen) _familyCmb.IsDropDownOpen = true;
+            PopulateFamilyCombo(_familyCmb.Text ?? "", preserveText: true);
         }
 
         private void FamilyChanged(object s, SelectionChangedEventArgs e)

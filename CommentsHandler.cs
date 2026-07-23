@@ -74,6 +74,7 @@ namespace METools.Comments
                         string text = req.Text ?? "";
                         string refElId = req.ReferencedElementId ?? "";
                         string refSummary = req.ReferencedSummary ?? "";
+                        string assignedTo = req.AssignedTo ?? "";
                         Task.Run(() =>
                         {
                             try
@@ -90,6 +91,7 @@ namespace METools.Comments
                                         Status       = CommentStatus.Open,
                                         ReferencedElementId = refElId,
                                         ReferencedSummary   = refSummary,
+                                        AssignedTo          = assignedTo,
                                     });
                                 }, out string err);
                                 if (!ok) OnError?.Invoke(err);
@@ -118,6 +120,27 @@ namespace METools.Comments
                                         c.ResolvedBy  = resolver;
                                         c.ResolvedUtc = DateTime.UtcNow;
                                     }
+                                }, out string err);
+                                if (!ok) OnError?.Invoke(err);
+                                OnLoaded?.Invoke(CommentsStorage.LoadAll(projectId));
+                            }
+                            catch (Exception ex) { OnError?.Invoke(ex.Message); }
+                        });
+                        break;
+                    }
+
+                    case CommentsAction.SetAssignedTo:
+                    {
+                        string commentId = req.CommentId;
+                        string assignedTo = req.AssignedTo ?? "";
+                        Task.Run(() =>
+                        {
+                            try
+                            {
+                                bool ok = CommentsStorage.Mutate(projectId, list =>
+                                {
+                                    var c = list.FirstOrDefault(x => x.Id == commentId);
+                                    if (c != null) c.AssignedTo = assignedTo;
                                 }, out string err);
                                 if (!ok) OnError?.Invoke(err);
                                 OnLoaded?.Invoke(CommentsStorage.LoadAll(projectId));

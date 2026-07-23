@@ -355,13 +355,17 @@ namespace METools
                         BorderThickness=""{{TemplateBinding BorderThickness}}""
                         CornerRadius=""4"">
                     <Grid>
-                        <ToggleButton Focusable=""False"" Opacity=""0""
+                        <ToggleButton x:Name=""ToggleBtn"" Focusable=""False"" Opacity=""0""
                             IsChecked=""{{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={{RelativeSource TemplatedParent}}}}""
                             HorizontalAlignment=""Stretch"" VerticalAlignment=""Stretch""/>
-                        <ContentPresenter Margin=""8,0,24,0"" IsHitTestVisible=""False""
+                        <ContentPresenter x:Name=""ContentSite"" Margin=""8,0,24,0"" IsHitTestVisible=""False""
                             VerticalAlignment=""Center""
                             Content=""{{Binding SelectionBoxItem, RelativeSource={{RelativeSource TemplatedParent}}}}""
                             ContentTemplate=""{{Binding SelectionBoxItemTemplate, RelativeSource={{RelativeSource TemplatedParent}}}}""/>
+                        <TextBox x:Name=""PART_EditableTextBox"" Margin=""8,0,24,0"" VerticalAlignment=""Center""
+                            Background=""Transparent"" BorderThickness=""0"" Foreground=""{{TemplateBinding Foreground}}""
+                            Focusable=""True"" Visibility=""Collapsed""
+                            IsReadOnly=""{{TemplateBinding IsReadOnly}}""/>
                         <Path Data=""M 0 0 L 4 4 L 8 0 Z"" Fill=""{fg}""
                               HorizontalAlignment=""Right"" VerticalAlignment=""Center""
                               Margin=""0,0,8,0"" IsHitTestVisible=""False""/>
@@ -378,6 +382,14 @@ namespace METools
                         </Popup>
                     </Grid>
                 </Border>
+                <ControlTemplate.Triggers>
+                    <Trigger Property=""IsEditable"" Value=""True"">
+                        <Setter TargetName=""ContentSite"" Property=""Visibility"" Value=""Collapsed""/>
+                        <Setter TargetName=""PART_EditableTextBox"" Property=""Visibility"" Value=""Visible""/>
+                        <Setter TargetName=""ToggleBtn"" Property=""HorizontalAlignment"" Value=""Right""/>
+                        <Setter TargetName=""ToggleBtn"" Property=""Width"" Value=""24""/>
+                    </Trigger>
+                </ControlTemplate.Triggers>
             </ControlTemplate>
         </Setter.Value>
     </Setter>

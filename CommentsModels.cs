@@ -40,6 +40,12 @@ namespace METools.Comments
         // in that case, same as Activity Log's level navigation does.
         public string ReferencedElementId { get; set; } = "";
         public string ReferencedSummary { get; set; } = ""; // e.g. "Lighting Fixtures - 18W Ceiling Lamp", shown even if the element is later deleted
+
+        // Optional: who this comment is for. Informational only -- everyone
+        // on the team still sees the comment either way, this just makes
+        // clear whose job it is. Free text (typed username), not a fixed
+        // user directory, since there isn't one to validate against.
+        public string AssignedTo { get; set; } = "";
     }
 
     // Root object of the shared JSON file -- wrapping the list (rather than
@@ -50,7 +56,7 @@ namespace METools.Comments
         public List<ProjectComment> Comments { get; set; } = new List<ProjectComment>();
     }
 
-    public enum CommentsAction { Refresh, Add, SetStatus, Delete, JumpToLevel, GoToElement }
+    public enum CommentsAction { Refresh, Add, SetStatus, Delete, JumpToLevel, GoToElement, SetAssignedTo }
 
     public class CommentsRequest
     {
@@ -62,5 +68,6 @@ namespace METools.Comments
         public CommentStatus NewStatus { get; set; }
         public string ReferencedElementId { get; set; } = "";
         public string ReferencedSummary { get; set; } = "";
+        public string AssignedTo { get; set; } = "";
     }
 }

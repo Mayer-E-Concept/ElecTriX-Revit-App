@@ -9,6 +9,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using Autodesk.Revit.UI;
 using Button   = System.Windows.Controls.Button;
+using ComboBox = System.Windows.Controls.ComboBox;
 using TextBox  = System.Windows.Controls.TextBox;
 
 namespace METools.Comments
@@ -35,6 +36,7 @@ namespace METools.Comments
         private string _pendingRefElementId = "";
         private string _pendingRefSummary = "";
         private StackPanel _refChipHost;
+        private ComboBox _assignCombo;
 
         // Settings row (kept inline in this window rather than in the shared
         // Settings window, since the shared folder + sound toggle are specific
@@ -50,7 +52,13 @@ namespace METools.Comments
             _extEvent = extEvent;
             _handler  = handler;
             _uiApp    = uiApp;
-            _handler.OnLoaded = list => Dispatcher.Invoke(() => { _all = list; RebuildList(); });
+            _handler.OnLoaded = list => Dispatcher.Invoke(() =>
+            {
+                _all = list;
+                RebuildList();
+                PopulateAssignCombo();
+                ResizeToFitContent();
+            });
             _handler.OnError  = msg  => Dispatcher.Invoke(() => { if (StatusLeft != null) StatusLeft.Text = msg; });
             _handler.OnCurrentLevel = (lvl, sb) => Dispatcher.Invoke(() =>
             {
@@ -79,7 +87,7 @@ namespace METools.Comments
 
         private void BuildUi()
         {
-            var scroller = new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+            var scroller = new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, MaxHeight = 480 };
             var root = new StackPanel { Margin = new Thickness(16) };
             scroller.Content = root;
             RootDock.Children.Add(scroller);
@@ -181,6 +189,18 @@ namespace METools.Comments
             root.Children.Add(refRow);
             RenderRefChip();
 
+            var assignRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 12) };
+            assignRow.Children.Add(new TextBlock
+            {
+                Text = "Assign to (optional):", FontSize = 11, Foreground = MeToolsTheme.BrMuted,
+                VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 0),
+            });
+            _assignCombo = MeToolsWindowBase.StyledCombo(26, 11);
+            _assignCombo.Width = 200;
+            _assignCombo.IsEditable = true;
+            assignRow.Children.Add(_assignCombo);
+            root.Children.Add(assignRow);
+
             var addBtn = MakeBtn("+ Add Comment", false, () =>
             {
                 var text = _tbNewComment.Text;
@@ -196,12 +216,14 @@ namespace METools.Comments
                     LevelName = _currentLevel, ScopeBoxName = _currentScopeBox,
                     ReferencedElementId = _pendingRefElementId,
                     ReferencedSummary   = _pendingRefSummary,
+                    AssignedTo = (_assignCombo.Text ?? "").Trim(),
                 };
                 _extEvent.Raise();
                 _tbNewComment.Text = "";
                 SetPlaceholder(_tbNewComment, "e.g. Need 4 more lamps on this level…");
                 _pendingRefElementId = "";
                 _pendingRefSummary = "";
+                _assignCombo.Text = "";
                 RenderRefChip();
             });
             addBtn.HorizontalAlignment = HorizontalAlignment.Left;
@@ -317,6 +339,37 @@ namespace METools.Comments
             }
         }
 
+        // Same reasoning as SettingsWindow.ResizeToFitActiveTab(): InitWindow's
+        // Loaded handler measures the window once and freezes its height so
+        // the resize grip doesn't fight WPF's auto-sizing. Here the trigger
+        // for needing a re-measure isn't a tab switch, it's that comments
+        // load asynchronously (OnLoaded fires after a background Task.Run) --
+        // so the freeze happens while the list is still empty, and the
+        // window never grows once the real comments arrive a moment later.
+        private void PopulateAssignCombo()
+        {
+            if (_assignCombo == null) return;
+            var typed = _assignCombo.Text;
+            var names = _all.Select(x => x.Author).Concat(_all.Select(x => x.AssignedTo))
+                .Where(n => !string.IsNullOrWhiteSpace(n))
+                .Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(n => n).ToList();
+            _assignCombo.Items.Clear();
+            foreach (var n in names) _assignCombo.Items.Add(n);
+            _assignCombo.Text = typed; // preserve whatever the user was already typing
+        }
+
+        private void ResizeToFitContent()
+        {
+            try
+            {
+                SizeToContent = SizeToContent.Height;
+                UpdateLayout();
+                Height = ActualHeight;
+                SizeToContent = SizeToContent.Manual;
+            }
+            catch { }
+        }
+
         private void RebuildList()
         {
             _rowsPanel.Children.Clear();
@@ -402,6 +455,30 @@ namespace METools.Comments
                 Margin = new Thickness(0, 6, 0, 8),
             });
 
+            if (!string.IsNullOrEmpty(c.AssignedTo))
+            {
+                string me = "";
+                try { me = _uiApp?.Application?.Username ?? ""; } catch { }
+                bool isMe = !string.IsNullOrEmpty(me) && string.Equals(me, c.AssignedTo, StringComparison.OrdinalIgnoreCase);
+
+                stack.Children.Add(new Border
+                {
+                    Background = isMe
+                        ? new SolidColorBrush(Color.FromArgb(50, MeToolsTheme.CPetrol.R, MeToolsTheme.CPetrol.G, MeToolsTheme.CPetrol.B))
+                        : MeToolsTheme.BrInfoBox,
+                    BorderBrush = isMe ? MeToolsTheme.BrPetrol : MeToolsTheme.BrBorder,
+                    BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(4),
+                    Padding = new Thickness(8, 3, 8, 3), Margin = new Thickness(0, 0, 0, 8),
+                    HorizontalAlignment = HorizontalAlignment.Left,
+                    Child = new TextBlock
+                    {
+                        Text = (isMe ? "Assigned to you — " : "Assigned to ") + c.AssignedTo,
+                        FontSize = 11, FontWeight = isMe ? FontWeights.SemiBold : FontWeights.Normal,
+                        Foreground = isMe ? MeToolsTheme.BrPetrol : MeToolsTheme.BrInfoText,
+                    },
+                });
+            }
+
             if (c.Status != CommentStatus.Open && !string.IsNullOrEmpty(c.ResolvedBy))
             {
                 stack.Children.Add(new TextBlock
@@ -413,6 +490,33 @@ namespace METools.Comments
 
             var btnRow = new StackPanel { Orientation = Orientation.Horizontal };
             stack.Children.Add(btnRow);
+
+            var assignEditRow = new StackPanel
+            {
+                Orientation = Orientation.Horizontal, Margin = new Thickness(0, 8, 0, 0),
+                Visibility = Visibility.Collapsed,
+            };
+            var assignEditBox = new TextBox
+            {
+                Width = 160, Height = 26, FontSize = 11, Text = c.AssignedTo,
+                VerticalContentAlignment = VerticalAlignment.Center,
+                Background = MeToolsTheme.BrInput, Foreground = MeToolsTheme.BrText,
+                BorderBrush = MeToolsTheme.BrBorder, BorderThickness = new Thickness(1),
+                Padding = new Thickness(6, 0, 6, 0),
+            };
+            assignEditRow.Children.Add(assignEditBox);
+            var assignSetBtn = MakeBtn("Set", false, () =>
+            {
+                _handler.Request = new CommentsRequest
+                {
+                    Action = CommentsAction.SetAssignedTo, CommentId = c.Id,
+                    AssignedTo = (assignEditBox.Text ?? "").Trim(),
+                };
+                _extEvent.Raise();
+            });
+            assignSetBtn.Margin = new Thickness(6, 0, 0, 0);
+            assignEditRow.Children.Add(assignSetBtn);
+            stack.Children.Add(assignEditRow);
 
             var goBtn = MakeBtn("Go There", true, () =>
             {
@@ -441,6 +545,14 @@ namespace METools.Comments
                 goItemBtn.ToolTip = c.ReferencedSummary;
                 btnRow.Children.Add(goItemBtn);
             }
+
+            var assignBtn = MakeBtn(string.IsNullOrEmpty(c.AssignedTo) ? "Assign" : "Change", true, () =>
+            {
+                assignEditRow.Visibility = assignEditRow.Visibility == Visibility.Visible
+                    ? Visibility.Collapsed : Visibility.Visible;
+            });
+            assignBtn.Margin = new Thickness(0, 0, 6, 0);
+            btnRow.Children.Add(assignBtn);
 
             if (c.Status != CommentStatus.Done)
             {

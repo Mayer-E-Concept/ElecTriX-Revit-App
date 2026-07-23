@@ -113,6 +113,17 @@ namespace METools.Comments
             };
             root.Children.Add(text);
 
+            if (!string.IsNullOrEmpty(_comment.AssignedTo))
+            {
+                root.Children.Add(new TextBlock
+                {
+                    Text = "Assigned to " + _comment.AssignedTo,
+                    FontSize = 11, FontWeight = FontWeights.SemiBold,
+                    Foreground = MeToolsTheme.BrPetrol,
+                    Margin = new Thickness(0, -8, 0, 14),
+                });
+            }
+
             // Hidden unless something actually throws -- if it appears, the
             // text is the real exception message, not a guess.
             _errorText = new TextBlock

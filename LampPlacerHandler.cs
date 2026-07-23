@@ -31,6 +31,7 @@ namespace METools.LampPlacer
         public Action<int>    OnPlaced  { get; set; }
         public Action<bool>   OnWaiting { get; set; }  // true=waiting for input, false=done
         public Func<double, double?> OnPromptSpacing { get; set; }  // mm in -> mm out (null = cancel)
+        public Func<int, int?> OnPromptCount { get; set; }           // suggested count in -> confirmed count out (null = cancel)
         public Func<double, double?> OnPromptWallOffset { get; set; } // mm in -> mm out (null = cancel)
         private double? _wallOffsetFt;                                // set for wall-mounted lamps off a floor reference
         public Func<string> OnPromptPreset { get; set; }              // returns preset name | "" (use current family) | null (cancel)
@@ -1161,96 +1162,72 @@ namespace METools.LampPlacer
             var spots = new List<KeyValuePair<XYZ, double>>();
             if (cfg.LineMode == LineMode.ByCount)
             {
-                // Even division: N lamps, equal end-gaps AND equal inter-lamp gaps = L/(N+1).
+                // Centered subdivision: divide the line into N equal segments and
+                // place one lamp at the center of each. This makes the inter-lamp
+                // gap L/N and the end-gap (line start/end to first/last lamp)
+                // exactly HALF the inter-lamp gap -- e.g. for N=3, lamp 2 sits
+                // exactly at the line's center; for N=4, the midpoint between
+                // lamps 2 and 3 sits exactly at the line's center. Previously
+                // this used L/(N+1) with lamps at 1..N, which made the end-gaps
+                // equal to the FULL inter-lamp gap instead of half of it.
                 int n = Math.Max(1, cfg.LineCount);
                 foreach (var chain in polylines)
                 {
                     double L = PolylineLength(chain);
-                    double d = L / (n + 1);
-                    for (int i = 1; i <= n; i++)
-                    { double tan; XYZ p = PointAtArcLength(chain, d * i, out tan);
+                    double d = L / n;
+                    for (int i = 0; i < n; i++)
+                    { double tan; XYZ p = PointAtArcLength(chain, d * (i + 0.5), out tan);
                       spots.Add(new KeyValuePair<XYZ, double>(p, tan)); }
                 }
             }
             else // BySpacing
             {
-                double wallFt = ToFeet(cfg.WallMargin);
+                // Both branches below reduce to the same centered-subdivision
+                // placement as By Count (see above) -- "spacing" here just
+                // decides what COUNT to subdivide into, rather than being an
+                // anchor point to step from. This is what removes every issue
+                // reported with the old flow: no first-lamp click to anchor
+                // from (so the first lamp is never stuck wherever you
+                // happened to click), no overshoot past the line's end
+                // (impossible by construction -- centered subdivision only
+                // ever places within [0, L]), and no second spacing prompt
+                // (the side panel's spacing value already suggests a count;
+                // only that count needs confirming, not the spacing itself).
+                double spacingFt = ToFeet(cfg.LineSpacing);
+                if (spacingFt <= 0) spacingFt = ToFeet(2000.0); // defensive fallback, shouldn't normally hit
 
                 if (polylines.Count == 1)
                 {
-                    // Single line: keep the original interactive flow (click first lamp,
-                    // confirm spacing, click extras) since there's no ambiguity about which
-                    // line the clicks apply to.
                     var path = polylines[0];
-                    XYZ firstPick;
-                    try { firstPick = uidoc.Selection.PickPoint("Click where the FIRST lamp should go on the line"); }
-                    catch (OperationCanceledException) { firstPick = null; }
-                    catch (Exception) { firstPick = null; }
+                    double L = PolylineLength(path);
+                    int suggested = Math.Max(1, (int)Math.Round(L / spacingFt));
 
-                    if (firstPick != null)
+                    int? confirmed = OnPromptCount?.Invoke(suggested);
+                    if (confirmed != null && confirmed.Value > 0)
                     {
-                        double dd;
-                        double s0 = ProjectOnPolyline(path, firstPick, out dd);
-
-                        double totalLen = PolylineLength(path);
-                        double loS = wallFt, hiS = totalLen - wallFt;
-                        if (loS > hiS) { loS = hiS = totalLen / 2.0; }
-                        if (s0 < loS) s0 = loS; else if (s0 > hiS) s0 = hiS;
-
-                        double? mm = OnPromptSpacing?.Invoke(cfg.LineSpacing);
-                        if (mm != null && mm.Value > 0)
-                        {
-                            double d = ToFeet(mm.Value);
-                            // Count = number of lamp clicks (first + extras); spacing forced to d.
-                            int count = 1;
-                            while (true)
-                            {
-                                try { uidoc.Selection.PickPoint("Click to add another lamp at this spacing - press ESC when finished"); }
-                                catch (OperationCanceledException) { break; }
-                                catch (Exception) { break; }
-                                count++;
-                            }
-                            for (int k = 0; k < count; k++)
-                            { double tan; XYZ p = PointAtArcLength(path, s0 + d * k, out tan);
-                              spots.Add(new KeyValuePair<XYZ, double>(p, tan)); }
-                        }
-                        else OnStatus?.Invoke("Cancelled - no spacing entered.");
+                        int n = confirmed.Value;
+                        double d = L / n;
+                        for (int i = 0; i < n; i++)
+                        { double tan; XYZ p = PointAtArcLength(path, d * (i + 0.5), out tan);
+                          spots.Add(new KeyValuePair<XYZ, double>(p, tan)); }
                     }
+                    else OnStatus?.Invoke("Cancelled - no count entered.");
                 }
                 else
                 {
-                    // Multiple lines (e.g. a zig-zag drawn as separate segments):
-                    // apply the same fixed spacing to EACH selected line independently,
-                    // filling from the wall margin at one end to the wall margin at the
-                    // other end. No per-line clicking needed -- avoids the old bug where
-                    // only the line nearest the first click got any lamps at all.
-                    double? mm = OnPromptSpacing?.Invoke(cfg.LineSpacing);
-                    if (mm == null || mm.Value <= 0)
+                    // Multiple lines: each gets its own count computed from ITS
+                    // OWN length so the actual spacing stays close to what was
+                    // asked for on every segment, without prompting once per
+                    // line (which would be tedious for anything beyond two or
+                    // three lines).
+                    foreach (var chain in polylines)
                     {
-                        OnStatus?.Invoke("Cancelled - no spacing entered.");
-                    }
-                    else
-                    {
-                        double d = ToFeet(mm.Value);
-                        foreach (var chain in polylines)
-                        {
-                            double totalLen = PolylineLength(chain);
-                            double loS = wallFt, hiS = totalLen - wallFt;
-                            if (loS > hiS) { loS = hiS = totalLen / 2.0; }
-
-                            if (hiS - loS < 1e-6)
-                            {
-                                // Line too short for two margins -- place a single lamp at its centre
-                                double tan; XYZ p = PointAtArcLength(chain, loS, out tan);
-                                spots.Add(new KeyValuePair<XYZ, double>(p, tan));
-                            }
-                            else
-                            {
-                                for (double s = loS; s <= hiS + 1e-6; s += d)
-                                { double tan; XYZ p = PointAtArcLength(chain, s, out tan);
-                                  spots.Add(new KeyValuePair<XYZ, double>(p, tan)); }
-                            }
-                        }
+                        double L = PolylineLength(chain);
+                        int n = Math.Max(1, (int)Math.Round(L / spacingFt));
+                        double d = L / n;
+                        for (int i = 0; i < n; i++)
+                        { double tan; XYZ p = PointAtArcLength(chain, d * (i + 0.5), out tan);
+                          spots.Add(new KeyValuePair<XYZ, double>(p, tan)); }
                     }
                 }
             }
@@ -1312,25 +1289,6 @@ namespace METools.LampPlacer
         }
 
         // -- Project a point (XY) onto a polyline; returns arc-length, sets nearest distance --
-        private double ProjectOnPolyline(List<XYZ> chain, XYZ p, out double minDist)
-        {
-            minDist = double.MaxValue; double bestS = 0, acc = 0;
-            for (int i = 0; i + 1 < chain.Count; i++)
-            {
-                XYZ a = chain[i], b = chain[i + 1];
-                double dx = b.X - a.X, dy = b.Y - a.Y;
-                double segLen2 = dx * dx + dy * dy;
-                double segLen = Math.Sqrt(segLen2);
-                double t = segLen2 > 1e-12 ? ((p.X - a.X) * dx + (p.Y - a.Y) * dy) / segLen2 : 0;
-                if (t < 0) t = 0; else if (t > 1) t = 1;
-                double px = a.X + dx * t, py = a.Y + dy * t;
-                double d = Math.Sqrt((p.X - px) * (p.X - px) + (p.Y - py) * (p.Y - py));
-                if (d < minDist) { minDist = d; bestS = acc + segLen * t; }
-                acc += segLen;
-            }
-            return bestS;
-        }
-
         // -- Point (+ tangent angle) at an arc-length along a polyline (extends past the end) --
         private XYZ PointAtArcLength(List<XYZ> chain, double s, out double tangent)
         {

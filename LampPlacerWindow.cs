@@ -64,6 +64,7 @@ namespace METools.LampPlacer
             h.OnPlaced  = n => Dispatcher.Invoke(() => { StatusLeft.Text = $"Done: {n} lamps placed."; SetWaiting(false); });
             h.OnWaiting = w => Dispatcher.Invoke(() => SetWaiting(w));
             h.OnPromptSpacing    = def => ShowSpacingDialog(def);
+            h.OnPromptCount      = def => ShowCountDialog(def);
             h.OnPromptWallOffset = def => ShowOffsetDialog(def);
             h.OnPromptPreset     = ()  => ShowPresetChooser();
 
@@ -97,9 +98,20 @@ namespace METools.LampPlacer
 
             // FAMILY
             _body.Children.Add(Sec(S.Get("lamp.lighting_family")));
-            _famCmb = METools.MeToolsWindowBase.StyledCombo(28, 12); _famCmb.Margin = new Thickness(0, 0, 0, 6);
+            _famCmb = METools.MeToolsWindowBase.StyledCombo(28, 12);
+            _famCmb.Margin = new Thickness(0, 0, 0, 6);
+            _famCmb.IsEditable = true;
+            _famCmb.IsTextSearchEnabled = false;
             RebuildFamilyCombo();   // mode-aware + grouped (Lighting / Fire Alarm), wires FamChanged
+            _famCmb.AddHandler(System.Windows.Controls.Primitives.TextBoxBase.TextChangedEvent,
+                new TextChangedEventHandler(FamilySearchTextChanged));
+            _famCmb.DropDownClosed += (s, e) =>
+            {
+                RebuildFamilyCombo(""); // restore the full grouped list for next time
+                SyncFamilyComboText();
+            };
             _body.Children.Add(_famCmb);
+            SyncFamilyComboText();
 
             _typCmb = METools.MeToolsWindowBase.StyledCombo(28, 12); _typCmb.Margin = new Thickness(0, 0, 0, 14);
             _body.Children.Add(_typCmb);
@@ -331,7 +343,11 @@ namespace METools.LampPlacer
 
         // Rebuilds the family dropdown: grouped into Lighting / Fire Alarm headers, and Fire Alarm
         // families are listed only in Area-based mode. Preserves the current selection when possible.
-        void RebuildFamilyCombo()
+        // filter (optional): case-insensitive substring match against family name, from the search box.
+        // preserveText: true while the user is actively typing to search -- must
+        // NOT touch SelectedItem/SelectedIndex in that case (editable combo
+        // resyncs Text to match on any such assignment, overwriting what they typed).
+        void RebuildFamilyCombo(string filter = "", bool preserveText = false)
         {
             if (_famCmb == null) return;
             _famCmb.SelectionChanged -= FamChanged;
@@ -339,6 +355,7 @@ namespace METools.LampPlacer
             string current = _cfg.FamilyName;
             bool   area    = _cfg.Distribution == DistributionMode.AreaBased;
             bool   selValid = false;
+            bool   searching = !string.IsNullOrWhiteSpace(filter);
 
             _famCmb.Items.Clear();
             _famCmb.Items.Add(new ComboBoxItem { Content = S.Get("lamp.select_family_dropdown"), Tag = "" });
@@ -346,6 +363,7 @@ namespace METools.LampPlacer
             void AddGroup(string header, System.Collections.Generic.IEnumerable<string> fams)
             {
                 var list = fams.ToList();
+                if (searching) list = list.Where(f => f.IndexOf(filter, System.StringComparison.OrdinalIgnoreCase) >= 0).ToList();
                 if (list.Count == 0) return;
                 _famCmb.Items.Add(new ComboBoxItem
                 {
@@ -370,12 +388,17 @@ namespace METools.LampPlacer
                                             .Select(f => f.FamilyName).Distinct()
                                             .OrderBy(x => x, System.StringComparer.OrdinalIgnoreCase));
 
-            if (selValid)
+            if (preserveText)
+            {
+                // Mid-search: only the candidate list changes, selection state
+                // (and therefore the editable Text) stays exactly as typed.
+            }
+            else if (selValid)
             {
                 foreach (var it in _famCmb.Items)
                     if (it is ComboBoxItem ci && (ci.Tag as string) == current) { _famCmb.SelectedItem = ci; break; }
             }
-            else
+            else if (!searching)
             {
                 _famCmb.SelectedIndex = 0;
                 _cfg.FamilyName = "";
@@ -388,8 +411,35 @@ namespace METools.LampPlacer
                 }
                 UpdatePlacementDetection();
             }
+            else
+            {
+                // Searching and the current selection just isn't in the
+                // filtered results right now -- leave _cfg alone, just show
+                // the placeholder row selected until they pick something or
+                // clear the search.
+                _famCmb.SelectedIndex = 0;
+            }
 
             _famCmb.SelectionChanged += FamChanged;
+        }
+
+        // Forces the editable text to match the real current selection -- used
+        // after the dropdown closes without a new pick being made, so a
+        // half-typed search term never lingers as if it were the actual
+        // selection.
+        bool _suppressFamilyTextSync;
+        void SyncFamilyComboText()
+        {
+            _suppressFamilyTextSync = true;
+            try { _famCmb.Text = string.IsNullOrEmpty(_cfg.FamilyName) ? S.Get("lamp.select_family_dropdown") : _cfg.FamilyName; }
+            finally { _suppressFamilyTextSync = false; }
+        }
+
+        void FamilySearchTextChanged(object sender, TextChangedEventArgs e)
+        {
+            if (_suppressFamilyTextSync) return;
+            if (!_famCmb.IsDropDownOpen) _famCmb.IsDropDownOpen = true;
+            RebuildFamilyCombo(_famCmb.Text ?? "", preserveText: true);
         }
 
         void FamChanged(object s, SelectionChangedEventArgs e)
@@ -796,6 +846,58 @@ namespace METools.LampPlacer
         }
 
         // Small themed modal asking for the lamp spacing (mm). Returns null if cancelled.
+        // Prompt for how many lamps to place on a line, pre-filled with a
+        // suggestion computed from the line's actual length and the spacing
+        // entered in the side panel -- replaces the old flow that asked for
+        // spacing a second time after the line was already selected.
+        public int? ShowCountDialog(int defaultCount)
+        {
+            int? result = null;
+            var dlg = new Window
+            {
+                Title = "How many lamps?",
+                Width = 300, SizeToContent = SizeToContent.Height,
+                ResizeMode = ResizeMode.NoResize, WindowStyle = WindowStyle.ToolWindow,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                Background = MeToolsTheme.BrSurface, Owner = this
+            };
+            var sp = new StackPanel { Margin = new Thickness(16) };
+            sp.Children.Add(new TextBlock
+            {
+                Text = "Number of lamps on this line:",
+                Foreground = MeToolsTheme.BrText, Margin = new Thickness(0, 0, 0, 4),
+            });
+            sp.Children.Add(new TextBlock
+            {
+                Text = "Suggested from the line's length and your spacing setting -- change it if you want a different count.",
+                Foreground = MeToolsTheme.BrMuted, FontSize = 10.5, TextWrapping = TextWrapping.Wrap,
+                Margin = new Thickness(0, 0, 0, 8),
+            });
+            var tb = Num(Math.Max(1, defaultCount).ToString()); tb.Width = 120;
+            sp.Children.Add(tb);
+            var row = new StackPanel { Orientation = Orientation.Horizontal,
+                HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 14, 0, 0) };
+            var ok = new Button { Content = "OK", Width = 72, Margin = new Thickness(0, 0, 6, 0),
+                IsDefault = true, Background = MeToolsTheme.BrPetrol, Foreground = Brushes.White,
+                BorderBrush = MeToolsTheme.BrPetrol, Padding = new Thickness(0, 4, 0, 4),
+                Cursor = Cursors.Hand, Template = RoundedBtnTemplate() };
+            var cancel = new Button { Content = "Cancel", Width = 72, IsCancel = true,
+                Background = MeToolsTheme.BrInput, Foreground = MeToolsTheme.BrText,
+                BorderBrush = MeToolsTheme.BrBorder, Padding = new Thickness(0, 4, 0, 4),
+                Cursor = Cursors.Hand, Template = RoundedBtnTemplate() };
+            ok.Click += (s, e) =>
+            {
+                if (int.TryParse(tb.Text, out int v) && v > 0) { result = v; dlg.DialogResult = true; }
+                else { tb.Focus(); tb.SelectAll(); }
+            };
+            row.Children.Add(ok); row.Children.Add(cancel);
+            sp.Children.Add(row);
+            dlg.Content = sp;
+            dlg.Loaded += (s, e) => { tb.Focus(); tb.SelectAll(); };
+            dlg.ShowDialog();
+            return result;
+        }
+
         public double? ShowSpacingDialog(double defaultMm)
         {
             double? result = null;
