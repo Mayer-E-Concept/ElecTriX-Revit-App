@@ -701,6 +701,7 @@ namespace METools
                 {
                     _heightsHost.Children.Add(InfoBox("No families with a height (Niveau) parameter were found."));
                     _heightsLoaded = true;
+                    ResizeToFitActiveTab();
                     return;
                 }
 
@@ -722,6 +723,7 @@ namespace METools
                     _heightsHost.Children.Add(BuildHeightRow(en, overrides));
                 }
                 _heightsLoaded = true;
+                ResizeToFitActiveTab();
             }), System.Windows.Threading.DispatcherPriority.Background);
         }
 

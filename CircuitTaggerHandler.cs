@@ -145,7 +145,7 @@ namespace METools.FamilyPlacer
             FamilySymbol tagSymbol = FindTagSymbol(doc);
             bool canTag = tagSymbol != null;
             if (!canTag)
-                Report("Tag family 'ME-Tools_CircuitTag' not loaded -- params written without tags.");
+                Report("Tag family 'ME-Tools_CircuitTag' not loaded -- params written without tags. Run Project Health Check to fix this.");
 
             // Build full label: FI + Stromkreis [+ "_" + SubIndex]
             string baseLabel = BuildCircuitLabel(req.FI, req.Stromkreis);
@@ -390,9 +390,9 @@ namespace METools.FamilyPlacer
 
             var summary = $"Done. {written} elements updated";
             if (tagged > 0) summary += $", {tagged} tags placed";
-            if (!canTag)    summary += $" -- tag family '{TAG_FAMILY_NAME}' not loaded, no tags placed";
+            if (!canTag)    summary += $" -- tag family '{TAG_FAMILY_NAME}' not loaded, no tags placed. Run Project Health Check to fix this.";
             if (missingParams.Count > 0)
-                summary += $" -- NOT bound to this category, values not written: {string.Join(", ", missingParams)}";
+                summary += $" -- NOT bound to this category, values not written: {string.Join(", ", missingParams)}. If tags are showing '?', run Project Health Check to fix this.";
             if (errors > 0) summary += $", {errors} errors: " + errorMsgs.FirstOrDefault();
             Report(summary);
             OnDone?.Invoke();

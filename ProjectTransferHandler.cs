@@ -232,6 +232,15 @@ namespace METools.ProjectTransfer
                 => DuplicateTypeAction.UseDestinationTypes;
         }
 
+        // Removes ids matching the conflict predicate from the list in place,
+        // returning how many were removed.
+        private static int FilterOutConflicts(Document sourceDoc, List<ElementId> ids, Func<ElementId, bool> isConflict)
+        {
+            var toRemove = ids.Where(isConflict).ToList();
+            foreach (var id in toRemove) ids.Remove(id);
+            return toRemove.Count;
+        }
+
         private void Copy(UIApplication app)
         {
             var sourceDoc = app.ActiveUIDocument?.Document;
@@ -266,7 +275,39 @@ namespace METools.ProjectTransfer
                 else if (el is View)                buckets[1].Ids.Add(id);
             }
 
+            // Name-collision check, BEFORE copying anything: Revit's
+            // IDuplicateTypeNamesHandler only offers two choices when a copy
+            // would collide with an existing same-named element --
+            // UseDestinationTypes (silently keep whatever's already in the
+            // target, discard the source's version entirely) or Abort (cancel
+            // everything). There's no "bring the source version in as a
+            // rename" option here. This project's handler was unconditionally
+            // returning UseDestinationTypes, which means a name collision
+            // silently produced a "successful" copy that actually kept the
+            // TARGET's existing (possibly blank/stand-in) content instead of
+            // the source's -- exactly the "copied nicely but empty inside"
+            // symptom, and especially likely if source and target both come
+            // from the same shared company template with the same standard
+            // filter/schedule names already present in both. Skipping
+            // conflicts up front and reporting them honestly means the
+            // person sees "N skipped, already exist in target" instead of a
+            // false "all copied".
+            var targetFilterNames   = new FilteredElementCollector(targetDoc).OfClass(typeof(ParameterFilterElement)).ToElements().Select(e => e.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var targetScheduleNames = new FilteredElementCollector(targetDoc).OfClass(typeof(ViewSchedule)).ToElements().Select(e => e.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var targetSheetNumbers  = new FilteredElementCollector(targetDoc).OfClass(typeof(ViewSheet)).Cast<ViewSheet>().Select(v => v.SheetNumber).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var targetViewNames     = new FilteredElementCollector(targetDoc).OfClass(typeof(View)).ToElements().Select(e => e.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            int skippedFilters = FilterOutConflicts(sourceDoc, buckets[0].Ids, id => targetFilterNames.Contains(sourceDoc.GetElement(id).Name));
+            int skippedViews   = FilterOutConflicts(sourceDoc, buckets[1].Ids, id => targetViewNames.Contains(sourceDoc.GetElement(id).Name));
+            int skippedSheets  = FilterOutConflicts(sourceDoc, buckets[2].Ids, id => targetSheetNumbers.Contains((sourceDoc.GetElement(id) as ViewSheet)?.SheetNumber ?? ""));
+            int skippedSchedules = FilterOutConflicts(sourceDoc, buckets[3].Ids, id => targetScheduleNames.Contains(sourceDoc.GetElement(id).Name));
+
             var result = new TransferResult { Requested = ids.Count };
+            void ReportSkip(string label, int n) { if (n > 0) result.Lines.Add($"{label}: {Plural(n, "item", "items")} skipped -- already exist in target by name"); }
+            ReportSkip("Filters", skippedFilters);
+            ReportSkip("Views", skippedViews);
+            ReportSkip("Sheets", skippedSheets);
+            ReportSkip("Schedules", skippedSchedules);
 
             using (var tx = new Transaction(targetDoc, "ME-Tools: Project Transfer"))
             {
