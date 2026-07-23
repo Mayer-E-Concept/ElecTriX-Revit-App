@@ -716,6 +716,7 @@ namespace METools.FamilyPlacer
                 Content         = label,
                 Height          = 32,
                 MinWidth        = 120,
+                Padding         = new Thickness(12, 0, 12, 0),
                 FontSize        = 12,
                 Background      = active ? MeToolsTheme.BrActiveBg : MeToolsTheme.BrBtnBg,
                 BorderBrush     = active ? MeToolsTheme.BrPetrol    : MeToolsTheme.BrBorder,
@@ -769,6 +770,7 @@ namespace METools.FamilyPlacer
                 Content         = label,
                 Height          = 36,
                 FontSize        = 13,
+                Padding         = new Thickness(16, 0, 16, 0),
                 FontWeight      = FontWeights.SemiBold,
                 Background      = isOutline ? MeToolsTheme.BrBtnBg : MeToolsTheme.BrPetrol,
                 BorderBrush     = MeToolsTheme.BrPetrol,
@@ -776,6 +778,7 @@ namespace METools.FamilyPlacer
                 Foreground      = isOutline ? (MeToolsTheme.Current == MeTheme.Dark ? Brushes.White : MeToolsTheme.BrPetrol) : Brushes.White,
                 Cursor          = Cursors.Hand,
             };
+            btn.Template   = RoundedBtnTemplate();
             btn.Click      += (s, e) => onClick();
             btn.MouseEnter += (s, e) => btn.Background = isOutline
                 ? MeToolsTheme.BrActiveBg

@@ -24,6 +24,11 @@ namespace METools
             _evt     = evt;
             _handler = handler;
             _handler.OnResult = r => Dispatcher.Invoke(() => Render(r));
+            _handler.OnFixMessages = msgs => Dispatcher.Invoke(() =>
+            {
+                if (msgs != null && msgs.Count > 0)
+                    StatusLeft.Text = string.Join("  |  ", msgs);
+            });
 
             InitWindow("ElectriX -- Project Health Check", 520);
             Build();
@@ -43,11 +48,20 @@ namespace METools
             };
             DockPanel.SetDock(footer, Dock.Bottom);
             var row = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
+            var fixBtn = FooterBtn("Fix All", primary: false, onClick: () =>
+            {
+                StatusLeft.Text = "Fixing...";
+                _handler.DoFix = true;
+                _evt.Raise();
+            });
+            fixBtn.Margin = new Thickness(0, 0, 8, 0);
+            fixBtn.ToolTip = "Loads the ME-Tools_CircuitTag family and binds the 6 shared parameters, from the files bundled with the installer.";
             var refreshBtn = FooterBtn("Refresh", primary: true, onClick: () =>
             {
                 StatusLeft.Text = "Checking...";
                 _evt.Raise();
             });
+            row.Children.Add(fixBtn);
             row.Children.Add(refreshBtn);
             footer.Child = row;
             RootDock.Children.Add(footer);

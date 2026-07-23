@@ -140,6 +140,7 @@ namespace METools
             {
                 Content         = label,
                 FontSize        = 12,
+                Padding         = new Thickness(14, 0, 14, 0),
                 BorderThickness = new Thickness(0),
                 Background      = Brushes.Transparent,
                 Foreground      = new SolidColorBrush(Color.FromArgb(160, 255, 255, 255)),

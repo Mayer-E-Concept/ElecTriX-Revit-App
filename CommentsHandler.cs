@@ -16,6 +16,7 @@ namespace METools.Comments
         public Action<List<ProjectComment>> OnLoaded;
         public Action<string> OnError;
         public Action<string, string> OnCurrentLevel; // (levelName, scopeBoxName); "" if none
+        public Action<bool, string> OnGoToElementResult; // (success, message-if-any)
 
         // Execute runs on Revit's own UI thread (required for any Revit API
         // access). The project-ID lookup and level/username reads below are
@@ -71,6 +72,8 @@ namespace METools.Comments
                         // nothing upstream currently needs one.
                         string scopeBoxName = CurrentScopeBoxName(uidoc) ?? "";
                         string text = req.Text ?? "";
+                        string refElId = req.ReferencedElementId ?? "";
+                        string refSummary = req.ReferencedSummary ?? "";
                         Task.Run(() =>
                         {
                             try
@@ -85,6 +88,8 @@ namespace METools.Comments
                                         Text         = text,
                                         CreatedUtc   = DateTime.UtcNow,
                                         Status       = CommentStatus.Open,
+                                        ReferencedElementId = refElId,
+                                        ReferencedSummary   = refSummary,
                                     });
                                 }, out string err);
                                 if (!ok) OnError?.Invoke(err);
@@ -145,6 +150,10 @@ namespace METools.Comments
                         // Genuinely Revit-API-only (switching the active view),
                         // no network I/O involved, so this stays synchronous.
                         JumpTo(uidoc, req.LevelName, req.ScopeBoxName);
+                        break;
+
+                    case CommentsAction.GoToElement:
+                        GoToElementInternal(uidoc, req.ReferencedElementId);
                         break;
                 }
             }
@@ -218,6 +227,33 @@ namespace METools.Comments
             catch { }
         }
 
+        // Selects and zooms to a specific element via UIDocument.ShowElements --
+        // the standard Revit API method for exactly this ("take me to this
+        // element"), which picks an appropriate view and frames the element
+        // automatically. Degrades gracefully if the element has since been
+        // deleted, same philosophy as Activity Log's level navigation.
+        private void GoToElementInternal(UIDocument uidoc, string elementIdStr)
+        {
+            if (uidoc == null) { OnGoToElementResult?.Invoke(false, "No active document."); return; }
+            if (string.IsNullOrWhiteSpace(elementIdStr) || !int.TryParse(elementIdStr, out int idInt))
+            { OnGoToElementResult?.Invoke(false, "No element recorded for this comment."); return; }
+
+            try
+            {
+                var doc = uidoc.Document;
+                var elementId = new ElementId(idInt);
+                var el = doc.GetElement(elementId);
+                if (el == null)
+                { OnGoToElementResult?.Invoke(false, "That element no longer exists in this project."); return; }
+
+                var ids = new List<ElementId> { elementId };
+                uidoc.ShowElements(ids);
+                uidoc.Selection.SetElementIds(ids);
+                OnGoToElementResult?.Invoke(true, null);
+            }
+            catch (Exception ex) { OnGoToElementResult?.Invoke(false, ex.Message); }
+        }
+
         public string GetName() => "ME-Tools Comments";
 
         // ── Static convenience API for the popup ───────────────────────────
@@ -256,6 +292,22 @@ namespace METools.Comments
                 Action = CommentsAction.JumpToLevel,
                 LevelName = levelName,
                 ScopeBoxName = scopeBoxName,
+            };
+            _quickEvent.Raise();
+        }
+
+        public static void GoToElement(string elementId, Action<bool, string> onResult = null)
+        {
+            if (_quickEvent == null)
+            {
+                _quickHandler = new CommentsHandler();
+                _quickEvent = ExternalEvent.Create(_quickHandler);
+            }
+            if (onResult != null) _quickHandler.OnGoToElementResult = onResult;
+            _quickHandler.Request = new CommentsRequest
+            {
+                Action = CommentsAction.GoToElement,
+                ReferencedElementId = elementId,
             };
             _quickEvent.Raise();
         }

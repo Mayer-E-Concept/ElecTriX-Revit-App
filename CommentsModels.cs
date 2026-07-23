@@ -32,6 +32,14 @@ namespace METools.Comments
         public CommentStatus Status { get; set; } = CommentStatus.Open;
         public string ResolvedBy { get; set; } = "";
         public DateTime? ResolvedUtc { get; set; }
+
+        // Optional: a specific element this comment points at (e.g. "fix
+        // these lamps" on a crowded plan). Unlike LevelName/ScopeBoxName,
+        // this genuinely can't survive the element being deleted -- Go To
+        // Item degrades to a clear "that element no longer exists" message
+        // in that case, same as Activity Log's level navigation does.
+        public string ReferencedElementId { get; set; } = "";
+        public string ReferencedSummary { get; set; } = ""; // e.g. "Lighting Fixtures - 18W Ceiling Lamp", shown even if the element is later deleted
     }
 
     // Root object of the shared JSON file -- wrapping the list (rather than
@@ -42,7 +50,7 @@ namespace METools.Comments
         public List<ProjectComment> Comments { get; set; } = new List<ProjectComment>();
     }
 
-    public enum CommentsAction { Refresh, Add, SetStatus, Delete, JumpToLevel }
+    public enum CommentsAction { Refresh, Add, SetStatus, Delete, JumpToLevel, GoToElement }
 
     public class CommentsRequest
     {
@@ -52,5 +60,7 @@ namespace METools.Comments
         public string Text { get; set; } = "";
         public string CommentId { get; set; } = "";
         public CommentStatus NewStatus { get; set; }
+        public string ReferencedElementId { get; set; } = "";
+        public string ReferencedSummary { get; set; } = "";
     }
 }

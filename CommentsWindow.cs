@@ -17,6 +17,7 @@ namespace METools.Comments
     {
         private readonly ExternalEvent   _extEvent;
         private readonly CommentsHandler _handler;
+        private readonly Autodesk.Revit.UI.UIApplication _uiApp;
 
         private List<ProjectComment> _all = new List<ProjectComment>();
         private string _currentLevel = "";
@@ -29,6 +30,12 @@ namespace METools.Comments
         private StackPanel _rowsPanel;
         private TextBlock  _countLabel;
 
+        // Pending "reference an item" state for the comment currently being
+        // composed -- cleared after the comment is actually added.
+        private string _pendingRefElementId = "";
+        private string _pendingRefSummary = "";
+        private StackPanel _refChipHost;
+
         // Settings row (kept inline in this window rather than in the shared
         // Settings window, since the shared folder + sound toggle are specific
         // to this one feature).
@@ -38,10 +45,11 @@ namespace METools.Comments
 
         protected override string AppKey => "Comments";
 
-        public CommentsWindow(ExternalEvent extEvent, CommentsHandler handler)
+        public CommentsWindow(ExternalEvent extEvent, CommentsHandler handler, Autodesk.Revit.UI.UIApplication uiApp)
         {
             _extEvent = extEvent;
             _handler  = handler;
+            _uiApp    = uiApp;
             _handler.OnLoaded = list => Dispatcher.Invoke(() => { _all = list; RebuildList(); });
             _handler.OnError  = msg  => Dispatcher.Invoke(() => { if (StatusLeft != null) StatusLeft.Text = msg; });
             _handler.OnCurrentLevel = (lvl, sb) => Dispatcher.Invoke(() =>
@@ -55,6 +63,11 @@ namespace METools.Comments
                         ? "Current level: (open a floor plan view to tag a comment to a level)"
                         : $"Current level: {combined}";
                 }
+            });
+            _handler.OnGoToElementResult = (success, msg) => Dispatcher.Invoke(() =>
+            {
+                if (StatusLeft != null)
+                    StatusLeft.Text = success ? "Switched to and selected that item." : ("Couldn't go there: " + msg);
             });
 
             _soundOn = CommentsStorage.GetSoundEnabled();
@@ -160,6 +173,14 @@ namespace METools.Comments
             SetPlaceholder(_tbNewComment, "e.g. Need 4 more lamps on this level…");
             root.Children.Add(_tbNewComment);
 
+            var refRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 8) };
+            var refBtn = MakeBtn("+ Reference Item", true, OnReferenceItemClicked);
+            refRow.Children.Add(refBtn);
+            _refChipHost = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(8, 0, 0, 0) };
+            refRow.Children.Add(_refChipHost);
+            root.Children.Add(refRow);
+            RenderRefChip();
+
             var addBtn = MakeBtn("+ Add Comment", false, () =>
             {
                 var text = _tbNewComment.Text;
@@ -173,10 +194,15 @@ namespace METools.Comments
                 {
                     Action = CommentsAction.Add, Text = text,
                     LevelName = _currentLevel, ScopeBoxName = _currentScopeBox,
+                    ReferencedElementId = _pendingRefElementId,
+                    ReferencedSummary   = _pendingRefSummary,
                 };
                 _extEvent.Raise();
                 _tbNewComment.Text = "";
                 SetPlaceholder(_tbNewComment, "e.g. Need 4 more lamps on this level…");
+                _pendingRefElementId = "";
+                _pendingRefSummary = "";
+                RenderRefChip();
             });
             addBtn.HorizontalAlignment = HorizontalAlignment.Left;
             addBtn.Margin = new Thickness(0, 0, 0, 18);
@@ -400,6 +426,22 @@ namespace METools.Comments
             goBtn.Margin = new Thickness(0, 0, 6, 0);
             btnRow.Children.Add(goBtn);
 
+            if (!string.IsNullOrEmpty(c.ReferencedElementId))
+            {
+                var goItemBtn = MakeBtn("Go to Item", true, () =>
+                {
+                    _handler.Request = new CommentsRequest
+                    {
+                        Action = CommentsAction.GoToElement,
+                        ReferencedElementId = c.ReferencedElementId,
+                    };
+                    _extEvent.Raise();
+                });
+                goItemBtn.Margin = new Thickness(0, 0, 6, 0);
+                goItemBtn.ToolTip = c.ReferencedSummary;
+                btnRow.Children.Add(goItemBtn);
+            }
+
             if (c.Status != CommentStatus.Done)
             {
                 var doneBtn = MakeBtn("Mark Done", false, () => SetStatus(c.Id, CommentStatus.Done));
@@ -453,6 +495,82 @@ namespace METools.Comments
                 case CommentStatus.Ignored: return MeToolsTheme.BrSecText;
                 default:                    return MeToolsTheme.BrAccent;
             }
+        }
+
+        // Same Hide-window / PickObject / Show-window pattern already
+        // established in CircuitTaggerWindow.cs's OnSelectClicked -- works
+        // because this window is modeless and Revit's API allows a direct
+        // synchronous pick call from here, no ExternalEvent round-trip needed
+        // just to capture a selection.
+        private void OnReferenceItemClicked()
+        {
+            Hide();
+            try
+            {
+                var uidoc = _uiApp?.ActiveUIDocument;
+                if (uidoc == null) return;
+                var r = uidoc.Selection.PickObject(Autodesk.Revit.UI.Selection.ObjectType.Element,
+                    "Click the element to reference, then Esc to cancel");
+                var doc = uidoc.Document;
+                var el = doc.GetElement(r.ElementId);
+                if (el != null)
+                {
+                    _pendingRefElementId = r.ElementId.IntegerValue.ToString();
+
+                    string family = "", typeName = "";
+                    if (el is Autodesk.Revit.DB.FamilyInstance fi)
+                    {
+                        try { family = fi.Symbol?.Family?.Name ?? ""; } catch { }
+                        try { typeName = fi.Symbol?.Name ?? ""; } catch { }
+                    }
+                    else
+                    {
+                        try { typeName = doc.GetElement(el.GetTypeId())?.Name ?? ""; } catch { }
+                    }
+                    string cat = el.Category?.Name ?? "Element";
+                    var parts = new List<string> { cat };
+                    if (!string.IsNullOrEmpty(family)) parts.Add(family);
+                    if (!string.IsNullOrEmpty(typeName)) parts.Add(typeName);
+                    _pendingRefSummary = string.Join(" - ", parts);
+                }
+            }
+            catch (Autodesk.Revit.Exceptions.OperationCanceledException) { /* Esc pressed -- fine, nothing referenced */ }
+            catch { }
+            finally
+            {
+                Show();
+                RenderRefChip();
+            }
+        }
+
+        private void RenderRefChip()
+        {
+            if (_refChipHost == null) return;
+            _refChipHost.Children.Clear();
+            if (string.IsNullOrEmpty(_pendingRefElementId)) return;
+
+            var chip = new Border
+            {
+                Background = MeToolsTheme.BrInfoBox, CornerRadius = new CornerRadius(10),
+                Padding = new Thickness(8, 3, 4, 3), VerticalAlignment = VerticalAlignment.Center,
+            };
+            var sp = new StackPanel { Orientation = Orientation.Horizontal };
+            sp.Children.Add(new TextBlock
+            {
+                Text = _pendingRefSummary, FontSize = 10.5, Foreground = MeToolsTheme.BrInfoText,
+                VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0),
+                MaxWidth = 260, TextTrimming = TextTrimming.CharacterEllipsis,
+            });
+            var xBtn = new Button
+            {
+                Content = "\u00D7", FontSize = 12, Width = 18, Height = 18, Padding = new Thickness(0),
+                Background = Brushes.Transparent, BorderThickness = new Thickness(0),
+                Foreground = MeToolsTheme.BrMuted, Cursor = Cursors.Hand,
+            };
+            xBtn.Click += (s, e) => { _pendingRefElementId = ""; _pendingRefSummary = ""; RenderRefChip(); };
+            sp.Children.Add(xBtn);
+            chip.Child = sp;
+            _refChipHost.Children.Add(chip);
         }
 
         private Button MakeBtn(string label, bool isOutline, Action onClick)

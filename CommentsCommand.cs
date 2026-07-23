@@ -30,7 +30,7 @@ namespace METools.Comments
             var handler  = new CommentsHandler();
             var extEvent = ExternalEvent.Create(handler);
 
-            _window = new CommentsWindow(extEvent, handler);
+            _window = new CommentsWindow(extEvent, handler, uiApp);
             _window.Closed += (s, e) => _window = null;
             _window.Show();
 

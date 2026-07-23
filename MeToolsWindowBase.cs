@@ -479,6 +479,7 @@ namespace METools
             var b = new Button
             {
                 Content = label, Height = 30, MinWidth = 80, FontSize = 12,
+                Padding = new Thickness(14, 0, 14, 0),
                 Background  = active ? MeToolsTheme.BrActiveBg : MeToolsTheme.BrBtnBg,
                 BorderBrush = active ? MeToolsTheme.BrPetrol    : MeToolsTheme.BrBtnBorder,
                 BorderThickness = new Thickness(1),
@@ -503,6 +504,15 @@ namespace METools
             var cp = new System.Windows.FrameworkElementFactory(typeof(ContentPresenter));
             cp.SetValue(ContentPresenter.HorizontalAlignmentProperty, HorizontalAlignment.Center);
             cp.SetValue(ContentPresenter.VerticalAlignmentProperty, VerticalAlignment.Center);
+            // This was missing entirely -- without it, every button's own
+            // Padding setting (there are over a hundred across the suite)
+            // was silently ignored, since nothing ever told this template's
+            // ContentPresenter to respect it. That's the actual root cause
+            // of "text touching the edges" -- not a per-button styling
+            // mistake, a single missing binding in the one shared template
+            // almost every button in ME-Tools uses.
+            cp.SetBinding(ContentPresenter.MarginProperty, new System.Windows.Data.Binding("Padding")
+                { RelativeSource = new System.Windows.Data.RelativeSource(System.Windows.Data.RelativeSourceMode.TemplatedParent) });
             f.AppendChild(cp);
             return new System.Windows.Controls.ControlTemplate(typeof(Button)) { VisualTree = f };
         }
@@ -526,6 +536,7 @@ namespace METools
             var b = new Button
             {
                 Content = label, Height = 36, FontSize = 13, FontWeight = FontWeights.SemiBold,
+                Padding = new Thickness(16, 0, 16, 0),
                 Background = bgNorm, BorderBrush = MeToolsTheme.BrPetrol,
                 BorderThickness = new Thickness(1.5), Foreground = fg, Cursor = Cursors.Hand,
             };

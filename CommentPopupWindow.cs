@@ -133,6 +133,18 @@ namespace METools.Comments
             goBtn.Margin = new Thickness(0, 0, 8, 0);
             btnRow.Children.Add(goBtn);
 
+            if (!string.IsNullOrEmpty(_comment.ReferencedElementId))
+            {
+                var goItemBtn = MakeBtn("Go to Item", isOutline: true, () =>
+                {
+                    CommentsHandler.GoToElement(_comment.ReferencedElementId);
+                    Close();
+                });
+                goItemBtn.Margin = new Thickness(0, 0, 8, 0);
+                goItemBtn.ToolTip = _comment.ReferencedSummary;
+                btnRow.Children.Add(goItemBtn);
+            }
+
             var ignoreBtn = MakeBtn("Ignore", isOutline: true, () =>
             {
                 CommentsHandler.MarkStatus(_comment.Id, CommentStatus.Ignored);
