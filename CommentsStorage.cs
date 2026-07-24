@@ -93,30 +93,61 @@ namespace METools.Comments
             public bool SoundEnabled { get; set; } = true;
         }
 
+        // In-memory cache of this small per-machine file, validated against
+        // disk via a cheap timestamp check rather than a full re-read+parse
+        // every time. This matters because GetSharedFolder() is called from
+        // ActivityLogWatcher on EVERY DocumentChanged event -- i.e. every
+        // transaction anyone commits on a shared central model, not just
+        // electrical edits -- so re-parsing JSON off disk that often was
+        // pure overhead the vast majority of the time, since this setting
+        // itself changes maybe once ever per machine. The timestamp check
+        // (rather than caching blindly forever) still picks up a change made
+        // by another process, or by hand-editing the file, without needing
+        // a restart.
+        private static LocalSettings _cache;
+        private static DateTime _cacheWriteTimeUtc;
+        private static readonly object _cacheLock = new object();
+
         private static LocalSettings LoadLocalSettings()
         {
-            try
+            lock (_cacheLock)
             {
-                if (File.Exists(SettingsPath))
+                try
                 {
+                    if (!File.Exists(SettingsPath))
+                        return _cache ?? (_cache = new LocalSettings());
+
+                    var writeTime = File.GetLastWriteTimeUtc(SettingsPath);
+                    if (_cache != null && writeTime == _cacheWriteTimeUtc)
+                        return _cache; // unchanged since last read -- skip the re-parse
+
                     var json = File.ReadAllText(SettingsPath);
-                    var s = JsonSerializer.Deserialize<LocalSettings>(json);
-                    if (s != null) return s;
+                    var s = JsonSerializer.Deserialize<LocalSettings>(json) ?? new LocalSettings();
+                    _cache = s;
+                    _cacheWriteTimeUtc = writeTime;
+                    return _cache;
+                }
+                catch
+                {
+                    return _cache ?? new LocalSettings();
                 }
             }
-            catch { }
-            return new LocalSettings();
         }
 
         private static void SaveLocalSettings(LocalSettings s)
         {
-            try
+            lock (_cacheLock)
             {
-                var dir = Path.GetDirectoryName(SettingsPath);
-                if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
-                File.WriteAllText(SettingsPath, JsonSerializer.Serialize(s, new JsonSerializerOptions { WriteIndented = true }));
+                try
+                {
+                    var dir = Path.GetDirectoryName(SettingsPath);
+                    if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+                    File.WriteAllText(SettingsPath, JsonSerializer.Serialize(s, new JsonSerializerOptions { WriteIndented = true }));
+                    _cache = s;
+                    try { _cacheWriteTimeUtc = File.GetLastWriteTimeUtc(SettingsPath); } catch { }
+                }
+                catch { }
             }
-            catch { }
         }
 
         public static string GetSharedFolder() => LoadLocalSettings().SharedFolder ?? "";

@@ -168,19 +168,55 @@ namespace METools
             return LicenseStatus.BetaActive;
         }
 
-        /// <summary>Short machine identifier for activation-code binding.</summary>
+        /// <summary>
+        /// Short machine identifier for activation-code binding. Based on the
+        /// registry's MachineGuid (HKLM\SOFTWARE\Microsoft\Cryptography), which
+        /// only changes on an OS reinstall -- unlike the previous basis
+        /// (MachineName + UserDomainName), which changes the moment a customer
+        /// renames their PC or changes domain/workgroup membership, silently
+        /// invalidating an already-activated license with no obvious cause.
+        /// Falls back to the old scheme if the registry read fails for any
+        /// reason (e.g. a locked-down machine), so activation is never worse
+        /// than it was before.
+        /// </summary>
         public static string GetMachineId()
         {
             try
             {
-                string seed = Environment.MachineName + "|" + Environment.UserDomainName;
-                using (var sha = SHA256.Create())
-                {
-                    var hash = sha.ComputeHash(Encoding.UTF8.GetBytes(seed));
-                    return BitConverter.ToString(hash, 0, 6).Replace("-", "");
-                }
+                string guid = TryGetRegistryMachineGuid();
+                if (!string.IsNullOrEmpty(guid)) return HashId(guid);
             }
+            catch { }
+            return GetLegacyMachineId();
+        }
+
+        // Pre-this-fix machine ID. Kept (not removed) so VerifyCode below can
+        // still accept any code already issued against it -- switching
+        // GetMachineId()'s basis must not retroactively invalidate a license
+        // someone already activated under the old scheme.
+        private static string GetLegacyMachineId()
+        {
+            try { return HashId(Environment.MachineName + "|" + Environment.UserDomainName); }
             catch { return "ME-TOOLS"; }
+        }
+
+        private static string HashId(string seed)
+        {
+            using (var sha = SHA256.Create())
+            {
+                var hash = sha.ComputeHash(Encoding.UTF8.GetBytes(seed));
+                return BitConverter.ToString(hash, 0, 6).Replace("-", "");
+            }
+        }
+
+        private static string TryGetRegistryMachineGuid()
+        {
+            try
+            {
+                using (var key = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Cryptography"))
+                    return key?.GetValue("MachineGuid") as string;
+            }
+            catch { return null; }
         }
 
         /// <summary>
@@ -240,8 +276,12 @@ namespace METools
 
                 string mid = parts[0], t = parts[1], exp = parts[2];
 
-                // Bind to this machine.
-                if (!string.Equals(mid, GetMachineId(), StringComparison.OrdinalIgnoreCase)) return false;
+                // Bind to this machine -- accepts either the current, durable
+                // MachineGuid-based ID or the pre-fix MachineName/UserDomainName
+                // one, so a code issued before this change keeps working.
+                if (!string.Equals(mid, GetMachineId(), StringComparison.OrdinalIgnoreCase)
+                    && !string.Equals(mid, GetLegacyMachineId(), StringComparison.OrdinalIgnoreCase))
+                    return false;
 
                 // Verify the signature with the embedded public key.
                 using (var ecdsa = ECDsa.Create())

@@ -23,6 +23,13 @@ namespace METools
             // folder is configured in the Comments tool's own settings) --------
             METools.Comments.CommentsWatcher.Register(app);
 
+            // Comments' popup (Mark as read / Jump to Level / Go to Item) needs
+            // its ExternalEvent created here, in a guaranteed valid API context,
+            // NOT lazily on first button click -- see CommentsHandler.Ensure()
+            // for why. Must run after CommentsWatcher.Register above only by
+            // convention (no actual ordering dependency between the two).
+            METools.Comments.CommentsHandler.Ensure();
+
             // -- Activity Log background tracker (Added/Modified/Deleted per
             // user, shared folder same as Comments) -------------------------
             METools.ActivityLog.ActivityLogWatcher.Register(app);

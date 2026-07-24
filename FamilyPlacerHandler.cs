@@ -113,6 +113,13 @@ namespace METools.FamilyPlacer
                 // Statistics) once it was found there.
                 var allLevels = new FilteredElementCollector(doc).OfClass(typeof(Level)).Cast<Level>().ToList();
 
+                // Same fix, same reason: GetNearestWall used to run its own
+                // FilteredElementCollector + BoundingBoxIntersectsFilter for
+                // EVERY captured placement position -- one full wall query per
+                // item in a batch, instead of one for the whole batch. Fetched
+                // once here and searched in-memory per point instead.
+                var allWalls = new FilteredElementCollector(doc).OfClass(typeof(Wall)).Cast<Wall>().ToList();
+
                 foreach (var firstInst in captured)
                 {
                     XYZ pt = GetPt(firstInst);
@@ -125,7 +132,7 @@ namespace METools.FamilyPlacer
                     try { level = doc.GetElement(firstInst.LevelId) as Level; } catch { }
                     level = level ?? ResolveLevel(doc, Request.LevelId) ?? GetNearestLevel(allLevels, pt);
 
-                    var wall    = GetNearestWall(doc, pt);
+                    var wall    = GetNearestWall(allWalls, pt);
                     var walkDir = WallDir(wall);
 
                     // ★ Detect HOW the first family was placed (face vs workplane)
@@ -348,15 +355,19 @@ namespace METools.FamilyPlacer
         private Level GetNearestLevel(List<Level> allLevels, XYZ pt)
         { try { return allLevels.OrderBy(l => Math.Abs(l.Elevation - pt.Z)).FirstOrDefault(); } catch { return null; } }
 
-        private Wall GetNearestWall(Document doc, XYZ pt)
+        private Wall GetNearestWall(List<Wall> allWalls, XYZ pt)
         {
             try
             {
                 double r = UnitUtils.ConvertToInternalUnits(500, UnitTypeId.Millimeters);
-                var bb = new Outline(pt - new XYZ(r, r, r), pt + new XYZ(r, r, r));
-                return new FilteredElementCollector(doc).OfClass(typeof(Wall))
-                    .WherePasses(new BoundingBoxIntersectsFilter(bb)).Cast<Wall>()
-                    .OrderBy(w => WallDist(w, pt)).FirstOrDefault();
+                Wall best = null;
+                double bestDist = double.MaxValue;
+                foreach (var w in allWalls)
+                {
+                    double d = WallDist(w, pt);
+                    if (d <= r && d < bestDist) { bestDist = d; best = w; }
+                }
+                return best;
             }
             catch { return null; }
         }

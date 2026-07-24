@@ -54,7 +54,7 @@ namespace METools.FamilyPlacer
                 case CircuitTaggerAction.LoadParamsFromSelection:
                     ExecuteLoadParams(doc, uiDoc); break;
                 case CircuitTaggerAction.ClearCircuitData:
-                    ExecuteClearCircuitData(doc, req.CircuitLabelToClear); break;
+                    ExecuteClearCircuitData(doc, req.CircuitLabelsToClear); break;
             }
         }
 
@@ -677,21 +677,47 @@ namespace METools.FamilyPlacer
             return "";
         }
 
-        // -- Clear all circuit params from elements matching a circuit label --
-        private void ExecuteClearCircuitData(Document doc, string circuitLabel)
+        // -- Clear all circuit params from elements matching ANY of the given
+        // circuit labels, in ONE scan and ONE transaction. Previously this
+        // took a single label, so clearing N circuits meant N separate
+        // ReadAllTaggedElements scans (each one walking all 8 electrical
+        // categories plus a per-element room lookup) and N separate
+        // transactions -- on a real project, clearing ~10 circuits one at a
+        // time was genuinely slow for exactly that reason.
+        private void ExecuteClearCircuitData(Document doc, List<string> circuitLabels)
         {
-            if (string.IsNullOrEmpty(circuitLabel)) { Report("No circuit label to clear."); return; }
+            var labels = (circuitLabels ?? new List<string>())
+                .Where(l => !string.IsNullOrEmpty(l)).ToList();
+            if (labels.Count == 0) { Report("No circuit label(s) to clear."); OnDone?.Invoke(); return; }
+
+            var labelSet = new HashSet<string>(labels); // ordinal, matches the original == comparison
             int cleared = 0;
+            var foundLabels = new HashSet<string>();
             try
             {
-                var rows = ReadAllTaggedElements(doc);
+                var rows = ReadAllTaggedElements(doc); // one scan for the whole batch, not one per label
                 var toClear = rows
-                    .Where(r => r.CircuitLabel == circuitLabel || r.Stromkreis == circuitLabel)
+                    .Where(r => labelSet.Contains(r.CircuitLabel) || labelSet.Contains(r.Stromkreis))
                     .ToList();
 
-                if (toClear.Count == 0) { Report($"No elements found with circuit '{circuitLabel}'."); OnDone?.Invoke(); return; }
+                foreach (var r in toClear)
+                {
+                    if (labelSet.Contains(r.CircuitLabel)) foundLabels.Add(r.CircuitLabel);
+                    if (labelSet.Contains(r.Stromkreis))   foundLabels.Add(r.Stromkreis);
+                }
 
-                using (var tx = new Transaction(doc, $"ME-Tools: Clear circuit data '{circuitLabel}'"))
+                if (toClear.Count == 0)
+                {
+                    Report(labels.Count == 1
+                        ? $"No elements found with circuit '{labels[0]}'."
+                        : $"No elements found for any of the {labels.Count} selected circuits.");
+                    OnDone?.Invoke();
+                    return;
+                }
+
+                using (var tx = new Transaction(doc, labels.Count == 1
+                    ? $"ME-Tools: Clear circuit data '{labels[0]}'"
+                    : $"ME-Tools: Clear circuit data ({labels.Count} circuits)"))
                 {
                     tx.Start();
                     var fopt = tx.GetFailureHandlingOptions();
@@ -719,7 +745,12 @@ namespace METools.FamilyPlacer
             }
             catch (Exception ex) { Report("Clear failed: " + ex.Message); return; }
 
-            Report($"Cleared circuit data from {cleared} elements.");
+            int missing = labels.Count - foundLabels.Count;
+            string msg = labels.Count == 1
+                ? $"Cleared circuit data from {cleared} elements."
+                : $"Cleared circuit data from {cleared} elements across {foundLabels.Count} circuit(s)."
+                  + (missing > 0 ? $" {missing} selected circuit(s) had no matching elements." : "");
+            Report(msg);
             OnDone?.Invoke();
         }
 

@@ -54,6 +54,18 @@ namespace METools.ActivityLog
         {
             app.ControlledApplication.DocumentOpened  += OnDocumentOpened;
             app.ControlledApplication.DocumentChanged += OnDocumentChanged;
+            app.ControlledApplication.DocumentClosing += OnDocumentClosing;
+        }
+
+        // Without this, _cache below holds a live reference to every Document
+        // ever opened this session, forever -- since Document is the
+        // dictionary key, that pins the entire document object graph in
+        // memory even long after the user has closed the project. On a
+        // session that opens/closes several projects in a day, that's a real
+        // and growing leak, not just a theoretical one.
+        private static void OnDocumentClosing(object sender, DocumentClosingEventArgs e)
+        {
+            try { _cache.Remove(e.Document); } catch { }
         }
 
         private static void OnDocumentOpened(object sender, DocumentOpenedEventArgs e)

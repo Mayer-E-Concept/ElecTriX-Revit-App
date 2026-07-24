@@ -255,19 +255,22 @@ namespace METools
             return pa.Count.CompareTo(pb.Count);
         }
 
-        public static List<(string LevelName, int Sockets, int Switches, int Lamps)> CountByFloor(Document doc)
+        // Takes the already-fetched element lists (same ones Collect() uses for
+        // totals/by-type/by-workset) instead of re-scanning the document for
+        // these same 3 categories a second time -- this used to run its own
+        // independent FilteredElementCollector per category, duplicating work
+        // Collect() had already just done a few lines above it.
+        public static List<(string LevelName, int Sockets, int Switches, int Lamps)> CountByFloor(
+            Document doc, List<Element> socketEls, List<Element> switchEls, List<Element> lampEls)
         {
             var result = new Dictionary<string, (int s, int sw, int l)>(StringComparer.OrdinalIgnoreCase);
             // Fetched once, not per-element, for the geometric fallback in ResolveFloorLevelName.
             var allLevels = new FilteredElementCollector(doc).OfClass(typeof(Level)).Cast<Level>().ToList();
-            void Add(BuiltInCategory cat, int slot)
+            void Add(List<Element> els, int slot)
             {
-                try
+                foreach (var fi in els.OfType<FamilyInstance>())
                 {
-                    var instances = new FilteredElementCollector(doc)
-                        .OfCategory(cat).WhereElementIsNotElementType()
-                        .OfClass(typeof(FamilyInstance)).Cast<FamilyInstance>();
-                    foreach (var fi in instances)
+                    try
                     {
                         string lvl = ResolveFloorLevelName(doc, fi, allLevels);
                         if (!result.TryGetValue(lvl, out var t)) t = (0, 0, 0);
@@ -275,12 +278,12 @@ namespace METools
                                     : slot == 1 ? (t.s, t.sw + 1, t.l)
                                                 : (t.s, t.sw, t.l + 1);
                     }
+                    catch { }
                 }
-                catch { }
             }
-            Add(BuiltInCategory.OST_ElectricalFixtures, 0);
-            Add(BuiltInCategory.OST_LightingDevices,    1);
-            Add(BuiltInCategory.OST_LightingFixtures,   2);
+            Add(socketEls, 0);
+            Add(switchEls, 1);
+            Add(lampEls,   2);
             var keys = result.Keys.ToList();
             keys.Sort(CompareFloorNames);
             return keys
@@ -337,7 +340,7 @@ namespace METools
                 r.Add(new StatRow("Lamps by workset", ws, cnt));
 
             // Per-floor breakdown
-            foreach (var (lvl, soc, sw, lmp) in CountByFloor(doc))
+            foreach (var (lvl, soc, sw, lmp) in CountByFloor(doc, socketEls, switchEls, lampEls))
             {
                 if (soc + sw + lmp == 0) continue;
                 r.Add(new StatRow("Per floor", lvl + " — Sockets",  soc));

@@ -73,6 +73,10 @@ namespace METools.FamilyPlacer
         public string Apartment           { get; set; } = "";
         public string Building            { get; set; } = "";
         public string SubLabel            { get; set; } = "";
-        public string CircuitLabelToClear { get; set; } = ""; // used by ClearCircuitData action
+        // Used by ClearCircuitData action -- a list (not a single label) so
+        // multiple selected circuits can be cleared in one Revit-thread round
+        // trip, one transaction, and one stats refresh, instead of the user
+        // having to click Clear + confirm a dialog once per circuit.
+        public List<string> CircuitLabelsToClear { get; set; } = new List<string>();
     }
 }

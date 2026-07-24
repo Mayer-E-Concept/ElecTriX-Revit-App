@@ -283,17 +283,37 @@ namespace METools.Comments
         // The popup is a lightweight, standalone window that can appear whether
         // or not the main Comments management window is open, so it needs its
         // own always-available ExternalEvent rather than borrowing the main
-        // window's instance. Mirrors AppSwitcher's Ensure()/static pattern.
+        // window's instance.
+        //
+        // IMPORTANT: unlike AppSwitcher's Ensure() -- which this used to just
+        // say it "mirrors" without actually doing the same thing -- creation
+        // must happen proactively, from a call in App.OnStartup, NOT lazily
+        // on first use inside MarkStatus/JumpToLevel/GoToElement. Those three
+        // are called directly from the popup's button click handlers, which
+        // run as plain WPF UI-thread code with no Revit API context at all --
+        // ExternalEvent.Create() throws InvalidOperationException
+        // ("Attempting to create an ExternalEvent outside of a standard API
+        // execution") if it's first called from there. AppSwitcher avoids this
+        // because its own Ensure() is proactively called from every command's
+        // Open() method (a valid context) before any button exists to click.
+        // Ensure() here does the same: called once from App.OnStartup, so by
+        // the time a popup button is ever clicked, _quickEvent already exists
+        // and only the always-safe .Raise() runs from the click handler.
         private static CommentsHandler _quickHandler;
         private static ExternalEvent _quickEvent;
 
+        // Must be called from a valid API context -- App.OnStartup does this.
+        public static void Ensure()
+        {
+            if (_quickEvent != null) return;
+            _quickHandler = new CommentsHandler();
+            _quickEvent = ExternalEvent.Create(_quickHandler);
+        }
+
         public static void MarkStatus(string commentId, CommentStatus status)
         {
-            if (_quickEvent == null)
-            {
-                _quickHandler = new CommentsHandler();
-                _quickEvent = ExternalEvent.Create(_quickHandler);
-            }
+            Ensure(); // safety net only -- App.OnStartup should already have done this
+            if (_quickEvent == null) return;
             _quickHandler.Request = new CommentsRequest
             {
                 Action = CommentsAction.SetStatus,
@@ -305,11 +325,8 @@ namespace METools.Comments
 
         public static void JumpToLevel(string levelName, string scopeBoxName)
         {
-            if (_quickEvent == null)
-            {
-                _quickHandler = new CommentsHandler();
-                _quickEvent = ExternalEvent.Create(_quickHandler);
-            }
+            Ensure(); // safety net only -- App.OnStartup should already have done this
+            if (_quickEvent == null) return;
             _quickHandler.Request = new CommentsRequest
             {
                 Action = CommentsAction.JumpToLevel,
@@ -321,11 +338,8 @@ namespace METools.Comments
 
         public static void GoToElement(string elementId, Action<bool, string> onResult = null)
         {
-            if (_quickEvent == null)
-            {
-                _quickHandler = new CommentsHandler();
-                _quickEvent = ExternalEvent.Create(_quickHandler);
-            }
+            Ensure(); // safety net only -- App.OnStartup should already have done this
+            if (_quickEvent == null) return;
             if (onResult != null) _quickHandler.OnGoToElementResult = onResult;
             _quickHandler.Request = new CommentsRequest
             {

@@ -59,18 +59,21 @@ namespace METools
 
     public static class ProjectHealthCheckCollector
     {
-        private const string TAG_FAMILY_NAME = "ME-Tools_CircuitTag";
+        internal const string TAG_FAMILY_NAME = "ME-Tools_CircuitTag";
 
         // The exact 6 shared parameters Circuit Tagger writes, and the exact
         // 8 categories it reads/tags across (GetElectricalCategories() in
         // CircuitTaggerHandler.cs) -- kept in sync with that file by hand,
         // since there's no single shared source for both yet.
-        private static readonly string[] RequiredParams =
+        // internal, not private: ProjectHealthCheckFixer.FixSharedParameters
+        // below reuses these instead of keeping its own second copy, so the
+        // two can never drift apart the way they used to.
+        internal static readonly string[] RequiredParams =
         {
             "Vorsicherung", "FI-Kreis", "Stromkreis Tag", "Schaltkreis", "CAx_Apartment", "CAx_Building",
         };
 
-        private static readonly (BuiltInCategory Cat, string Label)[] RequiredCategories =
+        internal static readonly (BuiltInCategory Cat, string Label)[] RequiredCategories =
         {
             (BuiltInCategory.OST_ElectricalFixtures,   "Electrical Fixtures"),
             (BuiltInCategory.OST_LightingFixtures,      "Lighting Fixtures"),
@@ -229,7 +232,7 @@ namespace METools
                     .OfClass(typeof(FamilySymbol))
                     .OfCategory(BuiltInCategory.OST_MultiCategoryTags)
                     .Cast<FamilySymbol>()
-                    .Any(fs => string.Equals(fs.Family?.Name, "ME-Tools_CircuitTag", StringComparison.OrdinalIgnoreCase));
+                    .Any(fs => string.Equals(fs.Family?.Name, ProjectHealthCheckCollector.TAG_FAMILY_NAME, StringComparison.OrdinalIgnoreCase));
             }
             catch { alreadyLoaded = false; }
 
@@ -257,14 +260,8 @@ namespace METools
                 return;
             }
 
-            var requiredParams = new[] { "Vorsicherung", "FI-Kreis", "Stromkreis Tag", "Schaltkreis", "CAx_Apartment", "CAx_Building" };
-            var requiredCats = new[]
-            {
-                BuiltInCategory.OST_ElectricalFixtures, BuiltInCategory.OST_LightingFixtures,
-                BuiltInCategory.OST_LightingDevices,    BuiltInCategory.OST_ElectricalEquipment,
-                BuiltInCategory.OST_DataDevices,        BuiltInCategory.OST_FireAlarmDevices,
-                BuiltInCategory.OST_CommunicationDevices, BuiltInCategory.OST_SecurityDevices,
-            };
+            var requiredParams = ProjectHealthCheckCollector.RequiredParams;
+            var requiredCats = ProjectHealthCheckCollector.RequiredCategories.Select(c => c.Cat).ToArray();
 
             // Application.SharedParametersFilename is session-wide, not scoped
             // to this operation -- save whatever the user already had set and

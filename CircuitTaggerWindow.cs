@@ -52,6 +52,15 @@ namespace METools.FamilyPlacer
         // Lists
         private StackPanel _selectionList, _statsList;
 
+        // Stats tab: circuit labels checked for bulk "Clear Selected", and the
+        // button that triggers it -- persists across RefreshStats() calls that
+        // rebuild the rows, so it's cleared explicitly rather than relying on
+        // the (re-created) row checkboxes to reset it.
+        private readonly HashSet<string> _selectedForClear = new HashSet<string>();
+        private Button _btnClearSelected;
+        private readonly List<CheckBox> _allRowCheckboxes = new List<CheckBox>();
+        private CheckBox _selectAllCheckbox;
+
         // Status
         private TextBlock _lblStatus, _lblSelCount;
 
@@ -351,15 +360,22 @@ namespace METools.FamilyPlacer
             var hdrRow = new Grid { Margin = new Thickness(0, 0, 0, 6) };
             hdrRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             hdrRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            hdrRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             var hdrTb = SecH("Circuit Statistics");
             Grid.SetColumn(hdrTb, 0); hdrRow.Children.Add(hdrTb);
+            _btnClearSelected = SmallBtn("Clear Selected", false, OnClearSelectedClicked);
+            _btnClearSelected.Margin = new Thickness(12, 0, 0, 0);
+            _btnClearSelected.Padding = new Thickness(16, 0, 16, 0);
+            _btnClearSelected.IsEnabled = false;
+            _btnClearSelected.Foreground = new SolidColorBrush(Color.FromRgb(180, 60, 60));
+            Grid.SetColumn(_btnClearSelected, 1); hdrRow.Children.Add(_btnClearSelected);
             var btnRefStats = SmallBtn("Refresh", false, () => RefreshStats());
-            btnRefStats.Margin = new Thickness(12, 0, 0, 0);
+            btnRefStats.Margin = new Thickness(8, 0, 0, 0);
             btnRefStats.Padding = new Thickness(16, 0, 16, 0);
-            Grid.SetColumn(btnRefStats, 1); hdrRow.Children.Add(btnRefStats);
+            Grid.SetColumn(btnRefStats, 2); hdrRow.Children.Add(btnRefStats);
             sp.Children.Add(hdrRow);
 
-            sp.Children.Add(InfoBox("Stats read parameter values from elements -- not from visual tags. Deleting a tag does NOT clear the circuit data. Use 'Clear Circuit Data' on a row to wipe the parameters from all elements in that circuit."));
+            sp.Children.Add(InfoBox("Stats read parameter values from elements -- not from visual tags. Deleting a tag does NOT clear the circuit data. Tick the circuits you want to wipe and use 'Clear Selected' above, or use the per-row 'Clear' button for just one."));
             var container = new Border
             {
                 BorderBrush = MeToolsTheme.BrBorder, BorderThickness = new Thickness(1),
@@ -374,6 +390,7 @@ namespace METools.FamilyPlacer
         private void StatsHeader(StackPanel sp)
         {
             var grid = new Grid { Background = MeToolsTheme.BrHeader, MinHeight = 26 };
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(28) });  // select-all checkbox
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(6) });
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(70) });
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(180) });
@@ -384,15 +401,29 @@ namespace METools.FamilyPlacer
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(54) });
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(72) }); // unused -- matches the row grid's Clear-button column exactly
 
+            // Select-all/none checkbox for the whole visible list, in the header.
+            var selectAllCb = new CheckBox
+            {
+                VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Center,
+                ToolTip = "Select/deselect all visible circuits for bulk clearing",
+            };
+            selectAllCb.Click += (s, e) =>
+            {
+                bool check = selectAllCb.IsChecked == true;
+                foreach (var cb in _allRowCheckboxes) cb.IsChecked = check; // fires each row's Checked/Unchecked handler below
+            };
+            _selectAllCheckbox = selectAllCb;
+            Grid.SetColumn(selectAllCb, 0); grid.Children.Add(selectAllCb);
+
             // Total column gets a subtle tint so it reads as a summary column,
             // not a fifth badge in the Sock./Lamp/Sw. sequence.
             var totalBg = new Border { Background = new SolidColorBrush(Color.FromArgb(18, MeToolsTheme.COrange.R, MeToolsTheme.COrange.G, MeToolsTheme.COrange.B)) };
-            Grid.SetColumn(totalBg, 7); grid.Children.Add(totalBg);
+            Grid.SetColumn(totalBg, 8); grid.Children.Add(totalBg);
 
             // Thin vertical dividers between the four numeric columns -- this is
             // what makes it impossible to miscount which value sits under which
             // header (the actual cause of the earlier Sock./Sw. mix-up).
-            foreach (int col in new[] { 4, 5, 6, 7 })
+            foreach (int col in new[] { 5, 6, 7, 8 })
             {
                 var divider = new Border
                 {
@@ -404,11 +435,11 @@ namespace METools.FamilyPlacer
 
             var headers = new (int col, string text)[]
             {
-                (2, "Circuit / Vorsicherung"),
-                (4, "Sock."),
-                (5, "Lamp"),
-                (6, "Sw."),
-                (7, "Total"),
+                (3, "Circuit / Vorsicherung"),
+                (5, "Sock."),
+                (6, "Lamp"),
+                (7, "Sw."),
+                (8, "Total"),
             };
             foreach (var (col, text) in headers)
             {
@@ -416,8 +447,8 @@ namespace METools.FamilyPlacer
                 {
                     Text = text, FontSize = 9, FontWeight = FontWeights.SemiBold,
                     Foreground = MeToolsTheme.BrMuted, VerticalAlignment = VerticalAlignment.Center,
-                    HorizontalAlignment = col >= 4 ? HorizontalAlignment.Center : HorizontalAlignment.Left,
-                    Margin = new Thickness(col >= 4 ? 4 : 8, 0, 4, 0),
+                    HorizontalAlignment = col >= 5 ? HorizontalAlignment.Center : HorizontalAlignment.Left,
+                    Margin = new Thickness(col >= 5 ? 4 : 8, 0, 4, 0),
                 };
                 Grid.SetColumn(tb, col); grid.Children.Add(tb);
             }
@@ -432,6 +463,10 @@ namespace METools.FamilyPlacer
         {
             if (_statsList == null) return;
             _statsList.Children.Clear();
+            _allRowCheckboxes.Clear();
+            _selectedForClear.Clear();
+            if (_selectAllCheckbox != null) _selectAllCheckbox.IsChecked = false;
+            UpdateClearSelectedButtonState();
             StatsHeader(_statsList); // re-add header after clear
 
             var doc = _uiApp.ActiveUIDocument?.Document;
@@ -553,6 +588,7 @@ namespace METools.FamilyPlacer
         private FrameworkElement BuildStatsRow(CircuitStatRow stat, bool isSubRow = false)
         {
             var grid = new Grid { MinHeight = 32 };
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(28) }); // select checkbox
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(isSubRow ? 20 : 6) });
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(70) });
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(180) });
@@ -563,10 +599,25 @@ namespace METools.FamilyPlacer
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(54) });
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(72) });  // clear btn -- fixed, must match the empty spacer column added to the header (widened from 45 -- now that Padding actually applies (see RoundedBtnTemplate fix), the button's real margin+padding no longer fits in the old width)
 
+            // Select checkbox for bulk clearing -- one per circuit row (base
+            // AND sub-circuit rows each get their own, matching how the
+            // per-row Clear button already treats them as independently
+            // clearable circuits).
+            var selectCb = new CheckBox
+            {
+                VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Center,
+                IsChecked = _selectedForClear.Contains(stat.CircuitLabel),
+            };
+            var capturedLabelForSelect = stat.CircuitLabel;
+            selectCb.Checked   += (s, e) => { _selectedForClear.Add(capturedLabelForSelect);    UpdateClearSelectedButtonState(); };
+            selectCb.Unchecked += (s, e) => { _selectedForClear.Remove(capturedLabelForSelect); UpdateClearSelectedButtonState(); };
+            _allRowCheckboxes.Add(selectCb);
+            Grid.SetColumn(selectCb, 0); grid.Children.Add(selectCb);
+
             // Total column tint + column dividers, matching StatsHeader exactly.
             var totalBg = new Border { Background = new SolidColorBrush(Color.FromArgb(14, MeToolsTheme.COrange.R, MeToolsTheme.COrange.G, MeToolsTheme.COrange.B)) };
-            Grid.SetColumn(totalBg, 7); grid.Children.Add(totalBg);
-            foreach (int col in new[] { 4, 5, 6, 7 })
+            Grid.SetColumn(totalBg, 8); grid.Children.Add(totalBg);
+            foreach (int col in new[] { 5, 6, 7, 8 })
             {
                 var divider = new Border
                 {
@@ -590,21 +641,21 @@ namespace METools.FamilyPlacer
             ((FrameworkElement)badge).VerticalAlignment = VerticalAlignment.Center;
             ((FrameworkElement)badge).HorizontalAlignment = HorizontalAlignment.Left;
             labelRow.Children.Add(badge);
-            Grid.SetColumn(labelRow, 1); grid.Children.Add(labelRow);
+            Grid.SetColumn(labelRow, 2); grid.Children.Add(labelRow);
 
             var vs = TC(stat.Vorsicherung, small: true);
-            Grid.SetColumn(vs, 2); grid.Children.Add(vs);
+            Grid.SetColumn(vs, 3); grid.Children.Add(vs);
 
             var cb1 = CountBadge(stat.CountSockets,  MeToolsTheme.CPetrol);
             var cb2 = CountBadge(stat.CountLamps,     MeToolsTheme.CBlue);
             var cb3 = CountBadge(stat.CountSwitches,  MeToolsTheme.CGreen);
             var cb4 = CountBadge(stat.Total,          MeToolsTheme.COrange);
-            Grid.SetColumn(cb1, 4); grid.Children.Add(cb1);
-            Grid.SetColumn(cb2, 5); grid.Children.Add(cb2);
-            Grid.SetColumn(cb3, 6); grid.Children.Add(cb3);
-            Grid.SetColumn(cb4, 7); grid.Children.Add(cb4);
+            Grid.SetColumn(cb1, 5); grid.Children.Add(cb1);
+            Grid.SetColumn(cb2, 6); grid.Children.Add(cb2);
+            Grid.SetColumn(cb3, 7); grid.Children.Add(cb3);
+            Grid.SetColumn(cb4, 8); grid.Children.Add(cb4);
 
-            // Clear button -- always visible on the right
+            // Clear button -- always visible on the right (clears just this one circuit)
             var capturedLabel = stat.CircuitLabel;
             var clearBtn = new Button
             {
@@ -618,8 +669,8 @@ namespace METools.FamilyPlacer
                 ToolTip = "Clears all circuit parameters from elements with this circuit label. Does NOT delete the visual tags.",
                 Template = RoundedBtnTemplate(),
             };
-            clearBtn.Click += (s, e) => OnClearCircuitData(capturedLabel);
-            Grid.SetColumn(clearBtn, 8); grid.Children.Add(clearBtn);
+            clearBtn.Click += (s, e) => SendClearRequest(new List<string> { capturedLabel });
+            Grid.SetColumn(clearBtn, 9); grid.Children.Add(clearBtn);
 
             var row = new Border
             {
@@ -700,20 +751,48 @@ namespace METools.FamilyPlacer
             return panel;
         }
 
-        private void OnClearCircuitData(string circuitLabel)
+        // Shared by the per-row "Clear" button (single-item list) and
+        // "Clear Selected" (however many are checked) -- one confirmation,
+        // one request, one Revit-thread round trip regardless of count.
+        private void SendClearRequest(List<string> circuitLabels)
         {
-            var result = MessageBox.Show(
-                $"This will clear all circuit parameters from all elements with circuit '{circuitLabel}'.\n\nVisual tags are NOT deleted -- delete those manually in Revit.\n\nContinue?",
-                "Clear Circuit Data", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+            if (circuitLabels == null || circuitLabels.Count == 0) return;
+
+            string prompt = circuitLabels.Count == 1
+                ? $"This will clear all circuit parameters from all elements with circuit '{circuitLabels[0]}'.\n\nVisual tags are NOT deleted -- delete those manually in Revit.\n\nContinue?"
+                : $"This will clear all circuit parameters from all elements across {circuitLabels.Count} selected circuits:\n\n"
+                  + string.Join(", ", circuitLabels.Take(15)) + (circuitLabels.Count > 15 ? $", +{circuitLabels.Count - 15} more" : "")
+                  + "\n\nVisual tags are NOT deleted -- delete those manually in Revit.\n\nContinue?";
+
+            var result = MessageBox.Show(prompt, "Clear Circuit Data", MessageBoxButton.YesNo, MessageBoxImage.Warning);
             if (result != MessageBoxResult.Yes) return;
 
             _handler.Request = new CircuitTaggerRequest
             {
-                Action            = CircuitTaggerAction.ClearCircuitData,
-                CircuitLabelToClear = circuitLabel,
+                Action = CircuitTaggerAction.ClearCircuitData,
+                CircuitLabelsToClear = circuitLabels,
             };
             _extEvent.Raise();
-            UpdateStatusBar($"Clearing circuit data for '{circuitLabel}'...");
+            UpdateStatusBar(circuitLabels.Count == 1
+                ? $"Clearing circuit data for '{circuitLabels[0]}'..."
+                : $"Clearing circuit data for {circuitLabels.Count} circuits...");
+
+            // Optimistic: RefreshStats() (triggered by OnDone once the clear
+            // finishes) rebuilds the rows and clears selection anyway, but
+            // resetting the button now avoids a double-click queuing a second
+            // clear on the same labels while the first is still in flight.
+            _selectedForClear.Clear();
+            UpdateClearSelectedButtonState();
+        }
+
+        private void OnClearSelectedClicked() => SendClearRequest(_selectedForClear.ToList());
+
+        private void UpdateClearSelectedButtonState()
+        {
+            if (_btnClearSelected == null) return;
+            int n = _selectedForClear.Count;
+            _btnClearSelected.IsEnabled = n > 0;
+            _btnClearSelected.Content = n > 0 ? $"Clear Selected ({n})" : "Clear Selected";
         }
 
         // Public method called by CircuitTaggerCommand.OnDocChanged
