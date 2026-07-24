@@ -41,9 +41,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <None Update="METools.addin">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-    </None>
     <None Include="standard_worksets.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <TargetPath>config\standard_worksets.json</TargetPath>
@@ -96,7 +93,7 @@
     <MakeDir Directories="$(RevitAddinsDir2025)\config" ContinueOnError="true" />
     <Copy SourceFiles="$(OutputPath)METools.dll" DestinationFolder="$(RevitAddinsDir2025)"
           SkipUnchangedFiles="false" OverwriteReadOnlyFiles="true" ContinueOnError="true" />
-    <Copy SourceFiles="$(ProjectDir)METools.addin" DestinationFolder="$(RevitAddinsDir2025)"
+    <Copy SourceFiles="$(ProjectDir)METools_2025.addin" DestinationFiles="$(RevitAddinsDir2025)\METools.addin"
           SkipUnchangedFiles="false" OverwriteReadOnlyFiles="true" ContinueOnError="true" />
     <Copy SourceFiles="@(EmbeddedResource)" DestinationFolder="$(RevitAddinsDir2025)\Icons"
           SkipUnchangedFiles="false" OverwriteReadOnlyFiles="true" ContinueOnError="true" />

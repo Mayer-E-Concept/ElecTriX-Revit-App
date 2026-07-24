@@ -11,22 +11,4 @@
     <VendorDescription>Mayer E-Concept SRL — www.mayer-econcept.ro</VendorDescription>
   </AddIn>
 
-  <AddIn Type="Command">
-    <Name>Symmetric Distributor</Name>
-    <Assembly>METools.dll</Assembly>
-    <AddInId>B2C3D4E5-F6A7-8901-BCDE-F12345678901</AddInId>
-    <FullClassName>METools.DistributeCommand</FullClassName>
-    <VendorId>MAYER_E_CONCEPT</VendorId>
-    <VendorDescription>Mayer E-Concept SRL</VendorDescription>
-  </AddIn>
-
-  <AddIn Type="Command">
-    <Name>Family Placer</Name>
-    <Assembly>METools.dll</Assembly>
-    <AddInId>C3D4E5F6-A7B8-9012-CDEF-123456789012</AddInId>
-    <FullClassName>METools.FamilyPlacer.FamilyPlacerCommand</FullClassName>
-    <VendorId>MAYER_E_CONCEPT</VendorId>
-    <VendorDescription>Mayer E-Concept SRL</VendorDescription>
-  </AddIn>
-
 </RevitAddIns>

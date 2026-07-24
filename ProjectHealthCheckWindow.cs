@@ -110,6 +110,35 @@ namespace METools
                 _body.Children.Add(StatusRow(row.ParamName, row.IsHealthy, detail));
             }
 
+            _body.Children.Add(Sec("Environment"));
+
+            string folderDetail;
+            if (!result.SharedFolderConfigured)
+                folderDetail = "Not configured -- set a shared folder in Comments' settings first.";
+            else if (!result.SharedFolderReachable)
+                folderDetail = $"Configured ('{result.SharedFolderPath}') but not reachable right now -- " +
+                                "check the network path or VPN connection.";
+            else
+                folderDetail = $"Reachable: '{result.SharedFolderPath}'.";
+            _body.Children.Add(StatusRow(
+                "Shared Folder (Comments & Activity Log)",
+                result.SharedFolderConfigured && result.SharedFolderReachable,
+                folderDetail));
+
+            _body.Children.Add(StatusRow(
+                "ME-Tools_CircuitTag.rfa (installer resource)",
+                result.TagFamilyResourcePresent,
+                result.TagFamilyResourcePresent
+                    ? "Present -- Fix All can use this file."
+                    : "Not found -- add it to the installer (setup.iss) so Fix All can load it."));
+
+            _body.Children.Add(StatusRow(
+                "METools_SharedParameters.txt (installer resource)",
+                result.SharedParamResourcePresent,
+                result.SharedParamResourcePresent
+                    ? "Present -- Fix All can use this file."
+                    : "Not found -- add it to the installer (setup.iss) so Fix All can bind it."));
+
             StatusLeft.Text = result.AllHealthy
                 ? "All checks passed."
                 : "Some checks failed -- see details above.";

@@ -8,10 +8,22 @@
 // session where these two gaps took a couple of hours to track down by hand
 // -- this turns that into a one-click, few-second check.
 //
+// Also checks two things that are per-machine/per-install rather than
+// per-project, but break Comments/Activity Log and Fix All just as
+// silently: the shared network folder Comments and Activity Log both read
+// and write (ActivityLogStorage has no folder setting of its own -- it
+// reuses CommentsStorage.GetSharedFolder(), so this is one check, not two),
+// and the two files Fix All below needs to already be sitting in
+// %ProgramData%\METools\Resources (bundled by the installer, see setup.iss).
+// Neither of those two is something Fix All can repair from inside Revit --
+// a missing network path or a missing installer asset needs a human, not a
+// transaction -- so they're reported but not part of the auto-fix below.
+//
 // Read-only. No transaction, nothing in the model is changed.
 using Autodesk.Revit.Attributes;
 using Autodesk.Revit.DB;
 using Autodesk.Revit.UI;
+using METools.Comments;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -31,7 +43,18 @@ namespace METools
         public string ProjectTitle;
         public bool   TagFamilyLoaded;
         public List<ParamCheckRow> ParamRows = new List<ParamCheckRow>();
-        public bool AllHealthy => TagFamilyLoaded && ParamRows.All(r => r.IsHealthy);
+
+        // -- Environment checks: per-machine/per-install, not per-project --
+        public string SharedFolderPath;
+        public bool   SharedFolderConfigured;
+        public bool   SharedFolderReachable;   // only meaningful if Configured
+        public bool   TagFamilyResourcePresent;
+        public bool   SharedParamResourcePresent;
+
+        public bool AllHealthy =>
+            TagFamilyLoaded && ParamRows.All(r => r.IsHealthy)
+            && SharedFolderConfigured && SharedFolderReachable
+            && TagFamilyResourcePresent && SharedParamResourcePresent;
     }
 
     public static class ProjectHealthCheckCollector
@@ -117,6 +140,33 @@ namespace METools
                 result.ParamRows.Add(row);
             }
 
+            // 3) Shared folder Comments and Activity Log both depend on.
+            // Per-machine setting (see CommentsStorage.cs), so this reflects
+            // whoever is running the check right now, not the project itself.
+            try
+            {
+                result.SharedFolderPath = CommentsStorage.GetSharedFolder();
+                result.SharedFolderConfigured = !string.IsNullOrWhiteSpace(result.SharedFolderPath);
+                if (result.SharedFolderConfigured)
+                {
+                    try { result.SharedFolderReachable = System.IO.Directory.Exists(result.SharedFolderPath); }
+                    catch { result.SharedFolderReachable = false; }
+                }
+            }
+            catch { result.SharedFolderConfigured = false; result.SharedFolderReachable = false; }
+
+            // 4) Installer-bundled resource files Fix All needs. Checked here,
+            // read-only, so a missing file shows up before Fix All is even
+            // clicked -- rather than as a failure message buried in its output
+            // after the fact. Paths shared with ProjectHealthCheckFixer below
+            // so the two can never drift apart.
+            try
+            {
+                result.TagFamilyResourcePresent   = System.IO.File.Exists(ProjectHealthCheckFixer.FamilyPath);
+                result.SharedParamResourcePresent = System.IO.File.Exists(ProjectHealthCheckFixer.SharedParamPath);
+            }
+            catch { result.TagFamilyResourcePresent = false; result.SharedParamResourcePresent = false; }
+
             return result;
         }
     }
@@ -143,10 +193,10 @@ namespace METools
     // to wherever you'd rather keep them).
     public static class ProjectHealthCheckFixer
     {
-        private static readonly string ResourcesDir = System.IO.Path.Combine(
+        internal static readonly string ResourcesDir = System.IO.Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "METools", "Resources");
-        private static readonly string FamilyPath     = System.IO.Path.Combine(ResourcesDir, "ME-Tools_CircuitTag.rfa");
-        private static readonly string SharedParamPath = System.IO.Path.Combine(ResourcesDir, "METools_SharedParameters.txt");
+        internal static readonly string FamilyPath     = System.IO.Path.Combine(ResourcesDir, "ME-Tools_CircuitTag.rfa");
+        internal static readonly string SharedParamPath = System.IO.Path.Combine(ResourcesDir, "METools_SharedParameters.txt");
 
         public static List<string> Fix(Document doc)
         {
