@@ -36,6 +36,8 @@ namespace METools
                     TryOpen("METools.ProjectHealthCheckCommand", app);
                 else if (Target == "ActivityLog")
                     METools.ActivityLog.ActivityLogCommand.Open(app);
+                else if (Target == "IfcLevelImport")
+                    METools.IfcImport.IfcLevelImportCommand.Open(app);
             }
             catch { }
         }
@@ -74,6 +76,7 @@ namespace METools
                 ("FamilyBrowser", "Family Browser"),
                 ("LampPlacer",    "Lamp Placer"),
                 ("LevelManager",  "Level Manager"),
+                ("IfcLevelImport", "IFC Level Importer"),
                 ("ProjectTransfer", "Project Transfer"),
                 ("FixLevel",      "Fix Level"),
                 ("CircuitTagger", "Circuit Tagger"),
