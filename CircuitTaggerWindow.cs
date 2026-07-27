@@ -575,9 +575,12 @@ namespace METools.FamilyPlacer
         // -2008095 = OST_SecurityDevices
         private static bool CatIsSocket(ExportRow r)  => r.CategoryId == -2001060;
         private static bool CatIsLamp(ExportRow r)    => r.CategoryId == -2001120;
-        private static bool CatIsSwitch(ExportRow r)  => r.CategoryId == -2001040 || r.CategoryId == -2008090
-                                                       || r.CategoryId == -2008093 || r.CategoryId == -2008094
-                                                       || r.CategoryId == -2008095;
+        // -2008087 = OST_LightingDevices -- confirmed live against this project's
+        // actual "_E_CAx Wechselschalter" switch family (was missing entirely,
+        // which is why switches fell through into the socket count instead).
+        private static bool CatIsSwitch(ExportRow r)  => r.CategoryId == -2008087 || r.CategoryId == -2001040
+                                                       || r.CategoryId == -2008090 || r.CategoryId == -2008093
+                                                       || r.CategoryId == -2008094 || r.CategoryId == -2008095;
 
         private Border GroupHeader(string text, Color color)
         {
