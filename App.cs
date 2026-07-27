@@ -131,32 +131,25 @@ namespace METools
             RibbonThemeWatcher.Register(flButton, "icon_fl_fix");
             panelLevels.AddSeparator();
 
-            // -- Level Manager ------------------------------------------------
+            // -- Level Manager (also handles IFC level import -- see its own
+            // "Import from IFC" tab; that used to be a separate ribbon button) --
             var lmBtn = new PushButtonData(
-                "LevelManager", "Level\nManager", dll,
+                "LevelManager", "Level & IFC\nManager", dll,
                 "METools.LevelManager.LevelManagerCommand")
             {
-                ToolTip         = "See every level in the project laid out like a section, grouped and sorted, and add new ones.",
-                LongDescription = $"Level Manager -- {VENDOR}\n\nShows all project levels stacked top-to-bottom by elevation, like a section.\n\n* Auto-groups levels by shared naming (e.g. UKD / FFB) -- no project-specific setup needed\n* Filter by group and by zone/house tag (e.g. H1, H2)\n* Compact (even spacing) or True Scale (proportional to elevation) display\n* Add a new level by name and elevation directly from the list",
+                ToolTip         = "See every level in the project laid out like a section, add new ones, or import levels from an IFC file.",
+                LongDescription = $"Level & IFC Manager -- {VENDOR}\n\nTwo tabs in one window:\n\n" +
+                                  "Project Levels -- shows all project levels stacked top-to-bottom by elevation, like a section.\n" +
+                                  "* Auto-groups levels by shared naming (e.g. UKD / FFB) -- no project-specific setup needed\n" +
+                                  "* Filter by group and by zone/house tag (e.g. H1, H2)\n" +
+                                  "* Compact (even spacing) or True Scale (proportional to elevation) display\n" +
+                                  "* Add a new level by name and elevation directly from the list\n\n" +
+                                  "Import from IFC -- reads levels, units and rough site coordinates from an IFC file (detects one already linked/imported in the project too) and lets you tick which levels to create.",
                 Image           = LoadIcon("icon_lm_light_16.png") ?? LoadIcon("icon_fp_light_16.png"),
                 LargeImage      = LoadIcon("icon_lm_light_32.png") ?? LoadIcon("icon_fp_light_32.png"),
             };
             var lmButton = panelLevels.AddItem(lmBtn) as PushButton;
             RibbonThemeWatcher.Register(lmButton, "icon_lm");
-            panelLevels.AddSeparator();
-
-            // -- IFC Level Importer --------------------------------------------
-            var ifcBtn = new PushButtonData(
-                "IfcLevelImport", "IFC Level\nImporter", dll,
-                "METools.IfcImport.IfcLevelImportCommand")
-            {
-                ToolTip         = "Read levels, units and rough site coordinates from an IFC file before importing anything.",
-                LongDescription = $"IFC Level Importer -- {VENDOR}\n\nOpens an IFC file and reads it directly (no full import) to show:\n\n* Every building storey (level) found, with its elevation -- tick which ones to create as real Revit Levels\n* The file's length unit compared against your project's, with a clear warning if they don't match (e.g. the file is in cm but your project is in mm)\n* Rough site placement / geographic / survey coordinates, if the file has them -- shown for reference only, nothing is moved in your project\n\nNothing is changed until you tick levels and click Import.",
-                Image           = LoadIcon("icon_ifc_light_16.png") ?? LoadIcon("icon_fp_light_16.png"),
-                LargeImage      = LoadIcon("icon_ifc_light_32.png") ?? LoadIcon("icon_fp_light_32.png"),
-            };
-            var ifcButton = panelLevels.AddItem(ifcBtn) as PushButton;
-            RibbonThemeWatcher.Register(ifcButton, "icon_ifc");
             panelLevels.AddSeparator();
 
             // -- Project Transfer ---------------------------------------------
