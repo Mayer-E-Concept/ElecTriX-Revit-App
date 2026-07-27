@@ -20,6 +20,7 @@ using Color      = System.Windows.Media.Color;
 using ComboBox   = System.Windows.Controls.ComboBox;
 using TextBox    = System.Windows.Controls.TextBox;
 using Grid       = System.Windows.Controls.Grid;
+using Ellipse    = System.Windows.Shapes.Ellipse;
 
 namespace METools.LevelManager
 {
@@ -110,7 +111,7 @@ namespace METools.LevelManager
             outer.Children.Add(_projectLevelsRoot);
             BuildProjectLevelsUi(_projectLevelsRoot);
 
-            _ifcRoot = new StackPanel { Visibility = Visibility.Collapsed };
+            _ifcRoot = new StackPanel { Visibility = System.Windows.Visibility.Collapsed };
             outer.Children.Add(_ifcRoot);
             BuildIfcUi(_ifcRoot);
         }
@@ -128,8 +129,8 @@ namespace METools.LevelManager
 
         private void SwitchMode(bool ifcMode)
         {
-            _projectLevelsRoot.Visibility = ifcMode ? Visibility.Collapsed : Visibility.Visible;
-            _ifcRoot.Visibility           = ifcMode ? Visibility.Visible   : Visibility.Collapsed;
+            _projectLevelsRoot.Visibility = ifcMode ? System.Windows.Visibility.Collapsed : System.Windows.Visibility.Visible;
+            _ifcRoot.Visibility           = ifcMode ? System.Windows.Visibility.Visible   : System.Windows.Visibility.Collapsed;
             UpdateToggle(_tabProjectBtn, !ifcMode);
             UpdateToggle(_tabIfcBtn, ifcMode);
         }
