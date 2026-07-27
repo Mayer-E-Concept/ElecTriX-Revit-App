@@ -262,10 +262,14 @@ namespace METools
             var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 4, 0, 20), VerticalAlignment = VerticalAlignment.Center };
             row.Children.Add(new TextBlock { Text = "Language:", FontSize = 12, Foreground = MeToolsTheme.BrText, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 12, 0) });
             _cbLanguage = StyledCombo(30, 12); _cbLanguage.Width = 180;
-            _cbLanguage.Items.Add("English"); _cbLanguage.Items.Add("Deutsch");
-            _cbLanguage.SelectedItem = SettingsStore.Language == "de" ? "Deutsch" : "English";
+            _cbLanguage.Items.Add("English"); _cbLanguage.Items.Add("Deutsch"); _cbLanguage.Items.Add("Română");
+            _cbLanguage.SelectedItem = SettingsStore.Language == "de" ? "Deutsch"
+                                     : SettingsStore.Language == "ro" ? "Română"
+                                     : "English";
             _cbLanguage.SelectionChanged += (s, e) =>
-                SettingsStore.Language = _cbLanguage.SelectedItem?.ToString() == "Deutsch" ? "de" : "en";
+                SettingsStore.Language = _cbLanguage.SelectedItem?.ToString() == "Deutsch" ? "de"
+                                        : _cbLanguage.SelectedItem?.ToString() == "Română" ? "ro"
+                                        : "en";
             row.Children.Add(_cbLanguage);
             p.Children.Add(row);
             p.Children.Add(new TextBlock { Text = "Language change takes effect after restarting Revit.", FontSize = 10, Foreground = MeToolsTheme.BrMuted, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 8) });
