@@ -152,11 +152,11 @@ namespace METools
             {
                 ToolTip         = "Read levels, units and rough site coordinates from an IFC file before importing anything.",
                 LongDescription = $"IFC Level Importer -- {VENDOR}\n\nOpens an IFC file and reads it directly (no full import) to show:\n\n* Every building storey (level) found, with its elevation -- tick which ones to create as real Revit Levels\n* The file's length unit compared against your project's, with a clear warning if they don't match (e.g. the file is in cm but your project is in mm)\n* Rough site placement / geographic / survey coordinates, if the file has them -- shown for reference only, nothing is moved in your project\n\nNothing is changed until you tick levels and click Import.",
-                Image           = LoadIcon("icon_lm_light_16.png") ?? LoadIcon("icon_fp_light_16.png"),
-                LargeImage      = LoadIcon("icon_lm_light_32.png") ?? LoadIcon("icon_fp_light_32.png"),
+                Image           = LoadIcon("icon_ifc_light_16.png") ?? LoadIcon("icon_fp_light_16.png"),
+                LargeImage      = LoadIcon("icon_ifc_light_32.png") ?? LoadIcon("icon_fp_light_32.png"),
             };
             var ifcButton = panelLevels.AddItem(ifcBtn) as PushButton;
-            RibbonThemeWatcher.Register(ifcButton, "icon_lm");
+            RibbonThemeWatcher.Register(ifcButton, "icon_ifc");
             panelLevels.AddSeparator();
 
             // -- Project Transfer ---------------------------------------------

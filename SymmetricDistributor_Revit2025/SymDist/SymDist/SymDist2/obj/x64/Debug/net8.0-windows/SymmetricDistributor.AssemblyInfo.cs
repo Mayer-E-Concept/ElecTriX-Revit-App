@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("SymmetricDistributor")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+596f4740f8ef602d9e6dfff3d809c15ee8fc642d")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+99e499058cf40e9b528f77ed7171bbc11e3a0ba9")]
 [assembly: System.Reflection.AssemblyProductAttribute("SymmetricDistributor")]
 [assembly: System.Reflection.AssemblyTitleAttribute("SymmetricDistributor")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
