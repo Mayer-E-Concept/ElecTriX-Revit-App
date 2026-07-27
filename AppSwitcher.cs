@@ -32,8 +32,6 @@ namespace METools
                     TryOpen("METools.StatisticsCommand", app);
                 else if (Target == "Comments")
                     METools.Comments.CommentsCommand.Open(app);
-                else if (Target == "ProjectHealthCheck")
-                    TryOpen("METools.ProjectHealthCheckCommand", app);
                 else if (Target == "ActivityLog")
                     METools.ActivityLog.ActivityLogCommand.Open(app);
             }
@@ -67,19 +65,21 @@ namespace METools
     public static class AppSwitcher
     {
         // Registry of switchable apps: Key (internal) -> Label (shown in the menu)
+        // Ordered to match the ribbon exactly: Placement, then Levels & Structure,
+        // then Circuits & Reporting, then Team. (Settings and Project Health Check
+        // live in the Setup panel but aren't switchable apps in this menu.)
         public static readonly List<(string Key, string Label)> Apps =
             new List<(string, string)>
             {
                 ("FamilyPlacer",  "Family Placer"),
                 ("FamilyBrowser", "Family Browser"),
                 ("LampPlacer",    "Lamp Placer"),
+                ("FixLevel",      "Fix Level"),
                 ("LevelManager",  "Level & IFC Manager"),
                 ("ProjectTransfer", "Project Transfer"),
-                ("FixLevel",      "Fix Level"),
                 ("CircuitTagger", "Circuit Tagger"),
                 ("Statistics",    "Statistics"),
                 ("Comments",      "Comments"),
-                ("ProjectHealthCheck", "Project Health Check"),
                 ("ActivityLog",   "Activity Log"),
             };
 

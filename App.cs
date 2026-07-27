@@ -34,6 +34,13 @@ namespace METools
             // user, shared folder same as Comments) -------------------------
             METools.ActivityLog.ActivityLogWatcher.Register(app);
 
+            // -- Circuit Tagger: detects a previously-tagged apartment being
+            // duplicated (Copy/Paste, Mirror, Array, Group placement) and
+            // prompts for a new House/Apartment so it doesn't merge into the
+            // original's Stats. ExternalEvent created here for the same
+            // reason as CommentsHandler.Ensure() above.
+            METools.CircuitDuplicate.CircuitDuplicateWatcher.Register(app);
+
             try { app.CreateRibbonTab(TAB); } catch { }
 
             var panelSetup     = app.CreateRibbonPanel(TAB, "Setup");
