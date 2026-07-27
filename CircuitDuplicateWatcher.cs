@@ -16,6 +16,7 @@
 using Autodesk.Revit.DB;
 using Autodesk.Revit.DB.Events;
 using Autodesk.Revit.UI;
+using METools.FamilyPlacer;
 using System.Collections.Generic;
 using System.Linq;
 
@@ -34,6 +35,14 @@ namespace METools.CircuitDuplicate
         {
             _handler = new CircuitDuplicateHandler();
             _event = ExternalEvent.Create(_handler);
+            _handler.OnDone = res =>
+            {
+                string msg = $"Reassigned {res.Updated} element(s).";
+                if (res.Tagged > 0) msg += $" Placed {res.Tagged} tag(s) in the active view.";
+                if (res.TagErrors > 0) msg += $" {res.TagErrors} tag(s) failed to place.";
+                if (!string.IsNullOrEmpty(res.NoTagReason)) msg += $" No tags placed -- {res.NoTagReason}.";
+                try { TaskDialog.Show("ME-Tools -- Circuit Tagger", msg); } catch { }
+            };
             app.ControlledApplication.DocumentChanged += OnDocumentChanged;
         }
 
@@ -63,8 +72,8 @@ namespace METools.CircuitDuplicate
                     if (!trackedCatIds.Contains(el.Category.Id)) continue;
 
                     string b = null, a = null;
-                    try { b = el.LookupParameter("CAx_Building")?.AsString(); } catch { }
-                    try { a = el.LookupParameter("CAx_Apartment")?.AsString(); } catch { }
+                    try { b = el.LookupParameter(CircuitTaggerHandler.PARAM_BUILDING)?.AsString(); } catch { }
+                    try { a = el.LookupParameter(CircuitTaggerHandler.PARAM_APARTMENT)?.AsString(); } catch { }
                     if (string.IsNullOrWhiteSpace(b) && string.IsNullOrWhiteSpace(a)) continue; // fresh placement, not a duplicate
 
                     matches.Add(id);

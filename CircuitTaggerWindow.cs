@@ -503,25 +503,34 @@ namespace METools.FamilyPlacer
 
                     foreach (var baseGrp in byBase)
                     {
-                        // All elements in this base circuit
+                        // All elements sharing this base (includes sub-circuits like
+                        // "2F2_1") -- used below to find the sub-circuits themselves,
+                        // but NOT for the parent row's own counts (see baseOnlyEl).
                         var allEl = baseGrp.ToList();
-                        int sockets  = allEl.Count(r => CatIsSocket(r));
-                        int lamps    = allEl.Count(r => CatIsLamp(r));
-                        int switches = allEl.Count(r => CatIsSwitch(r));
-                        int other    = Math.Max(0, allEl.Count - sockets - lamps - switches);
+
+                        // Only the elements tagged with the exact base label (no
+                        // sub-index) belong to the parent row. Using allEl here was
+                        // the bug: it silently folded every sub-circuit's elements
+                        // into the parent's counts too, so anything tagged "2F2_1"
+                        // showed up in both "2F2" and "2F2_1" simultaneously.
+                        var baseOnlyEl = allEl.Where(r => (r.CircuitLabel ?? "") == baseGrp.Key).ToList();
+                        int sockets  = baseOnlyEl.Count(r => CatIsSocket(r));
+                        int lamps    = baseOnlyEl.Count(r => CatIsLamp(r));
+                        int switches = baseOnlyEl.Count(r => CatIsSwitch(r));
+                        int other    = Math.Max(0, baseOnlyEl.Count - sockets - lamps - switches);
 
                         var stat = new CircuitStatRow
                         {
                             CircuitBase  = baseGrp.Key,
                             CircuitLabel = baseGrp.Key,
-                            Vorsicherung = allEl.FirstOrDefault()?.Vorsicherung ?? "",
-                            FI           = allEl.FirstOrDefault()?.FI ?? "",
+                            Vorsicherung = baseOnlyEl.FirstOrDefault()?.Vorsicherung ?? allEl.FirstOrDefault()?.Vorsicherung ?? "",
+                            FI           = baseOnlyEl.FirstOrDefault()?.FI ?? allEl.FirstOrDefault()?.FI ?? "",
                             Apartment    = aptGrp.Key,
                             Building     = bldGrp.Key,
                             CountSockets = sockets + other,
                             CountLamps   = lamps,
                             CountSwitches = switches,
-                            Elements     = allEl,
+                            Elements     = baseOnlyEl,
                         };
                         _statsList.Children.Add(BuildStatsRow(stat));
 

@@ -415,7 +415,7 @@ namespace METools.FamilyPlacer
             return label;
         }
 
-        private static XYZ GetFacingDirection(FamilyInstance fi)
+        internal static XYZ GetFacingDirection(FamilyInstance fi)
         {
             if (fi == null) return XYZ.BasisX;
             try { var f = fi.FacingOrientation; if (f != null && f.GetLength() > 0.01) return f.Normalize(); } catch { }
@@ -423,7 +423,7 @@ namespace METools.FamilyPlacer
             return XYZ.BasisX;
         }
 
-        private static string GetDirectionKey(XYZ dir)
+        internal static string GetDirectionKey(XYZ dir)
         {
             if (dir == null) return "E";
             return Math.Abs(dir.Y) >= Math.Abs(dir.X)
@@ -447,7 +447,7 @@ namespace METools.FamilyPlacer
             return false;
         }
 
-        private static XYZ GetElementCenter(Element el)
+        internal static XYZ GetElementCenter(Element el)
         {
             try
             {
@@ -459,7 +459,7 @@ namespace METools.FamilyPlacer
             return null;
         }
 
-        private static FamilySymbol FindTagSymbol(Document doc)
+        internal static FamilySymbol FindTagSymbol(Document doc)
         {
             try
             {
