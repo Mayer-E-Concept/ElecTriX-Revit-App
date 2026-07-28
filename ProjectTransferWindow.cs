@@ -50,8 +50,9 @@ namespace METools.ProjectTransfer
             _handler.OnStatus        = msg   => Dispatcher.Invoke(() => { if (StatusLeft != null) StatusLeft.Text = msg; });
             _handler.OnCopyDone      = res   => Dispatcher.Invoke(() => ShowCopyResult(res));
 
-            InitWindow("Project Transfer", width: 600);
-            BuildStatusBar("Loading…", "Revit 2025");
+            S.SetLanguage(SettingsStore.Language ?? "en");
+            InitWindow(S._("transfer.title"), width: 600);
+            BuildStatusBar(S._("transfer.loading"), "Revit 2025/2026");
             BuildUi();
 
             RequestTargetList();
@@ -66,7 +67,7 @@ namespace METools.ProjectTransfer
             RootDock.Children.Add(root);
 
             // ── Target project ───────────────────────────────────────────
-            root.Children.Add(Sec("Copy To"));
+            root.Children.Add(Sec(S._("transfer.copy_to")));
             var targetRow = new Grid { Margin = new Thickness(0, 0, 0, 12) };
             targetRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             targetRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(8) });
@@ -77,7 +78,7 @@ namespace METools.ProjectTransfer
             Grid.SetColumn(_targetCombo, 0);
             targetRow.Children.Add(_targetCombo);
 
-            var browseBtn = ActionBtn("Browse…", true, OnBrowseForTarget);
+            var browseBtn = ActionBtn(S._("transfer.browse"), true, OnBrowseForTarget);
             browseBtn.Height = 32; browseBtn.FontSize = 12; browseBtn.Padding = new Thickness(12, 0, 12, 0);
             Grid.SetColumn(browseBtn, 2);
             targetRow.Children.Add(browseBtn);
@@ -86,14 +87,13 @@ namespace METools.ProjectTransfer
 
             root.Children.Add(new TextBlock
             {
-                Text = "Only Drafting Views and Legends can be copied reliably — plan/section/elevation/3D " +
-                       "views depend on this project's own levels and grids, so they're left out here.",
+                Text = S._("transfer.views_hint"),
                 FontSize = 10.5, Foreground = MeToolsTheme.BrMuted, TextWrapping = TextWrapping.Wrap,
                 Margin = new Thickness(2, 0, 0, 12),
             });
 
             // ── Category filter + search ─────────────────────────────────
-            root.Children.Add(Sec("What To Copy"));
+            root.Children.Add(Sec(S._("transfer.what_to_copy")));
             _categoryBar = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 8) };
             var catScroller = new ScrollViewer
             {
@@ -126,11 +126,11 @@ namespace METools.ProjectTransfer
                 BorderBrush = MeToolsTheme.BrBorder, BorderThickness = new Thickness(1),
                 CaretBrush = MeToolsTheme.BrText, Margin = new Thickness(0, 0, 0, 8),
             };
-            SetPlaceholder(_searchBox, "Search…");
+            SetPlaceholder(_searchBox, S._("transfer.search_placeholder"));
             _searchBox.TextChanged += (s, e) =>
             {
                 var t = _searchBox.Text;
-                _searchText = (t == "Search…") ? "" : t;
+                _searchText = (t == S._("transfer.search_placeholder")) ? "" : t;
                 RebuildList();
             };
             root.Children.Add(_searchBox);
@@ -158,8 +158,8 @@ namespace METools.ProjectTransfer
             selRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             selRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
-            var selAllBtn  = ActionBtn("Select All",  true, () => SetAllVisibleSelected(true));
-            var selNoneBtn = ActionBtn("Select None", true, () => SetAllVisibleSelected(false));
+            var selAllBtn  = ActionBtn(S._("transfer.select_all"),  true, () => SetAllVisibleSelected(true));
+            var selNoneBtn = ActionBtn(S._("transfer.select_none"), true, () => SetAllVisibleSelected(false));
             selAllBtn.Height = 28; selAllBtn.FontSize = 11.5; selAllBtn.Padding = new Thickness(10, 0, 10, 0);
             selNoneBtn.Height = 28; selNoneBtn.FontSize = 11.5; selNoneBtn.Padding = new Thickness(10, 0, 10, 0);
             Grid.SetColumn(selAllBtn, 0); selRow.Children.Add(selAllBtn);
@@ -175,7 +175,7 @@ namespace METools.ProjectTransfer
             root.Children.Add(selRow);
 
             // ── Copy button ────────────────────────────────────────────────
-            _copyBtn = ActionBtn("Copy Selected to Target Project", false, OnCopyClicked);
+            _copyBtn = ActionBtn(S._("transfer.copy_btn"), false, OnCopyClicked);
             _copyBtn.HorizontalAlignment = HorizontalAlignment.Stretch;
             _copyBtn.IsEnabled = false;
             root.Children.Add(_copyBtn);
@@ -202,7 +202,7 @@ namespace METools.ProjectTransfer
             }
 
             if (_targetCombo.Items.Count == 0)
-                _targetCombo.Items.Add(new ComboBoxItem { Content = "— open another project first —", Tag = "" });
+                _targetCombo.Items.Add(new ComboBoxItem { Content = S._("transfer.open_another_first"), Tag = "" });
 
             var match = _targetCombo.Items.Cast<ComboBoxItem>()
                 .FirstOrDefault(i => (i.Tag as string) == previouslySelected);
@@ -214,13 +214,13 @@ namespace METools.ProjectTransfer
         {
             var dlg = new OpenFileDialog
             {
-                Title = "Open target project",
+                Title = S._("transfer.open_target_title"),
                 Filter = "Revit Project (*.rvt)|*.rvt",
                 CheckFileExists = true,
             };
             if (dlg.ShowDialog() != true) return;
 
-            if (StatusLeft != null) StatusLeft.Text = "Opening project…";
+            if (StatusLeft != null) StatusLeft.Text = S._("transfer.opening_project");
             _handler.Request = new TransferRequest { Action = TransferAction.OpenTargetFile, TargetFilePath = dlg.FileName };
             _extEvent.Raise();
         }
@@ -252,10 +252,10 @@ namespace METools.ProjectTransfer
 
             var defs = new (TransferCategory Cat, string Label)[]
             {
-                (TransferCategory.Filters,   "Filters"),
-                (TransferCategory.Views,     "Views"),
-                (TransferCategory.Sheets,    "Sheets"),
-                (TransferCategory.Schedules, "Schedules"),
+                (TransferCategory.Filters,   S._("transfer.cat_filters")),
+                (TransferCategory.Views,     S._("transfer.cat_views")),
+                (TransferCategory.Sheets,    S._("transfer.cat_sheets")),
+                (TransferCategory.Schedules, S._("transfer.cat_schedules")),
             };
             foreach (var (cat, label) in defs)
             {
@@ -340,7 +340,7 @@ namespace METools.ProjectTransfer
             foreach (var item in filtered)
                 _rowsPanel.Children.Add(BuildRow(item));
 
-            _countLabel.Text = $"{_selected.Count} selected of {_all.Count} total";
+            _countLabel.Text = string.Format(S._("transfer.selected_of_total"), _selected.Count, _all.Count);
         }
 
         private Border BuildRow(TransferItem item)
@@ -416,7 +416,7 @@ namespace METools.ProjectTransfer
 
         private void UpdateCounts()
         {
-            _countLabel.Text = $"{_selected.Count} selected of {_all.Count} total";
+            _countLabel.Text = string.Format(S._("transfer.selected_of_total"), _selected.Count, _all.Count);
             UpdateCopyButtonState();
         }
 
@@ -427,11 +427,11 @@ namespace METools.ProjectTransfer
         {
             var target = SelectedTargetTitle();
             if (string.IsNullOrEmpty(target))
-            { if (StatusLeft != null) StatusLeft.Text = "Pick or open a target project first."; return; }
+            { if (StatusLeft != null) StatusLeft.Text = S._("transfer.pick_target_first"); return; }
             if (_selected.Count == 0)
-            { if (StatusLeft != null) StatusLeft.Text = "Nothing selected to copy."; return; }
+            { if (StatusLeft != null) StatusLeft.Text = S._("transfer.nothing_selected"); return; }
 
-            if (StatusLeft != null) StatusLeft.Text = "Copying…";
+            if (StatusLeft != null) StatusLeft.Text = S._("transfer.copying");
             _handler.Request = new TransferRequest
             {
                 Action      = TransferAction.Copy,
@@ -445,7 +445,7 @@ namespace METools.ProjectTransfer
         {
             var summary = string.Join("   ·   ", res.Lines);
             if (StatusLeft != null)
-                StatusLeft.Text = string.IsNullOrEmpty(summary) ? "Nothing copied." : summary;
+                StatusLeft.Text = string.IsNullOrEmpty(summary) ? S._("transfer.nothing_copied") : summary;
         }
 
         // ═════════════════════════════════════════════════════════════════

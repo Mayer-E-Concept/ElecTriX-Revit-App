@@ -21,7 +21,8 @@ namespace METools
 
         public LicenseWindow()
         {
-            InitWindow("ME-Tools — Activation Required", 460);
+            S.SetLanguage(SettingsStore.Language ?? "en");
+            InitWindow(S._("license.window_title"), 460);
             Build();
         }
 
@@ -29,10 +30,10 @@ namespace METools
         {
             var status = LicenseManager.GetStatus();
             string headerText = status == LicenseStatus.LicenseExpired
-                ? "Your ME-Tools license has expired."
-                : "Your ME-Tools beta period has ended.";
+                ? S._("license.header_expired")
+                : S._("license.header_beta_ended");
 
-            BuildStatusBar("License required to continue");
+            BuildStatusBar(S._("license.status_bar"));
 
             var body = new StackPanel { Margin = new Thickness(24, 20, 24, 20) };
 
@@ -49,7 +50,7 @@ namespace METools
 
             body.Children.Add(new TextBlock
             {
-                Text         = "To continue using ME-Tools, choose a license option below or enter an activation code received from Mayer E-Concept SRL.",
+                Text         = S._("license.intro"),
                 FontSize     = 12,
                 Foreground   = MeToolsTheme.BrMuted,
                 TextWrapping = TextWrapping.Wrap,
@@ -59,7 +60,7 @@ namespace METools
             // ── License options ──────────────────────────────────────────────
             body.Children.Add(new TextBlock
             {
-                Text       = "LICENSE OPTIONS",
+                Text       = S._("license.options_header"),
                 FontSize   = 10,
                 FontWeight = FontWeights.SemiBold,
                 Foreground = MeToolsTheme.BrMuted,
@@ -72,13 +73,13 @@ namespace METools
             optGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(10) });
             optGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
-            var card30 = BuildOptionCard("30-Day Extension",
-                "30 Tage verlängern",
-                "Ideal for short-term projects.\nActivated immediately with code.",
+            var card30 = BuildOptionCard(S._("license.opt_30day_title"),
+                S._("license.opt_30day_sub"),
+                S._("license.opt_30day_desc"),
                 false);
-            var card1y = BuildOptionCard("1-Year License",
-                "1 Jahr Lizenz",
-                "Full access for 12 months.\nBest value for regular users.",
+            var card1y = BuildOptionCard(S._("license.opt_1y_title"),
+                S._("license.opt_1y_sub"),
+                S._("license.opt_1y_desc"),
                 true);
 
             Grid.SetColumn(card30, 0);
@@ -98,7 +99,7 @@ namespace METools
                 Margin          = new Thickness(0, 0, 0, 20),
                 Child           = new TextBlock
                 {
-                    Text         = "Contact: info@mayer-econcept.ro  ·  Mayer E-Concept SRL\nSend your Machine ID and desired license option.",
+                    Text         = S._("license.contact_info"),
                     FontSize     = 11,
                     Foreground   = MeToolsTheme.BrMuted,
                     TextWrapping = TextWrapping.Wrap
@@ -108,7 +109,7 @@ namespace METools
             // ── Machine ID ───────────────────────────────────────────────────
             body.Children.Add(new TextBlock
             {
-                Text       = "YOUR MACHINE ID",
+                Text       = S._("license.machine_id_header"),
                 FontSize   = 10,
                 FontWeight = FontWeights.SemiBold,
                 Foreground = MeToolsTheme.BrMuted,
@@ -132,7 +133,7 @@ namespace METools
             };
             var copyBtn = new Button
             {
-                Content           = "Copy",
+                Content           = S._("license.copy"),
                 Margin            = new Thickness(8, 0, 0, 0),
                 Padding           = new Thickness(14, 6, 14, 6),
                 Background        = MeToolsTheme.BrSurface,
@@ -147,7 +148,7 @@ namespace METools
             copyBtn.Click += (s, e) =>
             {
                 System.Windows.Clipboard.SetText(idTb.Text);
-                copyBtn.Content = "✓ Copied";
+                copyBtn.Content = S._("license.copied");
             };
             idRow.Children.Add(idTb);
             idRow.Children.Add(copyBtn);
@@ -156,7 +157,7 @@ namespace METools
             // ── Activation code entry ────────────────────────────────────────
             body.Children.Add(new TextBlock
             {
-                Text       = "ACTIVATION CODE",
+                Text       = S._("license.code_header"),
                 FontSize   = 10,
                 FontWeight = FontWeights.SemiBold,
                 Foreground = MeToolsTheme.BrMuted,
@@ -186,7 +187,7 @@ namespace METools
             };
             body.Children.Add(_statusTb);
 
-            _activateBtn                      = ActionBtn("Activate ME-Tools", true, Activate);
+            _activateBtn                      = ActionBtn(S._("license.activate_btn"), true, Activate);
             _activateBtn.HorizontalAlignment  = HorizontalAlignment.Stretch;
             _activateBtn.Height               = 40;
             body.Children.Add(_activateBtn);
@@ -224,7 +225,7 @@ namespace METools
                     Margin              = new Thickness(0, 0, 0, 8),
                     Child               = new TextBlock
                     {
-                        Text       = "RECOMMENDED",
+                        Text       = S._("license.recommended"),
                         FontSize   = 9,
                         FontWeight = FontWeights.Bold,
                         Foreground = new SolidColorBrush(accent)
@@ -266,7 +267,7 @@ namespace METools
             string code = _codeTb.Text?.Trim() ?? "";
             if (string.IsNullOrEmpty(code))
             {
-                ShowStatus("Please enter the activation code.", false);
+                ShowStatus(S._("license.enter_code"), false);
                 return;
             }
 
@@ -276,10 +277,10 @@ namespace METools
                 Activated = true;
                 string msg = licType switch
                 {
-                    LicenseType.Permanent => "✓  Activated — Full permanent license.",
-                    LicenseType.Year1     => "✓  Activated — 1-year license.",
-                    LicenseType.Extend30  => "✓  Activated — 30-day extension.",
-                    _                     => "✓  Activation successful."
+                    LicenseType.Permanent => S._("license.activated_permanent"),
+                    LicenseType.Year1     => S._("license.activated_1y"),
+                    LicenseType.Extend30  => S._("license.activated_30day"),
+                    _                     => S._("license.activated_generic")
                 };
                 ShowStatus(msg, true);
                 _activateBtn.IsEnabled = false;
@@ -292,7 +293,7 @@ namespace METools
             }
             else
             {
-                ShowStatus("✗  Invalid activation code. Please check and try again.", false);
+                ShowStatus(S._("license.invalid_code"), false);
             }
         }
 

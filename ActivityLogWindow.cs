@@ -43,36 +43,35 @@ namespace METools.ActivityLog
             _navHandler = navHandler;
             _navHandler.OnDone = (success, msg) => Dispatcher.Invoke(() =>
             {
-                StatusLeft.Text = success ? "Switched to that level's floor plan." : ("Couldn't go there: " + msg);
+                StatusLeft.Text = success ? S._("activitylog.switched_level") : string.Format(S._("activitylog.couldnt_go"), msg);
             });
             _handler.OnResult = (result, w) => Dispatcher.Invoke(() =>
             {
                 _all = result ?? new List<ActivityLogEntry>();
                 PopulateUserFilter();
                 RenderList();
-                StatusLeft.Text = string.IsNullOrEmpty(w) ? $"{_all.Count} entries." : w;
+                StatusLeft.Text = string.IsNullOrEmpty(w) ? string.Format(S._("activitylog.entries_count"), _all.Count) : w;
             });
 
-            InitWindow("ElectriX -- Activity Log", 620);
+            S.SetLanguage(SettingsStore.Language ?? "en");
+            InitWindow(S._("activitylog.title"), 620);
             Build();
 
             _all = entries ?? new List<ActivityLogEntry>();
 
             if (string.IsNullOrWhiteSpace(METools.Comments.CommentsStorage.GetSharedFolder()))
             {
-                _warningBox = InfoBox(
-                    "No shared folder configured yet -- Activity Log uses the same shared folder as Comments. " +
-                    "Set it once from the Comments tool's own Settings, and both features start working from then on.");
+                _warningBox = InfoBox(S._("activitylog.no_folder_warning"));
             }
 
             PopulateUserFilter();
             RenderList();
-            StatusLeft.Text = string.IsNullOrEmpty(warning) ? $"{_all.Count} entries." : warning;
+            StatusLeft.Text = string.IsNullOrEmpty(warning) ? string.Format(S._("activitylog.entries_count"), _all.Count) : warning;
         }
 
         private void Build()
         {
-            BuildStatusBar("Loading...");
+            BuildStatusBar(S._("activitylog.loading"));
 
             // Footer FIRST (Dock.Bottom before the fill element).
             var footer = new Border
@@ -83,10 +82,10 @@ namespace METools.ActivityLog
             };
             DockPanel.SetDock(footer, Dock.Bottom);
             var footerRow = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
-            var exportBtn = FooterBtn("Export CSV", primary: false, onClick: ExportCsv);
-            var refreshBtn = FooterBtn("Refresh", primary: true, onClick: () =>
+            var exportBtn = FooterBtn(S._("activitylog.export_csv"), primary: false, onClick: ExportCsv);
+            var refreshBtn = FooterBtn(S._("activitylog.refresh"), primary: true, onClick: () =>
             {
-                StatusLeft.Text = "Refreshing...";
+                StatusLeft.Text = S._("activitylog.refreshing");
                 _evt.Raise();
             });
             exportBtn.Margin = new Thickness(0, 0, 8, 0);
@@ -106,10 +105,10 @@ namespace METools.ActivityLog
             var filterSp = new StackPanel();
 
             var actionRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 8) };
-            _btnAll      = ToggleBtn("All",      true,  () => SetActionFilter(null));
-            _btnAdded    = ToggleBtn("Added",    false, () => SetActionFilter(ActivityAction.Added));
-            _btnModified = ToggleBtn("Modified", false, () => SetActionFilter(ActivityAction.Modified));
-            _btnDeleted  = ToggleBtn("Deleted",   false, () => SetActionFilter(ActivityAction.Deleted));
+            _btnAll      = ToggleBtn(S._("activitylog.filter_all"),      true,  () => SetActionFilter(null));
+            _btnAdded    = ToggleBtn(S._("activitylog.filter_added"),    false, () => SetActionFilter(ActivityAction.Added));
+            _btnModified = ToggleBtn(S._("activitylog.filter_modified"), false, () => SetActionFilter(ActivityAction.Modified));
+            _btnDeleted  = ToggleBtn(S._("activitylog.filter_deleted"),   false, () => SetActionFilter(ActivityAction.Deleted));
             foreach (var b in new[] { _btnAll, _btnAdded, _btnModified, _btnDeleted })
                 b.Margin = new Thickness(0, 0, 6, 0);
             actionRow.Children.Add(_btnAll);
@@ -131,7 +130,7 @@ namespace METools.ActivityLog
                 Background = MeToolsTheme.BrInput, Foreground = MeToolsTheme.BrText,
                 BorderBrush = MeToolsTheme.BrBorder, BorderThickness = new Thickness(1),
                 Padding = new Thickness(6, 0, 6, 0), VerticalContentAlignment = VerticalAlignment.Center,
-                ToolTip = "Search category / family / type / element id...",
+                ToolTip = S._("activitylog.search_tip"),
             };
             _searchBox.TextChanged += (s, e) => RenderList();
             searchRow.Children.Add(_searchBox);
@@ -167,7 +166,7 @@ namespace METools.ActivityLog
                 .Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(u => u).ToList();
 
             _userCmb.Items.Clear();
-            _userCmb.Items.Add(new ComboBoxItem { Content = "-- All users --", Tag = "" });
+            _userCmb.Items.Add(new ComboBoxItem { Content = S._("activitylog.all_users"), Tag = "" });
             foreach (var u in users)
                 _userCmb.Items.Add(new ComboBoxItem { Content = u, Tag = u });
             _userCmb.SelectedIndex = 0;
@@ -202,7 +201,7 @@ namespace METools.ActivityLog
             {
                 _body.Children.Add(new TextBlock
                 {
-                    Text = "No matching activity.", FontSize = 12, Foreground = MeToolsTheme.BrMuted,
+                    Text = S._("activitylog.no_matching"), FontSize = 12, Foreground = MeToolsTheme.BrMuted,
                     HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 30, 0, 0),
                 });
                 return;
@@ -230,14 +229,14 @@ namespace METools.ActivityLog
                 Margin = new Thickness(0, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center,
                 Child = new TextBlock
                 {
-                    Text = entry.Action.ToString(), FontSize = 10, FontWeight = FontWeights.SemiBold,
+                    Text = ActionLabel(entry.Action), FontSize = 10, FontWeight = FontWeights.SemiBold,
                     Foreground = new SolidColorBrush(actionColor),
                 },
             };
             line1.Children.Add(badge);
             line1.Children.Add(new TextBlock
             {
-                Text = string.IsNullOrEmpty(entry.Category) ? "(unknown category)" : entry.Category,
+                Text = string.IsNullOrEmpty(entry.Category) ? S._("activitylog.unknown_category") : entry.Category,
                 FontSize = 12, FontWeight = FontWeights.SemiBold, Foreground = MeToolsTheme.BrText,
                 VerticalAlignment = VerticalAlignment.Center,
             });
@@ -253,10 +252,10 @@ namespace METools.ActivityLog
             var detailParts = new List<string>
             {
                 entry.TimestampLocal.ToString("yyyy-MM-dd HH:mm"),
-                string.IsNullOrEmpty(entry.User) ? "(unknown user)" : entry.User,
+                string.IsNullOrEmpty(entry.User) ? S._("activitylog.unknown_user") : entry.User,
             };
             if (!string.IsNullOrEmpty(entry.LevelName)) detailParts.Add(entry.LevelName);
-            detailParts.Add("ID " + entry.ElementId);
+            detailParts.Add(S._("activitylog.id_prefix") + entry.ElementId);
             if (!string.IsNullOrEmpty(entry.TransactionNames)) detailParts.Add(entry.TransactionNames);
 
             var line2 = new StackPanel { Orientation = Orientation.Horizontal };
@@ -270,7 +269,7 @@ namespace METools.ActivityLog
             {
                 var goBtn = new Button
                 {
-                    Content = "Go to Level", FontSize = 9, Height = 18,
+                    Content = S._("activitylog.go_to_level"), FontSize = 9, Height = 18,
                     Padding = new Thickness(6, 0, 6, 0), Margin = new Thickness(8, 0, 0, 0),
                     Background = MeToolsTheme.BrBtnBg, Foreground = MeToolsTheme.BrPetrol,
                     BorderBrush = MeToolsTheme.BrPetrol, BorderThickness = new Thickness(1),
@@ -280,7 +279,7 @@ namespace METools.ActivityLog
                 var capturedLevelId = entry.LevelId;
                 goBtn.Click += (s, e) =>
                 {
-                    StatusLeft.Text = "Switching level...";
+                    StatusLeft.Text = S._("activitylog.switching_level");
                     _navHandler.TargetLevelId = capturedLevelId;
                     _navEvt.Raise();
                 };
@@ -294,6 +293,16 @@ namespace METools.ActivityLog
                 Padding = new Thickness(2, 8, 2, 8),
                 Child = outer,
             };
+        }
+
+        private static string ActionLabel(ActivityAction action)
+        {
+            switch (action)
+            {
+                case ActivityAction.Added:    return S._("activitylog.action_added");
+                case ActivityAction.Deleted:  return S._("activitylog.action_deleted");
+                default:                      return S._("activitylog.action_modified");
+            }
         }
 
         private void ExportCsv()
@@ -318,11 +327,11 @@ namespace METools.ActivityLog
                 }
 
                 File.WriteAllText(path, sb.ToString(), new UTF8Encoding(true));
-                StatusLeft.Text = "Exported: Documents\\METools\\" + Path.GetFileName(path);
+                StatusLeft.Text = string.Format(S._("activitylog.exported"), Path.GetFileName(path));
             }
             catch (Exception ex)
             {
-                StatusLeft.Text = "Export failed: " + ex.Message;
+                StatusLeft.Text = string.Format(S._("activitylog.export_failed"), ex.Message);
             }
         }
 

@@ -72,7 +72,8 @@ namespace METools.FamilyPlacer
         public CircuitTaggerWindow(UIApplication uiApp, ExternalEvent extEvent, CircuitTaggerHandler handler)
         {
             _uiApp = uiApp; _extEvent = extEvent; _handler = handler;
-            InitWindow("ElecTriX -- Circuit Tagger", 760);
+            S.SetLanguage(SettingsStore.Language ?? "en");
+            InitWindow(S._("circuittagger.title"), 760);
             MaxHeight = Math.Min(820, SystemParameters.WorkArea.Height - 60);
             _settingsData = CircuitTaggerSettings.Load();
             WireHandler();
@@ -106,7 +107,7 @@ namespace METools.FamilyPlacer
             });
             _handler.OnDone = () => Dispatcher.Invoke(() => { RefreshStats(); });
             _handler.OnError = msg => Dispatcher.Invoke(() =>
-                MessageBox.Show(msg, "ME-Tools -- Circuit Tagger", MessageBoxButton.OK, MessageBoxImage.Warning));
+                MessageBox.Show(msg, S._("circuittagger.title"), MessageBoxButton.OK, MessageBoxImage.Warning));
             _handler.OnParamsLoaded = loaded => Dispatcher.Invoke(() =>
             {
                 if (_tbVorsicherung      != null) _tbVorsicherung.Text      = loaded.Vorsicherung      ?? "";
@@ -117,14 +118,14 @@ namespace METools.FamilyPlacer
                 if (_cbApartment         != null) _cbApartment.Text         = loaded.Apartment         ?? "";
                 if (_cbBuilding          != null) _cbBuilding.Text          = loaded.Building          ?? "";
                 if (_tbSubLabel          != null) _tbSubLabel.Text          = loaded.SubLabel          ?? "";
-                UpdateStatusBar("Params loaded. Edit and click Apply & Tag.");
+                UpdateStatusBar(S._("circuittagger.params_loaded"));
             });
         }
 
         // ?? Build ?????????????????????????????????????????????????????????
         private void Build()
         {
-            BuildStatusBar("Ready -- select elements to tag");
+            BuildStatusBar(S._("circuittagger.ready_select"));
             var tabBar = BuildTabBar();
             DockPanel.SetDock(tabBar, Dock.Top);
             RootDock.Children.Add(tabBar);
@@ -156,9 +157,9 @@ namespace METools.FamilyPlacer
             _panStats    = BuildStatsPanel();
             _panSettings = BuildSettingsPanel();
 
-            _tabTag      = MakeTab("Tag Elements",  MeToolsTheme.CPetrol, () => ShowTab(_tabTag,      _panTag));
-            _tabStats    = MakeTab("Circuit Stats",  MeToolsTheme.COrange, () => { ShowTab(_tabStats, _panStats); RefreshStats(); });
-            _tabSettings = MakeTab("Settings",       MeToolsTheme.CGreen,  () => ShowTab(_tabSettings, _panSettings));
+            _tabTag      = MakeTab(S._("circuittagger.tab_tag"),      MeToolsTheme.CPetrol, () => ShowTab(_tabTag,      _panTag));
+            _tabStats    = MakeTab(S._("circuittagger.tab_stats"),    MeToolsTheme.COrange, () => { ShowTab(_tabStats, _panStats); RefreshStats(); });
+            _tabSettings = MakeTab(S._("circuittagger.tab_settings"), MeToolsTheme.CGreen,  () => ShowTab(_tabSettings, _panSettings));
             var sp = new StackPanel { Orientation = Orientation.Horizontal };
             sp.Children.Add(_tabTag); sp.Children.Add(_tabStats); sp.Children.Add(_tabSettings);
             return new Border
@@ -224,18 +225,18 @@ namespace METools.FamilyPlacer
             var sp = new StackPanel { Visibility = Visibility.Collapsed };
 
             // -- Selection row
-            sp.Children.Add(SecH("Element Selection"));
+            sp.Children.Add(SecH(S._("circuittagger.element_selection")));
             var selRow = new Grid { Margin = new Thickness(0, 4, 0, 4) };
             selRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             selRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            _lblSelCount = new TextBlock { Text = "0 elements selected", FontSize = 11,
+            _lblSelCount = new TextBlock { Text = S._("circuittagger.elements_selected_0"), FontSize = 11,
                 Foreground = MeToolsTheme.BrMuted, VerticalAlignment = VerticalAlignment.Center };
             Grid.SetColumn(_lblSelCount, 0); selRow.Children.Add(_lblSelCount);
             var btnRow = new StackPanel { Orientation = Orientation.Horizontal };
-            var btnSel  = SmallBtn("+ Select in Revit", true,  OnSelectClicked);
-            var btnLoad = SmallBtn("Load",               false, OnLoadFromSelectionClicked);
-            btnLoad.ToolTip = "Select an already-tagged element in Revit, click Load to fill in all fields from it.";
-            var btnClr  = SmallBtn("Clear",              false, OnClearClicked);
+            var btnSel  = SmallBtn(S._("circuittagger.select_in_revit"), true,  OnSelectClicked);
+            var btnLoad = SmallBtn(S._("circuittagger.load"),               false, OnLoadFromSelectionClicked);
+            btnLoad.ToolTip = S._("circuittagger.load_tip");
+            var btnClr  = SmallBtn(S._("circuittagger.clear"),              false, OnClearClicked);
             btnSel.Margin  = new Thickness(0, 0, 6, 0);
             btnLoad.Margin = new Thickness(0, 0, 6, 0);
             btnRow.Children.Add(btnSel); btnRow.Children.Add(btnLoad); btnRow.Children.Add(btnClr);
@@ -256,8 +257,8 @@ namespace METools.FamilyPlacer
             sp.Children.Add(Div());
 
             // -- Circuit Parameters (2x2 grid + sub-index)
-            sp.Children.Add(SecH("Circuit Parameters"));
-            sp.Children.Add(InfoBox("FI + Stromkreis = tag label (e.g. 1 + F1 = 1F1). Sub-index adds _N suffix (e.g. 1F1_1 for the switch/lamp group). Leave blank to skip."));
+            sp.Children.Add(SecH(S._("circuittagger.circuit_parameters")));
+            sp.Children.Add(InfoBox(S._("circuittagger.circuit_params_hint")));
 
             var p2 = new Grid { Margin = new Thickness(0, 4, 0, 0) };
             p2.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -269,19 +270,19 @@ namespace METools.FamilyPlacer
             p2.RowDefinitions.Add(new RowDefinition { Height = new GridLength(8) });
             p2.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
-            var vsCard = InlineCard("Vorsicherung", "Upstream fuse (e.g. B25A)", out _tbVorsicherung);
+            var vsCard = InlineCard("Vorsicherung", S._("circuittagger.fuse_hint"), out _tbVorsicherung);
             Grid.SetRow(vsCard, 0); Grid.SetColumn(vsCard, 0); p2.Children.Add(vsCard);
 
-            var fiCard = InlineCard("FI (RCD number)", "e.g. 1, 2", out _tbFI);
+            var fiCard = InlineCard("FI (RCD number)", S._("circuittagger.fi_hint"), out _tbFI);
             Grid.SetRow(fiCard, 0); Grid.SetColumn(fiCard, 2); p2.Children.Add(fiCard);
 
-            var subCard = InlineCard("Sub-index", "Number only. Empty = no suffix.", out _tbSubIndex);
+            var subCard = InlineCard(S._("circuittagger.subindex_label"), S._("circuittagger.subindex_hint"), out _tbSubIndex);
             Grid.SetRow(subCard, 0); Grid.SetColumn(subCard, 4); p2.Children.Add(subCard);
 
-            var skCard = InlineCard("Stromkreis", "Circuit branch, e.g. F1, F2", out _tbStromkreis);
+            var skCard = InlineCard("Stromkreis", S._("circuittagger.circuit_hint"), out _tbStromkreis);
             Grid.SetRow(skCard, 2); Grid.SetColumn(skCard, 0); p2.Children.Add(skCard);
 
-            var bkCard = InlineCard("Beleuchtungskreis", "Lighting circuit, e.g. L1 (optional)", out _tbBeleuchtungskreis);
+            var bkCard = InlineCard("Beleuchtungskreis", S._("circuittagger.lighting_circuit_hint"), out _tbBeleuchtungskreis);
             Grid.SetRow(bkCard, 2); Grid.SetColumn(bkCard, 2); p2.Children.Add(bkCard);
 
             // Preview box in 5th column, row 2
@@ -292,7 +293,7 @@ namespace METools.FamilyPlacer
                 Padding = new Thickness(8, 6, 8, 6),
             };
             var prevSp = new StackPanel();
-            prevSp.Children.Add(new TextBlock { Text = "PREVIEW", FontSize = 8, FontWeight = FontWeights.SemiBold,
+            prevSp.Children.Add(new TextBlock { Text = S._("circuittagger.preview"), FontSize = 8, FontWeight = FontWeights.SemiBold,
                 Foreground = MeToolsTheme.BrMuted, Margin = new Thickness(0, 0, 0, 3) });
             var prevLabel = new TextBlock { Text = "--", FontSize = 22, FontWeight = FontWeights.Bold,
                 FontFamily = new FontFamily("Consolas"), Foreground = MeToolsTheme.BrPetrol };
@@ -318,33 +319,33 @@ namespace METools.FamilyPlacer
 
             // Sub-label (secondary annotation tag: a, b, c...)
             sp.Children.Add(Div());
-            sp.Children.Add(SecH("Secondary Tag (Optional)"));
-            sp.Children.Add(InfoBox("Generates a separate text annotation near each element (e.g. 'a', 'b'). This is independent of the circuit tag. Leave blank to skip."));
-            var subLabelCard = InlineCard("Secondary Label", "e.g. a, b, c. A separate text tag is placed near each element.", out _tbSubLabel);
+            sp.Children.Add(SecH(S._("circuittagger.secondary_tag")));
+            sp.Children.Add(InfoBox(S._("circuittagger.secondary_tag_hint")));
+            var subLabelCard = InlineCard(S._("circuittagger.secondary_label"), S._("circuittagger.secondary_label_hint"), out _tbSubLabel);
             sp.Children.Add(subLabelCard);
             _allInputs.Add(_tbSubLabel);
 
             sp.Children.Add(Div());
 
             // -- Group Tags (Apartment + Building side by side)
-            sp.Children.Add(SecH("Group Tags (invisible)"));
-            sp.Children.Add(InfoBox("Apartment and Building are stored as shared parameters on each element but not shown in the view. They group elements for the stats list and Excel export."));
+            sp.Children.Add(SecH(S._("circuittagger.group_tags")));
+            sp.Children.Add(InfoBox(S._("circuittagger.group_tags_hint")));
 
             var gRow = new Grid { Margin = new Thickness(0, 4, 0, 0) };
             gRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             gRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(12) });
             gRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
-            var aptCard = ComboCard("Apartment / Group", "Type new or pick from dropdown", out _cbApartment);
+            var aptCard = ComboCard("Apartment / Group", S._("circuittagger.pick_dropdown_hint"), out _cbApartment);
             Grid.SetColumn(aptCard, 0); gRow.Children.Add(aptCard);
 
-            var bldCard = ComboCard("Building / Haus", "Type new or pick from dropdown", out _cbBuilding);
+            var bldCard = ComboCard("Building / Haus", S._("circuittagger.pick_dropdown_hint"), out _cbBuilding);
             Grid.SetColumn(bldCard, 2); gRow.Children.Add(bldCard);
             sp.Children.Add(gRow);
             _allCombos.Add(_cbApartment); _allCombos.Add(_cbBuilding);
 
             sp.Children.Add(Div());
-            _lblStatus = new TextBlock { Text = "Ready.", FontSize = 11, Foreground = MeToolsTheme.BrMuted,
+            _lblStatus = new TextBlock { Text = S._("circuittagger.ready"), FontSize = 11, Foreground = MeToolsTheme.BrMuted,
                 TextWrapping = TextWrapping.Wrap };
             sp.Children.Add(_lblStatus);
             return sp;
@@ -361,21 +362,21 @@ namespace METools.FamilyPlacer
             hdrRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             hdrRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             hdrRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            var hdrTb = SecH("Circuit Statistics");
+            var hdrTb = SecH(S._("circuittagger.circuit_statistics"));
             Grid.SetColumn(hdrTb, 0); hdrRow.Children.Add(hdrTb);
-            _btnClearSelected = SmallBtn("Clear Selected", false, OnClearSelectedClicked);
+            _btnClearSelected = SmallBtn(S._("circuittagger.clear_selected"), false, OnClearSelectedClicked);
             _btnClearSelected.Margin = new Thickness(12, 0, 0, 0);
             _btnClearSelected.Padding = new Thickness(16, 0, 16, 0);
             _btnClearSelected.IsEnabled = false;
             _btnClearSelected.Foreground = new SolidColorBrush(Color.FromRgb(180, 60, 60));
             Grid.SetColumn(_btnClearSelected, 1); hdrRow.Children.Add(_btnClearSelected);
-            var btnRefStats = SmallBtn("Refresh", false, () => RefreshStats());
+            var btnRefStats = SmallBtn(S._("circuittagger.refresh"), false, () => RefreshStats());
             btnRefStats.Margin = new Thickness(8, 0, 0, 0);
             btnRefStats.Padding = new Thickness(16, 0, 16, 0);
             Grid.SetColumn(btnRefStats, 2); hdrRow.Children.Add(btnRefStats);
             sp.Children.Add(hdrRow);
 
-            sp.Children.Add(InfoBox("Stats read parameter values from elements -- not from visual tags. Deleting a tag does NOT clear the circuit data. Tick the circuits you want to wipe and use 'Clear Selected' above, or use the per-row 'Clear' button for just one."));
+            sp.Children.Add(InfoBox(S._("circuittagger.stats_hint")));
             var container = new Border
             {
                 BorderBrush = MeToolsTheme.BrBorder, BorderThickness = new Thickness(1),
@@ -405,7 +406,7 @@ namespace METools.FamilyPlacer
             var selectAllCb = new CheckBox
             {
                 VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Center,
-                ToolTip = "Select/deselect all visible circuits for bulk clearing",
+                ToolTip = S._("circuittagger.select_all_tip"),
             };
             selectAllCb.Click += (s, e) =>
             {
@@ -436,10 +437,10 @@ namespace METools.FamilyPlacer
             var headers = new (int col, string text)[]
             {
                 (3, "Circuit / Vorsicherung"),
-                (5, "Sock."),
-                (6, "Lamp"),
-                (7, "Sw."),
-                (8, "Total"),
+                (5, S._("circuittagger.col_sock")),
+                (6, S._("circuittagger.col_lamp")),
+                (7, S._("circuittagger.col_sw")),
+                (8, S._("circuittagger.col_total")),
             };
             foreach (var (col, text) in headers)
             {
@@ -473,7 +474,7 @@ namespace METools.FamilyPlacer
             if (doc == null) return;
 
             var rows = CircuitTaggerHandler.ReadAllTaggedElements(doc);
-            if (rows.Count == 0) { _statsList.Children.Add(EmptyRow("No tagged elements found.")); return; }
+            if (rows.Count == 0) { _statsList.Children.Add(EmptyRow(S._("circuittagger.no_tagged_found"))); return; }
 
             // Group: building -> apartment -> circuit base -> sub-circuits
             var byBuilding = rows
@@ -485,7 +486,7 @@ namespace METools.FamilyPlacer
             {
                 // Building header
                 _statsList.Children.Add(GroupHeader(
-                    string.IsNullOrEmpty(bldGrp.Key) ? "(No Building)" : "Building: " + bldGrp.Key,
+                    string.IsNullOrEmpty(bldGrp.Key) ? S._("circuittagger.no_building") : S._("circuittagger.building_prefix") + bldGrp.Key,
                     MeToolsTheme.CPetrol));
 
                 var byApt = bldGrp.GroupBy(r => r.Apartment ?? "").OrderBy(g => g.Key);
@@ -493,7 +494,7 @@ namespace METools.FamilyPlacer
                 {
                     // Apartment header
                     _statsList.Children.Add(GroupHeader(
-                        "  " + (string.IsNullOrEmpty(aptGrp.Key) ? "(No Apartment)" : aptGrp.Key),
+                        "  " + (string.IsNullOrEmpty(aptGrp.Key) ? S._("circuittagger.no_apartment") : aptGrp.Key),
                         MeToolsTheme.COrange));
 
                     // Group circuits by base (strip sub-index)
@@ -562,7 +563,7 @@ namespace METools.FamilyPlacer
                     }
                 }
             }
-            if (!anyRow) _statsList.Children.Add(EmptyRow("No tagged elements found."));
+            if (!anyRow) _statsList.Children.Add(EmptyRow(S._("circuittagger.no_tagged_found")));
         }
 
         // -- Category classification -- uses integer IDs (locale-independent) --
@@ -671,14 +672,14 @@ namespace METools.FamilyPlacer
             var capturedLabel = stat.CircuitLabel;
             var clearBtn = new Button
             {
-                Content = "Clear", Height = 20, FontSize = 9,
+                Content = S._("circuittagger.clear"), Height = 20, FontSize = 9,
                 Background = new SolidColorBrush(Color.FromArgb(0, 0, 0, 0)),
                 BorderBrush = new SolidColorBrush(Color.FromRgb(180, 60, 60)),
                 BorderThickness = new Thickness(1), Cursor = Cursors.Hand,
                 Foreground = new SolidColorBrush(Color.FromRgb(180, 60, 60)),
                 Margin = new Thickness(6, 0, 6, 0), Padding = new Thickness(8, 0, 8, 0),
                 VerticalAlignment = VerticalAlignment.Center,
-                ToolTip = "Clears all circuit parameters from elements with this circuit label. Does NOT delete the visual tags.",
+                ToolTip = S._("circuittagger.clear_row_tip"),
                 Template = RoundedBtnTemplate(),
             };
             clearBtn.Click += (s, e) => SendClearRequest(new List<string> { capturedLabel });
@@ -732,14 +733,14 @@ namespace METools.FamilyPlacer
             {
                 panel.Children.Add(new TextBlock
                 {
-                    Text = "No element details available.", FontSize = 10.5,
+                    Text = S._("circuittagger.no_element_details"), FontSize = 10.5,
                     Foreground = MeToolsTheme.BrMuted, FontStyle = FontStyles.Italic,
                 });
                 return panel;
             }
 
             var byLevel = elements
-                .GroupBy(e => string.IsNullOrEmpty(e.LevelName) ? "(No Level)" : e.LevelName)
+                .GroupBy(e => string.IsNullOrEmpty(e.LevelName) ? S._("circuittagger.no_level") : e.LevelName)
                 .OrderBy(g => g.Key);
 
             foreach (var lvlGrp in byLevel)
@@ -771,12 +772,12 @@ namespace METools.FamilyPlacer
             if (circuitLabels == null || circuitLabels.Count == 0) return;
 
             string prompt = circuitLabels.Count == 1
-                ? $"This will clear all circuit parameters from all elements with circuit '{circuitLabels[0]}'.\n\nVisual tags are NOT deleted -- delete those manually in Revit.\n\nContinue?"
-                : $"This will clear all circuit parameters from all elements across {circuitLabels.Count} selected circuits:\n\n"
-                  + string.Join(", ", circuitLabels.Take(15)) + (circuitLabels.Count > 15 ? $", +{circuitLabels.Count - 15} more" : "")
-                  + "\n\nVisual tags are NOT deleted -- delete those manually in Revit.\n\nContinue?";
+                ? string.Format(S._("circuittagger.clear_confirm_1"), circuitLabels[0])
+                : string.Format(S._("circuittagger.clear_confirm_n"), circuitLabels.Count)
+                  + string.Join(", ", circuitLabels.Take(15)) + (circuitLabels.Count > 15 ? string.Format(S._("circuittagger.clear_confirm_more"), circuitLabels.Count - 15) : "")
+                  + S._("circuittagger.clear_confirm_tail");
 
-            var result = MessageBox.Show(prompt, "Clear Circuit Data", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+            var result = MessageBox.Show(prompt, S._("circuittagger.clear_title"), MessageBoxButton.YesNo, MessageBoxImage.Warning);
             if (result != MessageBoxResult.Yes) return;
 
             _handler.Request = new CircuitTaggerRequest
@@ -786,8 +787,8 @@ namespace METools.FamilyPlacer
             };
             _extEvent.Raise();
             UpdateStatusBar(circuitLabels.Count == 1
-                ? $"Clearing circuit data for '{circuitLabels[0]}'..."
-                : $"Clearing circuit data for {circuitLabels.Count} circuits...");
+                ? string.Format(S._("circuittagger.clearing_1"), circuitLabels[0])
+                : string.Format(S._("circuittagger.clearing_n"), circuitLabels.Count));
 
             // Optimistic: RefreshStats() (triggered by OnDone once the clear
             // finishes) rebuilds the rows and clears selection anyway, but
@@ -804,7 +805,7 @@ namespace METools.FamilyPlacer
             if (_btnClearSelected == null) return;
             int n = _selectedForClear.Count;
             _btnClearSelected.IsEnabled = n > 0;
-            _btnClearSelected.Content = n > 0 ? $"Clear Selected ({n})" : "Clear Selected";
+            _btnClearSelected.Content = n > 0 ? string.Format(S._("circuittagger.clear_selected_n"), n) : S._("circuittagger.clear_selected");
         }
 
         // Public method called by CircuitTaggerCommand.OnDocChanged
@@ -822,8 +823,8 @@ namespace METools.FamilyPlacer
             var s = _settingsData ?? new CircuitTaggerSettingsData();
 
             // -- Tag Placement -------------------------------------------------
-            sp.Children.Add(SecH("Tag Placement"));
-            sp.Children.Add(InfoBox("X offset: horizontal distance from element right edge to tag. Y offset: vertical shift (positive = up, negative = down). Stack gap: spacing between stacked tags on same wall."));
+            sp.Children.Add(SecH(S._("circuittagger.tag_placement")));
+            sp.Children.Add(InfoBox(S._("circuittagger.tag_placement_hint")));
 
             var pGrid = new Grid { Margin = new Thickness(0, 4, 0, 0) };
             pGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -832,15 +833,15 @@ namespace METools.FamilyPlacer
             pGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(12) });
             pGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
-            var gapCard = InlineCard("X Offset (mm)", "Horizontal distance from element right edge to tag", out _tbSetGapMm);
+            var gapCard = InlineCard(S._("circuittagger.x_offset"), S._("circuittagger.x_offset_hint"), out _tbSetGapMm);
             _tbSetGapMm.Text = s.GapMm.ToString();
             Grid.SetColumn(gapCard, 0); pGrid.Children.Add(gapCard);
 
-            var yCard = InlineCard("Y Offset (mm)", "Vertical shift. Positive = up, negative = down", out _tbSetOffsetYMm);
+            var yCard = InlineCard(S._("circuittagger.y_offset"), S._("circuittagger.y_offset_hint"), out _tbSetOffsetYMm);
             _tbSetOffsetYMm.Text = s.OffsetYMm.ToString();
             Grid.SetColumn(yCard, 2); pGrid.Children.Add(yCard);
 
-            var stkCard2 = InlineCard("Stack Gap (mm)", "Gap between stacked tags on same wall", out _tbSetStackGapMm);
+            var stkCard2 = InlineCard(S._("circuittagger.stack_gap"), S._("circuittagger.stack_gap_hint"), out _tbSetStackGapMm);
             _tbSetStackGapMm.Text = s.StackGapMm.ToString();
             Grid.SetColumn(stkCard2, 4); pGrid.Children.Add(stkCard2);
             sp.Children.Add(pGrid);
@@ -849,11 +850,11 @@ namespace METools.FamilyPlacer
             sp.Children.Add(Div());
 
             // -- Secondary Label Style (matches Revit TextNoteType parameters exactly) ----
-            sp.Children.Add(SecH("Secondary Label Style"));
-            sp.Children.Add(InfoBox("All options match Revit's TextNoteType parameters exactly. Saved and applied when you click Apply & Tag."));
+            sp.Children.Add(SecH(S._("circuittagger.secondary_label_style")));
+            sp.Children.Add(InfoBox(S._("circuittagger.label_style_hint")));
 
             // == GRAPHICS section ==
-            sp.Children.Add(new TextBlock { Text = "GRAPHICS", FontSize = 9, FontWeight = FontWeights.SemiBold,
+            sp.Children.Add(new TextBlock { Text = S._("circuittagger.graphics"), FontSize = 9, FontWeight = FontWeights.SemiBold,
                 Foreground = MeToolsTheme.BrMuted, Margin = new Thickness(0, 8, 0, 6) });
 
             // Color row
@@ -875,7 +876,7 @@ namespace METools.FamilyPlacer
                 Padding = new Thickness(12, 10, 12, 10),
             };
             var colorSp = new StackPanel();
-            colorSp.Children.Add(new TextBlock { Text = "COLOR", FontSize = 9, FontWeight = FontWeights.SemiBold,
+            colorSp.Children.Add(new TextBlock { Text = S._("circuittagger.color"), FontSize = 9, FontWeight = FontWeights.SemiBold,
                 Foreground = MeToolsTheme.BrMuted, Margin = new Thickness(0, 0, 0, 6) });
             var colorRow = new StackPanel { Orientation = Orientation.Horizontal };
             _settingsColorSwatch = new Border
@@ -883,7 +884,7 @@ namespace METools.FamilyPlacer
                 Width = 32, Height = 32, CornerRadius = new CornerRadius(4),
                 BorderBrush = MeToolsTheme.BrBorder, BorderThickness = new Thickness(1),
                 Margin = new Thickness(0, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center,
-                Cursor = Cursors.Hand, ToolTip = "Click to open Revit color picker",
+                Cursor = Cursors.Hand, ToolTip = S._("circuittagger.color_picker_tip"),
             };
             try
             {
@@ -899,7 +900,7 @@ namespace METools.FamilyPlacer
                 Foreground = MeToolsTheme.BrInputFg, BorderBrush = MeToolsTheme.BrBorder,
                 BorderThickness = new Thickness(1), Padding = new Thickness(4, 0, 4, 0),
                 VerticalContentAlignment = VerticalAlignment.Center,
-                ToolTip = "Hex color e.g. #FF8000",
+                ToolTip = S._("circuittagger.hex_color_tip"),
             };
             _tbSetColorHex.TextChanged += (se, ev) =>
             {
@@ -914,7 +915,7 @@ namespace METools.FamilyPlacer
             };
 
             // Revit native color picker button
-            var pickColorBtn = SmallBtn("Pick...", false, () =>
+            var pickColorBtn = SmallBtn(S._("circuittagger.pick"), false, () =>
             {
                 try
                 {
@@ -931,7 +932,7 @@ namespace METools.FamilyPlacer
                 }
                 catch (Exception ex2)
                 {
-                    MessageBox.Show("Color picker error: " + ex2.Message);
+                    MessageBox.Show(S._("circuittagger.color_picker_error") + ex2.Message);
                 }
             });
             pickColorBtn.Margin = new Thickness(8, 0, 0, 0);
@@ -951,14 +952,14 @@ namespace METools.FamilyPlacer
                 Padding = new Thickness(12, 10, 12, 10),
             };
             var lwSp = new StackPanel();
-            lwSp.Children.Add(new TextBlock { Text = "LINE WEIGHT", FontSize = 9, FontWeight = FontWeights.SemiBold,
+            lwSp.Children.Add(new TextBlock { Text = S._("circuittagger.line_weight"), FontSize = 9, FontWeight = FontWeights.SemiBold,
                 Foreground = MeToolsTheme.BrMuted, Margin = new Thickness(0, 0, 0, 6) });
             TextBox tbLW;
             var lwBox = new TextBox { Height = 28, FontSize = 12, Text = s.SubLabelLineWeight.ToString(),
                 Background = MeToolsTheme.BrInput, Foreground = MeToolsTheme.BrInputFg,
                 BorderBrush = MeToolsTheme.BrBorder, BorderThickness = new Thickness(1),
                 Padding = new Thickness(6, 0, 6, 0), VerticalContentAlignment = VerticalAlignment.Center,
-                ToolTip = "Revit line weight 1-16" };
+                ToolTip = S._("circuittagger.line_weight_tip") };
             lwSp.Children.Add(lwBox); lwCard.Child = lwSp;
             tbLW = lwBox; _allInputs.Add(tbLW);
             Grid.SetRow(lwCard, 0); Grid.SetColumn(lwCard, 2); gfxGrid.Children.Add(lwCard);
@@ -972,13 +973,13 @@ namespace METools.FamilyPlacer
                 Padding = new Thickness(12, 10, 12, 10),
             };
             var loSp2 = new StackPanel();
-            loSp2.Children.Add(new TextBlock { Text = "LEADER/BORDER OFFSET (mm)", FontSize = 9, FontWeight = FontWeights.SemiBold,
+            loSp2.Children.Add(new TextBlock { Text = S._("circuittagger.leader_offset"), FontSize = 9, FontWeight = FontWeights.SemiBold,
                 Foreground = MeToolsTheme.BrMuted, Margin = new Thickness(0, 0, 0, 6) });
             var loBox2 = new TextBox { Height = 28, FontSize = 12, Text = s.SubLabelLeaderOffsetMm.ToString(),
                 Background = MeToolsTheme.BrInput, Foreground = MeToolsTheme.BrInputFg,
                 BorderBrush = MeToolsTheme.BrBorder, BorderThickness = new Thickness(1),
                 Padding = new Thickness(6, 0, 6, 0), VerticalContentAlignment = VerticalAlignment.Center,
-                ToolTip = "Leader/border offset in mm" };
+                ToolTip = S._("circuittagger.leader_offset_tip") };
             loSp2.Children.Add(loBox2); loCard2.Child = loSp2;
             tbLeaderOffset = loBox2; _allInputs.Add(tbLeaderOffset);
             Grid.SetRow(loCard2, 0); Grid.SetColumn(loCard2, 4); gfxGrid.Children.Add(loCard2);
@@ -991,10 +992,10 @@ namespace METools.FamilyPlacer
                 Padding = new Thickness(12, 10, 12, 10),
             };
             var bgSp = new StackPanel();
-            bgSp.Children.Add(new TextBlock { Text = "BACKGROUND + BORDER", FontSize = 9, FontWeight = FontWeights.SemiBold,
+            bgSp.Children.Add(new TextBlock { Text = S._("circuittagger.background_border"), FontSize = 9, FontWeight = FontWeights.SemiBold,
                 Foreground = MeToolsTheme.BrMuted, Margin = new Thickness(0, 0, 0, 6) });
-            _cbSetOpaque      = new CheckBox { Content = "Opaque Background",  IsChecked = s.SubLabelOpaque,      Foreground = MeToolsTheme.BrText, Margin = new Thickness(0, 0, 0, 4) };
-            _cbSetShowBorder  = new CheckBox { Content = "Show Border",          IsChecked = s.SubLabelShowBorder,  Foreground = MeToolsTheme.BrText };
+            _cbSetOpaque      = new CheckBox { Content = S._("circuittagger.opaque_bg"),  IsChecked = s.SubLabelOpaque,      Foreground = MeToolsTheme.BrText, Margin = new Thickness(0, 0, 0, 4) };
+            _cbSetShowBorder  = new CheckBox { Content = S._("circuittagger.show_border"),          IsChecked = s.SubLabelShowBorder,  Foreground = MeToolsTheme.BrText };
             bgSp.Children.Add(_cbSetOpaque); bgSp.Children.Add(_cbSetShowBorder);
             bgCard.Child = bgSp;
             Grid.SetRow(bgCard, 2); Grid.SetColumn(bgCard, 0); gfxGrid.Children.Add(bgCard);
@@ -1007,7 +1008,7 @@ namespace METools.FamilyPlacer
                 Padding = new Thickness(12, 10, 12, 10),
             };
             var laSp = new StackPanel();
-            laSp.Children.Add(new TextBlock { Text = "LEADER ARROWHEAD", FontSize = 9, FontWeight = FontWeights.SemiBold,
+            laSp.Children.Add(new TextBlock { Text = S._("circuittagger.leader_arrowhead"), FontSize = 9, FontWeight = FontWeights.SemiBold,
                 Foreground = MeToolsTheme.BrMuted, Margin = new Thickness(0, 0, 0, 6) });
             _cbSetHAlign = new ComboBox { Height = 28, FontSize = 11, IsEditable = false,
                 Background = MeToolsTheme.BrInput, Foreground = MeToolsTheme.BrInputFg, BorderBrush = MeToolsTheme.BrBorder };
@@ -1022,7 +1023,7 @@ namespace METools.FamilyPlacer
             sp.Children.Add(new Border { Height = 1, Background = MeToolsTheme.BrBorder, Margin = new Thickness(0, 10, 0, 10) });
 
             // == TEXT section ==
-            sp.Children.Add(new TextBlock { Text = "TEXT", FontSize = 9, FontWeight = FontWeights.SemiBold,
+            sp.Children.Add(new TextBlock { Text = S._("circuittagger.text"), FontSize = 9, FontWeight = FontWeights.SemiBold,
                 Foreground = MeToolsTheme.BrMuted, Margin = new Thickness(0, 0, 0, 6) });
 
             var txtGrid = new Grid { Margin = new Thickness(0, 0, 0, 8) };
@@ -1043,7 +1044,7 @@ namespace METools.FamilyPlacer
                 Padding = new Thickness(12, 10, 12, 10),
             };
             var fontSp = new StackPanel();
-            fontSp.Children.Add(new TextBlock { Text = "TEXT FONT", FontSize = 9, FontWeight = FontWeights.SemiBold,
+            fontSp.Children.Add(new TextBlock { Text = S._("circuittagger.text_font"), FontSize = 9, FontWeight = FontWeights.SemiBold,
                 Foreground = MeToolsTheme.BrMuted, Margin = new Thickness(0, 0, 0, 5) });
 
             // Searchable editable ComboBox
@@ -1090,19 +1091,19 @@ namespace METools.FamilyPlacer
 
             Grid.SetRow(fontCard2, 0); Grid.SetColumn(fontCard2, 0); txtGrid.Children.Add(fontCard2);
 
-            var sizeCard2 = InlineCard("Text Size (mm)", "Font size in mm e.g. 2.0", out _tbSetFontSizeMm);
+            var sizeCard2 = InlineCard(S._("circuittagger.text_size"), S._("circuittagger.text_size_hint"), out _tbSetFontSizeMm);
             _tbSetFontSizeMm.Text = s.SubLabelFontSizeMm.ToString();
             Grid.SetRow(sizeCard2, 0); Grid.SetColumn(sizeCard2, 2); txtGrid.Children.Add(sizeCard2);
 
             TextBox tbTabSize;
-            var tabCard = InlineCard("Tab Size (mm)", "Tab size in mm e.g. 12.7", out tbTabSize);
+            var tabCard = InlineCard(S._("circuittagger.tab_size"), S._("circuittagger.tab_size_hint"), out tbTabSize);
             tabCard.Tag = tbTabSize;
             tbTabSize.Text = s.SubLabelTabSizeMm.ToString();
             Grid.SetRow(tabCard, 0); Grid.SetColumn(tabCard, 4); txtGrid.Children.Add(tabCard);
             _allInputs.Add(tbTabSize);
 
             TextBox tbWidthFactor;
-            var wfCard = InlineCard("Width Factor", "Text width factor e.g. 0.75", out tbWidthFactor);
+            var wfCard = InlineCard(S._("circuittagger.width_factor"), S._("circuittagger.width_factor_hint"), out tbWidthFactor);
             tbWidthFactor.Text = s.SubLabelWidthFactor.ToString();
             Grid.SetRow(wfCard, 2); Grid.SetColumn(wfCard, 2); txtGrid.Children.Add(wfCard);
             _allInputs.Add(tbWidthFactor);
@@ -1115,11 +1116,11 @@ namespace METools.FamilyPlacer
                 Padding = new Thickness(12, 10, 12, 10),
             };
             var txtChkSp = new StackPanel();
-            txtChkSp.Children.Add(new TextBlock { Text = "TEXT STYLE", FontSize = 9, FontWeight = FontWeights.SemiBold,
+            txtChkSp.Children.Add(new TextBlock { Text = S._("circuittagger.text_style"), FontSize = 9, FontWeight = FontWeights.SemiBold,
                 Foreground = MeToolsTheme.BrMuted, Margin = new Thickness(0, 0, 0, 6) });
-            _cbSetBold      = new CheckBox { Content = "Bold",      IsChecked = s.SubLabelBold,      Foreground = MeToolsTheme.BrText, Margin = new Thickness(0, 0, 0, 4) };
-            _cbSetItalic    = new CheckBox { Content = "Italic",    IsChecked = s.SubLabelItalic,    Foreground = MeToolsTheme.BrText, Margin = new Thickness(0, 0, 0, 4) };
-            _cbSetUnderline = new CheckBox { Content = "Underline", IsChecked = s.SubLabelUnderline, Foreground = MeToolsTheme.BrText };
+            _cbSetBold      = new CheckBox { Content = S._("circuittagger.bold"),      IsChecked = s.SubLabelBold,      Foreground = MeToolsTheme.BrText, Margin = new Thickness(0, 0, 0, 4) };
+            _cbSetItalic    = new CheckBox { Content = S._("circuittagger.italic"),    IsChecked = s.SubLabelItalic,    Foreground = MeToolsTheme.BrText, Margin = new Thickness(0, 0, 0, 4) };
+            _cbSetUnderline = new CheckBox { Content = S._("circuittagger.underline"), IsChecked = s.SubLabelUnderline, Foreground = MeToolsTheme.BrText };
             txtChkSp.Children.Add(_cbSetBold); txtChkSp.Children.Add(_cbSetItalic); txtChkSp.Children.Add(_cbSetUnderline);
             txtChkCard.Child = txtChkSp;
             Grid.SetRow(txtChkCard, 2); Grid.SetColumn(txtChkCard, 0); txtGrid.Children.Add(txtChkCard);
@@ -1138,10 +1139,10 @@ namespace METools.FamilyPlacer
             // Save button            sp.Children.Add(Div());
 
             // Save button
-            var saveBtn = MakeFooterBtn("Save Settings as Default", true, OnSaveSettings);
+            var saveBtn = MakeFooterBtn(S._("circuittagger.save_defaults"), true, OnSaveSettings);
             saveBtn.Margin = new Thickness(0, 0, 0, 0);
             sp.Children.Add(saveBtn);
-            sp.Children.Add(new TextBlock { Text = "Settings are saved to %APPDATA%\\METools\\circuit-tagger.json and applied on next tag placement.",
+            sp.Children.Add(new TextBlock { Text = S._("circuittagger.settings_saved_path_hint"),
                 FontSize = 10, Foreground = MeToolsTheme.BrMuted, Margin = new Thickness(0, 8, 0, 0),
                 TextWrapping = TextWrapping.Wrap });
             return sp;
@@ -1181,9 +1182,9 @@ namespace METools.FamilyPlacer
 
             _settingsData = d;
             CircuitTaggerSettings.Save(d);
-            UpdateStatusBar("Settings saved.");
-            MessageBox.Show("Settings saved. They will be applied on the next Apply & Tag.",
-                "ME-Tools -- Settings Saved", MessageBoxButton.OK, MessageBoxImage.Information);
+            UpdateStatusBar(S._("circuittagger.settings_saved"));
+            MessageBox.Show(S._("circuittagger.settings_saved_msg"),
+                S._("circuittagger.settings_saved_title"), MessageBoxButton.OK, MessageBoxImage.Information);
         }
 
         // ???????????????????????????????????????????????????????????????????
@@ -1200,15 +1201,15 @@ namespace METools.FamilyPlacer
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
-            var hint = new TextBlock { Text = "Select elements, fill parameters, then click Apply.  (Tags showing '?' -- check Project Health Check.)",
+            var hint = new TextBlock { Text = S._("circuittagger.footer_hint"),
                 FontSize = 11, Foreground = MeToolsTheme.BrMuted, VerticalAlignment = VerticalAlignment.Center };
             Grid.SetColumn(hint, 0); grid.Children.Add(hint);
 
             var btnSp = new StackPanel { Orientation = Orientation.Horizontal };
-            var btnExp = MakeFooterBtn("Export Excel", false, OnExportClicked);
+            var btnExp = MakeFooterBtn(S._("circuittagger.export_excel"), false, OnExportClicked);
             btnExp.Margin = new Thickness(0, 0, 8, 0);
             btnSp.Children.Add(btnExp);
-            btnSp.Children.Add(MakeFooterBtn("Apply & Tag", true, OnApplyClicked));
+            btnSp.Children.Add(MakeFooterBtn(S._("circuittagger.apply_and_tag"), true, OnApplyClicked));
             Grid.SetColumn(btnSp, 1); grid.Children.Add(btnSp);
 
             footer.Child = grid;
@@ -1229,7 +1230,7 @@ namespace METools.FamilyPlacer
                 var filter = new ElectricalElementFilter();
                 var picked = uiDoc.Selection.PickObjects(
                     Autodesk.Revit.UI.Selection.ObjectType.Element, filter,
-                    "Select elements to tag -- press Finish or ESC when done");
+                    S._("circuittagger.select_prompt"));
                 var doc   = uiDoc.Document;
                 var phase = new FilteredElementCollector(doc).OfClass(typeof(Phase)).Cast<Phase>().LastOrDefault();
                 foreach (var ref_ in picked)
@@ -1247,7 +1248,7 @@ namespace METools.FamilyPlacer
                 }
             }
             catch (Autodesk.Revit.Exceptions.OperationCanceledException) { }
-            catch (Exception ex) { MessageBox.Show(ex.Message, "Select Elements"); }
+            catch (Exception ex) { MessageBox.Show(ex.Message, S._("circuittagger.select_elements_title")); }
             finally { Show(); RefreshSelectionList(); }
         }
 
@@ -1257,15 +1258,15 @@ namespace METools.FamilyPlacer
         {
             _handler.Request = new CircuitTaggerRequest { Action = CircuitTaggerAction.LoadParamsFromSelection };
             _extEvent.Raise();
-            UpdateStatusBar("Loading params from selected element...");
+            UpdateStatusBar(S._("circuittagger.loading_params"));
         }
 
         private void OnApplyClicked()
         {
             if (_selected.Count == 0)
             {
-                MessageBox.Show("Please select at least one element first.",
-                    "ME-Tools -- Circuit Tagger", MessageBoxButton.OK, MessageBoxImage.Information);
+                MessageBox.Show(S._("circuittagger.select_one_first"),
+                    S._("circuittagger.title"), MessageBoxButton.OK, MessageBoxImage.Information);
                 return;
             }
             _handler.TagStyle = new CircuitTagStyle
@@ -1289,7 +1290,7 @@ namespace METools.FamilyPlacer
                 SubLabel          = _tbSubLabel?.Text?.Trim()          ?? "",
             };
             _extEvent.Raise();
-            UpdateStatusBar("Writing parameters...");
+            UpdateStatusBar(S._("circuittagger.writing_params"));
         }
 
         private void OnExportClicked()
@@ -1299,12 +1300,12 @@ namespace METools.FamilyPlacer
             var rows = CircuitTaggerHandler.ReadAllTaggedElements(doc);
             if (rows.Count == 0)
             {
-                MessageBox.Show("No tagged elements found.", "Export", MessageBoxButton.OK, MessageBoxImage.Information);
+                MessageBox.Show(S._("circuittagger.export_no_tagged"), S._("circuittagger.export_title"), MessageBoxButton.OK, MessageBoxImage.Information);
                 return;
             }
             var dlg = new Microsoft.Win32.SaveFileDialog
             {
-                Title = "Export Circuit Data", Filter = "CSV files (*.csv)|*.csv",
+                Title = S._("circuittagger.export_circuit_data"), Filter = "CSV files (*.csv)|*.csv",
                 FileName = $"CircuitExport_{DateTime.Now:yyyyMMdd_HHmm}", DefaultExt = ".csv",
             };
             if (dlg.ShowDialog() != true) return;
@@ -1319,13 +1320,13 @@ namespace METools.FamilyPlacer
                         Q(r.Category), Q(r.FamilyName), Q(r.Room), Q(r.ElementId)));
                 }
                 File.WriteAllText(dlg.FileName, sb.ToString(), Encoding.UTF8);
-                UpdateStatusBar($"Exported {rows.Count} rows.");
-                MessageBox.Show($"Exported {rows.Count} rows.\n{dlg.FileName}", "Export Complete",
+                UpdateStatusBar(string.Format(S._("circuittagger.exported_rows"), rows.Count));
+                MessageBox.Show(string.Format(S._("circuittagger.exported_rows_path"), rows.Count, dlg.FileName), S._("circuittagger.export_complete"),
                     MessageBoxButton.OK, MessageBoxImage.Information);
             }
             catch (Exception ex)
             {
-                MessageBox.Show("Export failed:\n" + ex.Message, "Export Error", MessageBoxButton.OK, MessageBoxImage.Warning);
+                MessageBox.Show(string.Format(S._("circuittagger.export_failed"), ex.Message), S._("circuittagger.export_error"), MessageBoxButton.OK, MessageBoxImage.Warning);
             }
         }
 
@@ -1344,7 +1345,7 @@ namespace METools.FamilyPlacer
             {
                 _selectionList.Children.Add(new TextBlock
                 {
-                    Text = "No elements selected. Click '+ Select in Revit'.",
+                    Text = S._("circuittagger.no_elements_selected"),
                     FontSize = 11, Foreground = MeToolsTheme.BrMuted, Margin = new Thickness(10, 8, 10, 8),
                 });
             }
@@ -1398,8 +1399,8 @@ namespace METools.FamilyPlacer
                 }
             }
             if (_lblSelCount != null)
-                _lblSelCount.Text = _selected.Count == 0 ? "0 elements selected"
-                    : $"{_selected.Count} element{(_selected.Count == 1 ? "" : "s")} selected";
+                _lblSelCount.Text = _selected.Count == 0 ? S._("circuittagger.elements_selected_0")
+                    : string.Format(S._(_selected.Count == 1 ? "circuittagger.n_elements_selected_1" : "circuittagger.n_elements_selected_n"), _selected.Count);
         }
 
         // ?? Theme ?????????????????????????????????????????????????????????

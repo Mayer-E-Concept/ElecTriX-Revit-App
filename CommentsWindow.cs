@@ -22,7 +22,7 @@ namespace METools.Comments
         private List<ProjectComment> _all = new List<ProjectComment>();
         private string _currentLevel = "";
         private string _currentScopeBox = "";
-        private string _statusFilter = "Open"; // "" = All, else CommentStatus.ToString()
+        private string _statusFilter = "Open"; // "" = All, else CommentStatus.ToString() -- key stays English, only the Label shown is localized
 
         private TextBlock  _levelLabel;
         private TextBox    _tbNewComment;
@@ -67,20 +67,21 @@ namespace METools.Comments
                 {
                     var combined = CombinedLabel(_currentLevel, _currentScopeBox);
                     _levelLabel.Text = string.IsNullOrEmpty(_currentLevel)
-                        ? "Current level: (open a floor plan view to tag a comment to a level)"
-                        : $"Current level: {combined}";
+                        ? S._("comments.current_level_none")
+                        : string.Format(S._("comments.current_level"), combined);
                 }
             });
             _handler.OnGoToElementResult = (success, msg) => Dispatcher.Invoke(() =>
             {
                 if (StatusLeft != null)
-                    StatusLeft.Text = success ? "Switched to and selected that item." : ("Couldn't go there: " + msg);
+                    StatusLeft.Text = success ? S._("comments.switched_to_item") : string.Format(S._("comments.couldnt_go"), msg);
             });
 
             _soundOn = CommentsStorage.GetSoundEnabled();
 
-            InitWindow("Comments", width: 560);
-            BuildStatusBar("Loading comments…", "Revit");
+            S.SetLanguage(SettingsStore.Language ?? "en");
+            InitWindow(S._("comments.window_title"), width: 560);
+            BuildStatusBar(S._("comments.loading"), "Revit 2025/2026");
             BuildUi();
         }
 
@@ -92,10 +93,10 @@ namespace METools.Comments
             RootDock.Children.Add(scroller);
 
             // ── Shared folder + sound settings ─────────────────────────────
-            root.Children.Add(Sec("Shared Folder"));
+            root.Children.Add(Sec(S._("comments.shared_folder")));
             root.Children.Add(new TextBlock
             {
-                Text = "A network folder everyone on the team can reach. Comments for every project are stored here.",
+                Text = S._("comments.shared_folder_hint"),
                 FontSize = 10.5, Foreground = MeToolsTheme.BrMuted, TextWrapping = TextWrapping.Wrap,
                 Margin = new Thickness(2, 0, 0, 6),
             });
@@ -114,7 +115,7 @@ namespace METools.Comments
             Grid.SetColumn(_tbSharedFolder, 0);
             folderRow.Children.Add(_tbSharedFolder);
 
-            var browseBtn = MakeBtn("Browse…", true, () =>
+            var browseBtn = MakeBtn(S._("comments.browse"), true, () =>
             {
                 try
                 {
@@ -126,9 +127,9 @@ namespace METools.Comments
                     // a folder picker).
                     var dlg = new Microsoft.Win32.OpenFileDialog
                     {
-                        Title = "Select the shared comments folder",
+                        Title = S._("comments.select_folder_title"),
                         CheckFileExists = false,
-                        FileName = "Select This Folder",
+                        FileName = S._("comments.select_this_folder"),
                         Filter = "Folder|no.files",
                     };
                     if (!string.IsNullOrWhiteSpace(_tbSharedFolder.Text))
@@ -161,10 +162,10 @@ namespace METools.Comments
             root.Children.Add(_soundToggleBtn);
 
             // ── Leave a new comment ──────────────────────────────────────
-            root.Children.Add(Sec("Leave A Comment"));
+            root.Children.Add(Sec(S._("comments.leave_comment")));
             _levelLabel = new TextBlock
             {
-                Text = "Current level: (open a floor plan view to tag a comment to a level)",
+                Text = S._("comments.current_level_none"),
                 FontSize = 11, Foreground = MeToolsTheme.BrMuted, Margin = new Thickness(2, 0, 0, 6),
             };
             root.Children.Add(_levelLabel);
@@ -177,11 +178,11 @@ namespace METools.Comments
                 BorderBrush = MeToolsTheme.BrBorder, BorderThickness = new Thickness(1),
                 Margin = new Thickness(0, 0, 0, 8),
             };
-            SetPlaceholder(_tbNewComment, "e.g. Need 4 more lamps on this level…");
+            SetPlaceholder(_tbNewComment, S._("comments.new_comment_placeholder"));
             root.Children.Add(_tbNewComment);
 
             var refRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 8) };
-            var refBtn = MakeBtn("+ Reference Item", true, OnReferenceItemClicked);
+            var refBtn = MakeBtn(S._("comments.reference_item"), true, OnReferenceItemClicked);
             refRow.Children.Add(refBtn);
             _refChipHost = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(8, 0, 0, 0) };
             refRow.Children.Add(_refChipHost);
@@ -191,7 +192,7 @@ namespace METools.Comments
             var assignRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 12) };
             assignRow.Children.Add(new TextBlock
             {
-                Text = "Assign to (optional):", FontSize = 11, Foreground = MeToolsTheme.BrMuted,
+                Text = S._("comments.assign_optional"), FontSize = 11, Foreground = MeToolsTheme.BrMuted,
                 VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 0),
             });
             _assignBox = new TextBox
@@ -200,18 +201,18 @@ namespace METools.Comments
                 Background = MeToolsTheme.BrInput, Foreground = MeToolsTheme.BrText,
                 BorderBrush = MeToolsTheme.BrBorder, BorderThickness = new Thickness(1),
                 Padding = new Thickness(6, 0, 6, 0), VerticalContentAlignment = VerticalAlignment.Center,
-                ToolTip = "Type a name",
+                ToolTip = S._("comments.type_a_name"),
             };
             assignRow.Children.Add(_assignBox);
             root.Children.Add(assignRow);
 
-            var addBtn = MakeBtn("+ Add Comment", false, () =>
+            var addBtn = MakeBtn(S._("comments.add_comment"), false, () =>
             {
                 var text = _tbNewComment.Text;
-                if (text == "e.g. Need 4 more lamps on this level…" || string.IsNullOrWhiteSpace(text)) return;
+                if (text == S._("comments.new_comment_placeholder") || string.IsNullOrWhiteSpace(text)) return;
                 if (string.IsNullOrWhiteSpace(CommentsStorage.GetSharedFolder()))
                 {
-                    if (StatusLeft != null) StatusLeft.Text = "Set a shared folder above first.";
+                    if (StatusLeft != null) StatusLeft.Text = S._("comments.set_folder_first");
                     return;
                 }
                 _handler.Request = new CommentsRequest
@@ -224,7 +225,7 @@ namespace METools.Comments
                 };
                 _extEvent.Raise();
                 _tbNewComment.Text = "";
-                SetPlaceholder(_tbNewComment, "e.g. Need 4 more lamps on this level…");
+                SetPlaceholder(_tbNewComment, S._("comments.new_comment_placeholder"));
                 _pendingRefElementId = "";
                 _pendingRefSummary = "";
                 _assignBox.Text = "";
@@ -235,7 +236,7 @@ namespace METools.Comments
             root.Children.Add(addBtn);
 
             // ── All comments ─────────────────────────────────────────────
-            root.Children.Add(Sec("All Comments"));
+            root.Children.Add(Sec(S._("comments.all_comments")));
 
             _statusBar_Filters = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 8) };
             root.Children.Add(_statusBar_Filters);
@@ -247,7 +248,7 @@ namespace METools.Comments
             _rowsPanel = new StackPanel();
             root.Children.Add(_rowsPanel);
 
-            var refreshBtn = MakeBtn("Refresh", true, () =>
+            var refreshBtn = MakeBtn(S._("comments.refresh"), true, () =>
             {
                 _handler.Request = new CommentsRequest { Action = CommentsAction.Refresh };
                 _extEvent.Raise();
@@ -257,7 +258,7 @@ namespace METools.Comments
             root.Children.Add(refreshBtn);
         }
 
-        private string SoundLabel() => _soundOn ? "🔊 Notification sound: On" : "🔇 Notification sound: Off";
+        private string SoundLabel() => _soundOn ? S._("comments.sound_on") : S._("comments.sound_off");
 
         // Level names alone can be ambiguous (confirmed live: different
         // building sections can share an identically-named level), so the
@@ -330,10 +331,10 @@ namespace METools.Comments
             _statusBar_Filters.Children.Clear();
             var defs = new (string Key, string Label)[]
             {
-                ("Open", "Open"),
-                ("Done", "Done"),
-                ("Ignored", "Ignored"),
-                ("", "All"),
+                ("Open", S._("comments.filter_open")),
+                ("Done", S._("comments.filter_done")),
+                ("Ignored", S._("comments.filter_ignored")),
+                ("", S._("comments.filter_all")),
             };
             foreach (var (key, label) in defs)
             {
@@ -357,8 +358,8 @@ namespace METools.Comments
                 .Where(n => !string.IsNullOrWhiteSpace(n))
                 .Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(n => n).ToList();
             _assignBox.ToolTip = names.Count == 0
-                ? "Type a name"
-                : "Type a name. Previously used: " + string.Join(", ", names);
+                ? S._("comments.type_a_name")
+                : S._("comments.type_a_name_prev") + string.Join(", ", names);
         }
 
         private void ResizeToFitContent()
@@ -378,13 +379,13 @@ namespace METools.Comments
             _rowsPanel.Children.Clear();
             var filtered = _all.Where(c => string.IsNullOrEmpty(_statusFilter) || c.Status.ToString() == _statusFilter)
                                 .ToList();
-            _countLabel.Text = $"{filtered.Count} of {_all.Count} total";
+            _countLabel.Text = string.Format(S._("comments.count_of_total"), filtered.Count, _all.Count);
 
             if (filtered.Count == 0)
             {
                 _rowsPanel.Children.Add(new TextBlock
                 {
-                    Text = "No comments here yet.", FontSize = 11.5, Foreground = MeToolsTheme.BrMuted,
+                    Text = S._("comments.no_comments_yet"), FontSize = 11.5, Foreground = MeToolsTheme.BrMuted,
                     Margin = new Thickness(2, 8, 0, 8),
                 });
                 return;
@@ -447,7 +448,7 @@ namespace METools.Comments
                 Background = ChipColor(c.Status), CornerRadius = new CornerRadius(3),
                 Padding = new Thickness(6, 1, 6, 1), HorizontalAlignment = HorizontalAlignment.Right,
             };
-            statusChip.Child = new TextBlock { Text = c.Status.ToString(), FontSize = 9.5, Foreground = Brushes.White };
+            statusChip.Child = new TextBlock { Text = StatusLabel(c.Status), FontSize = 9.5, Foreground = Brushes.White };
             Grid.SetColumn(statusChip, 1);
             topRow.Children.Add(statusChip);
             stack.Children.Add(topRow);
@@ -475,7 +476,7 @@ namespace METools.Comments
                     HorizontalAlignment = HorizontalAlignment.Left,
                     Child = new TextBlock
                     {
-                        Text = (isMe ? "Assigned to you — " : "Assigned to ") + c.AssignedTo,
+                        Text = (isMe ? S._("comments.assigned_to_you") : S._("comments.assigned_to")) + c.AssignedTo,
                         FontSize = 11, FontWeight = isMe ? FontWeights.SemiBold : FontWeights.Normal,
                         Foreground = isMe ? MeToolsTheme.BrPetrol : MeToolsTheme.BrInfoText,
                     },
@@ -486,7 +487,7 @@ namespace METools.Comments
             {
                 stack.Children.Add(new TextBlock
                 {
-                    Text = $"{c.Status} by {c.ResolvedBy}" + (c.ResolvedUtc.HasValue ? $" — {LocalTime(c.ResolvedUtc.Value):g}" : ""),
+                    Text = string.Format(S._("comments.resolved_by"), StatusLabel(c.Status), c.ResolvedBy) + (c.ResolvedUtc.HasValue ? $" — {LocalTime(c.ResolvedUtc.Value):g}" : ""),
                     FontSize = 10, Foreground = MeToolsTheme.BrMuted, Margin = new Thickness(0, 0, 0, 8),
                 });
             }
@@ -508,7 +509,7 @@ namespace METools.Comments
                 Padding = new Thickness(6, 0, 6, 0),
             };
             assignEditRow.Children.Add(assignEditBox);
-            var assignSetBtn = MakeBtn("Set", false, () =>
+            var assignSetBtn = MakeBtn(S._("comments.set"), false, () =>
             {
                 _handler.Request = new CommentsRequest
                 {
@@ -521,7 +522,7 @@ namespace METools.Comments
             assignEditRow.Children.Add(assignSetBtn);
             stack.Children.Add(assignEditRow);
 
-            var goBtn = MakeBtn("Go There", true, () =>
+            var goBtn = MakeBtn(S._("comments.go_there"), true, () =>
             {
                 _handler.Request = new CommentsRequest
                 {
@@ -535,7 +536,7 @@ namespace METools.Comments
 
             if (!string.IsNullOrEmpty(c.ReferencedElementId))
             {
-                var goItemBtn = MakeBtn("Go to Item", true, () =>
+                var goItemBtn = MakeBtn(S._("comments.go_to_item"), true, () =>
                 {
                     _handler.Request = new CommentsRequest
                     {
@@ -549,7 +550,7 @@ namespace METools.Comments
                 btnRow.Children.Add(goItemBtn);
             }
 
-            var assignBtn = MakeBtn(string.IsNullOrEmpty(c.AssignedTo) ? "Assign" : "Change", true, () =>
+            var assignBtn = MakeBtn(string.IsNullOrEmpty(c.AssignedTo) ? S._("comments.assign") : S._("comments.change"), true, () =>
             {
                 assignEditRow.Visibility = assignEditRow.Visibility == Visibility.Visible
                     ? Visibility.Collapsed : Visibility.Visible;
@@ -559,29 +560,29 @@ namespace METools.Comments
 
             if (c.Status != CommentStatus.Done)
             {
-                var doneBtn = MakeBtn("Mark Done", false, () => SetStatus(c.Id, CommentStatus.Done));
+                var doneBtn = MakeBtn(S._("comments.mark_done"), false, () => SetStatus(c.Id, CommentStatus.Done));
                 doneBtn.Margin = new Thickness(0, 0, 6, 0);
                 btnRow.Children.Add(doneBtn);
             }
             if (c.Status != CommentStatus.Ignored)
             {
-                var ignoreBtn = MakeBtn("Ignore", true, () => SetStatus(c.Id, CommentStatus.Ignored));
+                var ignoreBtn = MakeBtn(S._("comments.ignore"), true, () => SetStatus(c.Id, CommentStatus.Ignored));
                 btnRow.Children.Add(ignoreBtn);
             }
             if (c.Status != CommentStatus.Open)
             {
-                var reopenBtn = MakeBtn("Reopen", true, () => SetStatus(c.Id, CommentStatus.Open));
+                var reopenBtn = MakeBtn(S._("comments.reopen"), true, () => SetStatus(c.Id, CommentStatus.Open));
                 btnRow.Children.Add(reopenBtn);
             }
 
             // Unlike the other actions here, this one can't be undone from
             // within the app (Ignore/Done can always be Reopened) -- so it's
             // the one action that gets an explicit confirmation step first.
-            var deleteBtn = MakeBtn("Delete", true, () =>
+            var deleteBtn = MakeBtn(S._("comments.delete"), true, () =>
             {
                 var result = TaskDialog.Show(
-                    "Delete Comment",
-                    $"Permanently delete this comment by {c.Author}?\n\n\"{c.Text}\"",
+                    S._("comments.delete_title"),
+                    string.Format(S._("comments.delete_confirm"), c.Author, c.Text),
                     TaskDialogCommonButtons.Yes | TaskDialogCommonButtons.No);
                 if (result != TaskDialogResult.Yes) return;
 
@@ -601,6 +602,16 @@ namespace METools.Comments
         }
 
         private static DateTime LocalTime(DateTime utc) => utc.Kind == DateTimeKind.Utc ? utc.ToLocalTime() : utc;
+
+        private static string StatusLabel(CommentStatus status)
+        {
+            switch (status)
+            {
+                case CommentStatus.Done:    return S._("comments.status_done");
+                case CommentStatus.Ignored: return S._("comments.status_ignored");
+                default:                    return S._("comments.status_open");
+            }
+        }
 
         private static Brush ChipColor(CommentStatus status)
         {
@@ -625,7 +636,7 @@ namespace METools.Comments
                 var uidoc = _uiApp?.ActiveUIDocument;
                 if (uidoc == null) return;
                 var r = uidoc.Selection.PickObject(Autodesk.Revit.UI.Selection.ObjectType.Element,
-                    "Click the element to reference, then Esc to cancel");
+                    S._("comments.pick_element_prompt"));
                 var doc = uidoc.Document;
                 var el = doc.GetElement(r.ElementId);
                 if (el != null)
@@ -642,7 +653,7 @@ namespace METools.Comments
                     {
                         try { typeName = doc.GetElement(el.GetTypeId())?.Name ?? ""; } catch { }
                     }
-                    string cat = el.Category?.Name ?? "Element";
+                    string cat = el.Category?.Name ?? S._("comments.element");
                     var parts = new List<string> { cat };
                     if (!string.IsNullOrEmpty(family)) parts.Add(family);
                     if (!string.IsNullOrEmpty(typeName)) parts.Add(typeName);

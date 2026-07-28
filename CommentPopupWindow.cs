@@ -19,6 +19,7 @@ namespace METools.Comments
 
         public CommentPopupWindow(ProjectComment comment)
         {
+            S.SetLanguage(SettingsStore.Language ?? "en");
             _comment = comment;
 
             Title = "ME-Tools";
@@ -67,7 +68,7 @@ namespace METools.Comments
 
             var header = new TextBlock
             {
-                Text = "New comment",
+                Text = S._("commentpopup.new_comment"),
                 FontSize = 14,
                 FontWeight = FontWeights.Bold,
                 Foreground = MeToolsTheme.BrAccent,
@@ -117,7 +118,7 @@ namespace METools.Comments
             {
                 root.Children.Add(new TextBlock
                 {
-                    Text = "Assigned to " + _comment.AssignedTo,
+                    Text = S._("commentpopup.assigned_to") + _comment.AssignedTo,
                     FontSize = 11, FontWeight = FontWeights.SemiBold,
                     Foreground = MeToolsTheme.BrPetrol,
                     Margin = new Thickness(0, -8, 0, 14),
@@ -136,7 +137,7 @@ namespace METools.Comments
             var btnRow = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
             root.Children.Add(btnRow);
 
-            var goBtn = MakeBtn("Go There", isOutline: true, () =>
+            var goBtn = MakeBtn(S._("commentpopup.go_there"), isOutline: true, () =>
             {
                 CommentsHandler.JumpToLevel(_comment.LevelName, _comment.ScopeBoxName);
                 Close();
@@ -146,7 +147,7 @@ namespace METools.Comments
 
             if (!string.IsNullOrEmpty(_comment.ReferencedElementId))
             {
-                var goItemBtn = MakeBtn("Go to Item", isOutline: true, () =>
+                var goItemBtn = MakeBtn(S._("commentpopup.go_to_item"), isOutline: true, () =>
                 {
                     CommentsHandler.GoToElement(_comment.ReferencedElementId);
                     Close();
@@ -156,7 +157,7 @@ namespace METools.Comments
                 btnRow.Children.Add(goItemBtn);
             }
 
-            var ignoreBtn = MakeBtn("Ignore", isOutline: true, () =>
+            var ignoreBtn = MakeBtn(S._("commentpopup.ignore"), isOutline: true, () =>
             {
                 CommentsHandler.MarkStatus(_comment.Id, CommentStatus.Ignored);
                 Close();
@@ -164,7 +165,7 @@ namespace METools.Comments
             ignoreBtn.Margin = new Thickness(0, 0, 8, 0);
             btnRow.Children.Add(ignoreBtn);
 
-            var doneBtn = MakeBtn("Mark Done", isOutline: false, () =>
+            var doneBtn = MakeBtn(S._("commentpopup.mark_done"), isOutline: false, () =>
             {
                 CommentsHandler.MarkStatus(_comment.Id, CommentStatus.Done);
                 Close();

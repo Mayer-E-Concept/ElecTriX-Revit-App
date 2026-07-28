@@ -86,8 +86,9 @@ namespace METools.LevelManager
             _ifcExtEvent = ifcExtEvent;
             _ifcHandler  = ifcHandler;
 
-            InitWindow("Level & IFC Manager", width: 580);
-            BuildStatusBar("Loading levels…", "Revit 2025/2026");
+            S.SetLanguage(SettingsStore.Language ?? "en");
+            InitWindow(S._("levelmanager.title"), width: 580);
+            BuildStatusBar(S._("levelmanager.loading"), "Revit 2025/2026");
             BuildUi();
 
             _ifcHandler.OnDone  = res => Dispatcher.Invoke(() => OnIfcImportDone(res));
@@ -119,8 +120,8 @@ namespace METools.LevelManager
         private FrameworkElement BuildModeTabs()
         {
             var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(14, 12, 14, 0) };
-            _tabProjectBtn = ToggleBtn("Project Levels", true, () => SwitchMode(false));
-            _tabIfcBtn     = ToggleBtn("Import from IFC", false, () => SwitchMode(true));
+            _tabProjectBtn = ToggleBtn(S._("levelmanager.tab_project_levels"), true, () => SwitchMode(false));
+            _tabIfcBtn     = ToggleBtn(S._("levelmanager.tab_import_ifc"), false, () => SwitchMode(true));
             _tabIfcBtn.Margin = new Thickness(6, 0, 0, 0);
             row.Children.Add(_tabProjectBtn);
             row.Children.Add(_tabIfcBtn);
@@ -145,7 +146,7 @@ namespace METools.LevelManager
             root.Margin = new Thickness(14, 12, 14, 10);
 
             // ── Group filter row ────────────────────────────────────────
-            root.Children.Add(Sec("Group"));
+            root.Children.Add(Sec(S._("levelmanager.group")));
             _groupBar = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 10) };
             var groupScroller = new ScrollViewer
             {
@@ -177,8 +178,8 @@ namespace METools.LevelManager
             ctrlRow.Children.Add(_zoneCombo);
 
             var spacingPanel = new StackPanel { Orientation = Orientation.Horizontal };
-            _btnEven  = ToggleBtn("Compact",    !_trueScale, () => SetSpacingMode(false));
-            _btnScale = ToggleBtn("True Scale",  _trueScale, () => SetSpacingMode(true));
+            _btnEven  = ToggleBtn(S._("levelmanager.compact"),    !_trueScale, () => SetSpacingMode(false));
+            _btnScale = ToggleBtn(S._("levelmanager.true_scale"),  _trueScale, () => SetSpacingMode(true));
             _btnScale.Margin = new Thickness(6, 0, 0, 0);
             spacingPanel.Children.Add(_btnEven);
             spacingPanel.Children.Add(_btnScale);
@@ -194,7 +195,7 @@ namespace METools.LevelManager
             Grid.SetColumn(_countLabel, 3);
             ctrlRow.Children.Add(_countLabel);
 
-            var refreshBtn = ActionBtn("⟳ Refresh", true, RequestRefresh);
+            var refreshBtn = ActionBtn(S._("levelmanager.refresh"), true, RequestRefresh);
             refreshBtn.Height = 28; refreshBtn.FontSize = 12; refreshBtn.Padding = new Thickness(10, 0, 10, 0);
             Grid.SetColumn(refreshBtn, 4);
             ctrlRow.Children.Add(refreshBtn);
@@ -218,7 +219,7 @@ namespace METools.LevelManager
             root.Children.Add(scrollerBorder);
 
             // ── Add level panel ─────────────────────────────────────────
-            root.Children.Add(Sec("Add Level"));
+            root.Children.Add(Sec(S._("levelmanager.add_level")));
 
             var addGrid = new Grid();
             addGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -237,7 +238,7 @@ namespace METools.LevelManager
                 BorderBrush = MeToolsTheme.BrBorder, BorderThickness = new Thickness(1),
                 CaretBrush = MeToolsTheme.BrText,
             };
-            SetPlaceholder(_tbName, "New level name…");
+            SetPlaceholder(_tbName, S._("levelmanager.new_level_name"));
             Grid.SetColumn(_tbName, 0);
             addGrid.Children.Add(_tbName);
 
@@ -248,13 +249,13 @@ namespace METools.LevelManager
 
             var mLabel = new TextBlock
             {
-                Text = "m", FontSize = 12, Foreground = MeToolsTheme.BrMuted,
+                Text = S._("levelmanager.meters_short"), FontSize = 12, Foreground = MeToolsTheme.BrMuted,
                 VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(4, 0, 0, 0),
             };
             Grid.SetColumn(mLabel, 4);
             addGrid.Children.Add(mLabel);
 
-            var addBtn = ActionBtn("Add Level", false, OnAddLevel);
+            var addBtn = ActionBtn(S._("levelmanager.add_level"), false, OnAddLevel);
             addBtn.MinWidth = 110;
             Grid.SetColumn(addBtn, 6);
             addGrid.Children.Add(addBtn);
@@ -263,7 +264,7 @@ namespace METools.LevelManager
 
             root.Children.Add(new TextBlock
             {
-                Text = "Tip: click a level in the list to prefill its elevation +3.000 m as a starting point.",
+                Text = S._("levelmanager.add_level_tip"),
                 FontSize = 10.5, Foreground = MeToolsTheme.BrMuted,
                 Margin = new Thickness(2, 6, 0, 0), TextWrapping = TextWrapping.Wrap,
             });
@@ -283,21 +284,24 @@ namespace METools.LevelManager
             // Keep the currently selected filter if it still exists, else reset to All.
             if (!groups.Contains(_groupFilter)) _groupFilter = "";
 
-            var allBtn = ToggleBtn("All", _groupFilter == "", () => SetGroupFilter(""));
+            var allBtn = ToggleBtn(S._("levelmanager.filter_all"), _groupFilter == "", () => SetGroupFilter(""));
+            allBtn.Tag = "";
             _groupBar.Children.Add(allBtn);
 
             foreach (var g in groups)
             {
                 if (string.IsNullOrEmpty(g)) continue;
-                var label = g;
+                var label = g; // auto-detected from the project's own naming (e.g. "UKD") -- not translatable text
                 var btn = ToggleBtn(label, _groupFilter == g, () => SetGroupFilter(g));
+                btn.Tag = g;
                 btn.Margin = new Thickness(6, 0, 0, 0);
                 _groupBar.Children.Add(btn);
             }
 
             if (groups.Contains(""))
             {
-                var otherBtn = ToggleBtn("Other", _groupFilter == "__other__", () => SetGroupFilter("__other__"));
+                var otherBtn = ToggleBtn(S._("levelmanager.filter_other"), _groupFilter == "__other__", () => SetGroupFilter("__other__"));
+                otherBtn.Tag = "__other__";
                 otherBtn.Margin = new Thickness(6, 0, 0, 0);
                 _groupBar.Children.Add(otherBtn);
             }
@@ -309,7 +313,7 @@ namespace METools.LevelManager
                 .Distinct().OrderBy(z => z).ToList();
 
             _zoneCombo.Items.Clear();
-            _zoneCombo.Items.Add(new ComboBoxItem { Content = "All Zones", Tag = "" });
+            _zoneCombo.Items.Add(new ComboBoxItem { Content = S._("levelmanager.all_zones"), Tag = "" });
             foreach (var z in zones)
                 _zoneCombo.Items.Add(new ComboBoxItem { Content = z, Tag = z });
 
@@ -321,13 +325,13 @@ namespace METools.LevelManager
         private void SetGroupFilter(string key)
         {
             _groupFilter = key;
+            // Compare each button's Tag (the actual filter key, set when the
+            // button was created) rather than its displayed Content text --
+            // Content is now localized, so it can no longer double as the key.
             foreach (Button b in _groupBar.Children.OfType<Button>())
             {
-                var label = (b.Content as string) ?? "";
-                bool active = (label == "All" && key == "") ||
-                              (label == "Other" && key == "__other__") ||
-                              (label == key);
-                UpdateToggle(b, active);
+                var btnKey = (b.Tag as string) ?? "";
+                UpdateToggle(b, btnKey == key);
             }
             RebuildList();
         }
@@ -369,8 +373,8 @@ namespace METools.LevelManager
             }
 
             _countLabel.Text = filtered.Count == _all.Count
-                ? $"{_all.Count} level(s)"
-                : $"Showing {filtered.Count} of {_all.Count} level(s)";
+                ? string.Format(S._(_all.Count == 1 ? "levelmanager.count_1" : "levelmanager.count_n"), _all.Count)
+                : string.Format(S._(_all.Count == 1 ? "levelmanager.showing_1" : "levelmanager.showing_n"), filtered.Count, _all.Count);
         }
 
         private bool MatchesFilter(LevelRow r)
@@ -499,7 +503,7 @@ namespace METools.LevelManager
         // ═════════════════════════════════════════════════════════════════
         private void RequestRefresh()
         {
-            if (StatusLeft != null) StatusLeft.Text = "Refreshing…";
+            if (StatusLeft != null) StatusLeft.Text = S._("levelmanager.refreshing");
             _handler.Request = new LevelManagerRequest { Action = LevelManagerAction.Refresh };
             _extEvent.Raise();
         }
@@ -507,14 +511,14 @@ namespace METools.LevelManager
         private void OnAddLevel()
         {
             var name = _tbName.Text?.Trim() ?? "";
-            if (string.IsNullOrEmpty(name) || name == "New level name…")
-            { if (StatusLeft != null) StatusLeft.Text = "Enter a name for the new level."; return; }
+            if (string.IsNullOrEmpty(name) || name == S._("levelmanager.new_level_name"))
+            { if (StatusLeft != null) StatusLeft.Text = S._("levelmanager.enter_level_name"); return; }
 
             var elevText = (_tbElevation.Text ?? "0").Replace(',', '.');
             if (!double.TryParse(elevText, NumberStyles.Float, CultureInfo.InvariantCulture, out var elevM))
-            { if (StatusLeft != null) StatusLeft.Text = "Elevation must be a number (meters)."; return; }
+            { if (StatusLeft != null) StatusLeft.Text = S._("levelmanager.invalid_elevation"); return; }
 
-            if (StatusLeft != null) StatusLeft.Text = "Creating level…";
+            if (StatusLeft != null) StatusLeft.Text = S._("levelmanager.creating_level");
             _handler.Request = new LevelManagerRequest
             {
                 Action        = LevelManagerAction.AddLevel,
@@ -554,7 +558,7 @@ namespace METools.LevelManager
         {
             sp.Margin = new Thickness(14, 12, 14, 10);
 
-            sp.Children.Add(Sec("Source"));
+            sp.Children.Add(Sec(S._("ifcimport.source")));
             _ifcSourcePanel = new StackPanel();
             sp.Children.Add(_ifcSourcePanel);
 
@@ -576,7 +580,7 @@ namespace METools.LevelManager
                 row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
                 var infoPanel = new StackPanel();
-                infoPanel.Children.Add(new TextBlock { Text = "Currently loaded", FontSize = 10, Foreground = MeToolsTheme.BrMuted });
+                infoPanel.Children.Add(new TextBlock { Text = S._("ifcimport.currently_loaded"), FontSize = 10, Foreground = MeToolsTheme.BrMuted });
                 infoPanel.Children.Add(new TextBlock
                 {
                     Text = System.IO.Path.GetFileName(_ifcFilePath), FontSize = 13, FontWeight = FontWeights.SemiBold,
@@ -584,7 +588,7 @@ namespace METools.LevelManager
                 });
                 Grid.SetColumn(infoPanel, 0); row.Children.Add(infoPanel);
 
-                var changeBtn = ActionBtn("Change source...", true, OnIfcChangeSourceClicked);
+                var changeBtn = ActionBtn(S._("ifcimport.change_source"), true, OnIfcChangeSourceClicked);
                 changeBtn.VerticalAlignment = VerticalAlignment.Center;
                 Grid.SetColumn(changeBtn, 1); row.Children.Add(changeBtn);
 
@@ -596,16 +600,16 @@ namespace METools.LevelManager
             {
                 _ifcSourcePanel.Children.Add(new TextBlock
                 {
-                    Text = _ifcDetected.Count == 1 ? "Found in this project:" : $"Found {_ifcDetected.Count} in this project:",
+                    Text = _ifcDetected.Count == 1 ? S._("ifcimport.found_in_project_1") : string.Format(S._("ifcimport.found_in_project_n"), _ifcDetected.Count),
                     FontSize = 11, Foreground = MeToolsTheme.BrMuted, Margin = new Thickness(0, 0, 0, 6),
                 });
                 foreach (var d in _ifcDetected) _ifcSourcePanel.Children.Add(BuildIfcDetectedRow(d));
                 _ifcSourcePanel.Children.Add(new TextBlock
                 {
-                    Text = "or", FontSize = 10, Foreground = MeToolsTheme.BrMuted,
+                    Text = S._("ifcimport.or"), FontSize = 10, Foreground = MeToolsTheme.BrMuted,
                     HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 2, 0, 8),
                 });
-                var browseBtnSecondary = ActionBtn("Browse for a different IFC file...", true, BrowseAndLoadIfc);
+                var browseBtnSecondary = ActionBtn(S._("ifcimport.browse_different"), true, BrowseAndLoadIfc);
                 browseBtnSecondary.Margin = new Thickness(0, 0, 0, 14);
                 _ifcSourcePanel.Children.Add(browseBtnSecondary);
                 return;
@@ -620,16 +624,16 @@ namespace METools.LevelManager
             var cardSp = new StackPanel();
             cardSp.Children.Add(new TextBlock
             {
-                Text = "No IFC file found in this project", FontSize = 14, FontWeight = FontWeights.SemiBold,
+                Text = S._("ifcimport.no_ifc_found"), FontSize = 14, FontWeight = FontWeights.SemiBold,
                 Foreground = MeToolsTheme.BrText, Margin = new Thickness(0, 0, 0, 4),
             });
             cardSp.Children.Add(new TextBlock
             {
-                Text = "Checked for linked and imported IFC files -- nothing here matches. Browse for one directly to get started.",
+                Text = S._("ifcimport.no_ifc_hint"),
                 FontSize = 11, Foreground = MeToolsTheme.BrMuted, TextWrapping = TextWrapping.Wrap,
                 Margin = new Thickness(0, 0, 0, 16),
             });
-            var browseBtn = ActionBtn("Browse for an IFC file...", false, BrowseAndLoadIfc);
+            var browseBtn = ActionBtn(S._("ifcimport.browse"), false, BrowseAndLoadIfc);
             browseBtn.Height = 40; browseBtn.FontSize = 13; browseBtn.HorizontalAlignment = HorizontalAlignment.Stretch;
             cardSp.Children.Add(browseBtn);
             card.Child = cardSp;
@@ -647,7 +651,7 @@ namespace METools.LevelManager
             infoPanel.Children.Add(new TextBlock { Text = d.Path, FontSize = 9.5, Foreground = MeToolsTheme.BrMuted, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 1, 0, 0) });
             Grid.SetColumn(infoPanel, 0); grid.Children.Add(infoPanel);
 
-            var useBtn = ActionBtn("Use this", false, () => LoadIfcSource(d.Path));
+            var useBtn = ActionBtn(S._("ifcimport.use_this"), false, () => LoadIfcSource(d.Path));
             useBtn.VerticalAlignment = VerticalAlignment.Center;
             Grid.SetColumn(useBtn, 1); grid.Children.Add(useBtn);
 
@@ -665,14 +669,14 @@ namespace METools.LevelManager
             _ifcFilePath = null; _ifcParsed = null; _ifcRows.Clear();
             RebuildIfcSourcePanel();
             RebuildIfcResultsPanel();
-            if (StatusLeft != null) StatusLeft.Text = "Select an IFC source above to begin.";
+            if (StatusLeft != null) StatusLeft.Text = S._("ifcimport.select_source_hint");
         }
 
         private void BrowseAndLoadIfc()
         {
             var dlg = new Microsoft.Win32.OpenFileDialog
             {
-                Title = "Select an IFC file",
+                Title = S._("ifcimport.select_file_title"),
                 Filter = "IFC files (*.ifc)|*.ifc|All files (*.*)|*.*",
                 CheckFileExists = true,
             };
@@ -684,7 +688,7 @@ namespace METools.LevelManager
             var parsed = IfcLiteReader.Parse(path);
             if (!parsed.Success)
             {
-                if (StatusLeft != null) StatusLeft.Text = parsed.FatalError ?? "Could not parse this file.";
+                if (StatusLeft != null) StatusLeft.Text = parsed.FatalError ?? S._("ifcimport.could_not_parse");
                 return;
             }
             _ifcParsed = parsed;
@@ -692,7 +696,7 @@ namespace METools.LevelManager
             _ifcRows.Clear();
             RebuildIfcSourcePanel();
             RebuildIfcResultsPanel();
-            if (StatusLeft != null) StatusLeft.Text = "Loaded " + System.IO.Path.GetFileName(path) + ".";
+            if (StatusLeft != null) StatusLeft.Text = string.Format(S._("ifcimport.loaded"), System.IO.Path.GetFileName(path));
         }
 
         private void RebuildIfcResultsPanel()
@@ -703,7 +707,7 @@ namespace METools.LevelManager
             {
                 _ifcResultsPanel.Children.Add(new TextBlock
                 {
-                    Text = "Levels, units and location info will appear here once a source is loaded.",
+                    Text = S._("ifcimport.levels_appear_hint"),
                     FontSize = 11, FontStyle = FontStyles.Italic, Foreground = MeToolsTheme.BrMuted,
                     TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 6),
                 });
@@ -714,12 +718,12 @@ namespace METools.LevelManager
 
             _ifcResultsPanel.Children.Add(new TextBlock
             {
-                Text = $"Schema: {_ifcParsed.SchemaVersion}", FontSize = 10.5, Foreground = MeToolsTheme.BrMuted,
+                Text = string.Format(S._("ifcimport.schema"), _ifcParsed.SchemaVersion), FontSize = 10.5, Foreground = MeToolsTheme.BrMuted,
                 Margin = new Thickness(0, 0, 0, 12),
             });
 
             // -- Units ---------------------------------------------------------
-            _ifcResultsPanel.Children.Add(Sec("Units"));
+            _ifcResultsPanel.Children.Add(Sec(S._("ifcimport.units")));
             var (revitLabel, revitKind) = DescribeRevitLengthUnit(doc);
             bool mismatch = _ifcParsed.LengthUnitKind != IfcLengthUnitKind.Unknown
                             && revitKind != IfcLengthUnitKind.Unknown
@@ -728,8 +732,8 @@ namespace METools.LevelManager
             var unitGrid = new Grid();
             unitGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             unitGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            var ifcUnitBox = IfcUnitTile("This IFC file", _ifcParsed.LengthUnitLabel, mismatch);
-            var rvtUnitBox = IfcUnitTile("Your Revit project", revitLabel, mismatch);
+            var ifcUnitBox = IfcUnitTile(S._("ifcimport.this_ifc_file"), _ifcParsed.LengthUnitLabel, mismatch);
+            var rvtUnitBox = IfcUnitTile(S._("ifcimport.your_revit_project"), revitLabel, mismatch);
             Grid.SetColumn(ifcUnitBox, 0); unitGrid.Children.Add(ifcUnitBox);
             Grid.SetColumn(rvtUnitBox, 1); unitGrid.Children.Add(rvtUnitBox);
             _ifcResultsPanel.Children.Add(unitGrid);
@@ -737,27 +741,25 @@ namespace METools.LevelManager
             if (mismatch)
             {
                 double ratio = _ifcParsed.LengthUnitToMeters / RevitUnitToMeters(revitKind);
-                _ifcResultsPanel.Children.Add(IfcInfoBoxWarn(
-                    $"Unit mismatch: this IFC file is in {_ifcParsed.LengthUnitLabel}, but your Revit project's units are set to {revitLabel}. " +
-                    $"One raw unit in the file equals {ratio:0.####}x what the same number would mean in your project. " +
-                    "Level elevations below are converted correctly regardless -- this warning is so you don't get caught out entering or eyeballing other values (like dimensions from this file's drawings) assuming the wrong scale."));
+                _ifcResultsPanel.Children.Add(IfcInfoBoxWarn(string.Format(S._("ifcimport.unit_mismatch"),
+                    _ifcParsed.LengthUnitLabel, revitLabel, ratio.ToString("0.####"))));
             }
             else
             {
-                _ifcResultsPanel.Children.Add(InfoBox("No unit mismatch detected between this file and your project."));
+                _ifcResultsPanel.Children.Add(InfoBox(S._("ifcimport.no_mismatch")));
             }
 
             // -- Site / location (read-only, informational only) ---------------
             if (_ifcParsed.Site.HasAnyInfo)
             {
-                _ifcResultsPanel.Children.Add(Sec("Site / Location (read-only -- nothing here changes your project)"));
+                _ifcResultsPanel.Children.Add(Sec(S._("ifcimport.site_location")));
                 _ifcResultsPanel.Children.Add(BuildIfcSitePanel());
             }
 
             // -- Warnings --------------------------------------------------------
             if (_ifcParsed.Warnings.Count > 0)
             {
-                _ifcResultsPanel.Children.Add(Sec($"Notes ({_ifcParsed.Warnings.Count})"));
+                _ifcResultsPanel.Children.Add(Sec(string.Format(S._("ifcimport.notes_count"), _ifcParsed.Warnings.Count)));
                 var warnBox = new Border
                 {
                     Background = MeToolsTheme.BrSurface, BorderBrush = MeToolsTheme.BrBorder,
@@ -776,7 +778,7 @@ namespace METools.LevelManager
             }
 
             // -- Levels table ------------------------------------------------------
-            _ifcResultsPanel.Children.Add(Sec($"Levels found ({_ifcParsed.Levels.Count})"));
+            _ifcResultsPanel.Children.Add(Sec(string.Format(S._("ifcimport.levels_found"), _ifcParsed.Levels.Count)));
 
             var existingNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             try
@@ -794,7 +796,7 @@ namespace METools.LevelManager
                 {
                     Info = info,
                     IsSelected = !clash,
-                    BlockReason = clash ? "A level with this name already exists -- will be skipped" : null,
+                    BlockReason = clash ? S._("ifcimport.name_exists_skip") : null,
                 });
             }
 
@@ -811,7 +813,7 @@ namespace METools.LevelManager
             tableBorder.Child = tableOuter;
             _ifcResultsPanel.Children.Add(tableBorder);
 
-            _ifcImportBtn = ActionBtn("Import Selected Levels", false, OnIfcImportClicked);
+            _ifcImportBtn = ActionBtn(S._("ifcimport.import_selected"), false, OnIfcImportClicked);
             _ifcResultsPanel.Children.Add(_ifcImportBtn);
         }
 
@@ -843,20 +845,20 @@ namespace METools.LevelManager
             {
                 double toM = _ifcParsed.LengthUnitToMeters;
                 double x = (site.LocalX ?? 0) * toM, y = (site.LocalY ?? 0) * toM, z = (site.LocalZ ?? 0) * toM;
-                panel.Children.Add(IfcInfoLine("Site's local placement",
-                    $"X = {x:0.###} m,  Y = {y:0.###} m,  Z = {z:0.###} m  (relative to this IFC file's own origin/placement -- not necessarily your project's origin)"));
+                panel.Children.Add(IfcInfoLine(S._("ifcimport.site_local_placement"),
+                    string.Format(S._("ifcimport.site_local_desc"), x.ToString("0.###"), y.ToString("0.###"), z.ToString("0.###"))));
             }
             if (site.LatitudeDeg.HasValue && site.LongitudeDeg.HasValue)
             {
-                panel.Children.Add(IfcInfoLine("Geographic reference",
-                    $"Lat {site.LatitudeDeg:0.000000}\u00B0, Lon {site.LongitudeDeg:0.000000}\u00B0" +
-                    (site.RefElevationRaw.HasValue ? $", elevation {(site.RefElevationRaw.Value * _ifcParsed.LengthUnitToMeters):0.##} m" : "")));
+                panel.Children.Add(IfcInfoLine(S._("ifcimport.geo_reference"),
+                    string.Format(S._("ifcimport.geo_desc"), site.LatitudeDeg.Value.ToString("0.000000"), site.LongitudeDeg.Value.ToString("0.000000")) +
+                    (site.RefElevationRaw.HasValue ? string.Format(S._("ifcimport.geo_elev_suffix"), (site.RefElevationRaw.Value * _ifcParsed.LengthUnitToMeters).ToString("0.##")) : "")));
             }
             if (site.MapEastings.HasValue)
             {
-                panel.Children.Add(IfcInfoLine("Survey coordinates (IfcMapConversion)",
-                    $"Easting {site.MapEastings:0.###},  Northing {site.MapNorthings:0.###}" +
-                    (site.MapOrthogonalHeight.HasValue ? $",  Height {site.MapOrthogonalHeight:0.###}" : "")));
+                panel.Children.Add(IfcInfoLine(S._("ifcimport.survey_coords"),
+                    string.Format(S._("ifcimport.survey_desc"), site.MapEastings.Value.ToString("0.###"), site.MapNorthings.Value.ToString("0.###")) +
+                    (site.MapOrthogonalHeight.HasValue ? string.Format(S._("ifcimport.survey_height_suffix"), site.MapOrthogonalHeight.Value.ToString("0.###")) : "")));
             }
             return panel;
         }
@@ -886,7 +888,7 @@ namespace METools.LevelManager
             };
             Grid.SetColumn(_ifcSelectAllCb, 0); grid.Children.Add(_ifcSelectAllCb);
 
-            var headers = new (int col, string text)[] { (1, "Level name"), (2, "Elevation (file unit)"), (3, "Elevation (your project)") };
+            var headers = new (int col, string text)[] { (1, S._("ifcimport.level_name_col")), (2, S._("ifcimport.elev_file_col")), (3, S._("ifcimport.elev_project_col")) };
             foreach (var (col, text) in headers)
             {
                 var tb = new TextBlock
@@ -964,10 +966,10 @@ namespace METools.LevelManager
         private void OnIfcImportClicked()
         {
             var selected = _ifcRows.Where(r => r.IsSelected && r.Importable).Select(r => r.Info).ToList();
-            if (selected.Count == 0) { if (StatusLeft != null) StatusLeft.Text = "Nothing selected."; return; }
+            if (selected.Count == 0) { if (StatusLeft != null) StatusLeft.Text = S._("ifcimport.nothing_selected"); return; }
 
             _ifcImportBtn.IsEnabled = false;
-            if (StatusLeft != null) StatusLeft.Text = $"Creating {selected.Count} level(s)...";
+            if (StatusLeft != null) StatusLeft.Text = string.Format(S._("ifcimport.creating_levels"), selected.Count);
             _ifcHandler.Request = new IfcLevelImportRequest
             {
                 LevelsToCreate = selected,
@@ -979,8 +981,8 @@ namespace METools.LevelManager
         private void OnIfcImportDone(IfcLevelImportResultInfo res)
         {
             _ifcImportBtn.IsEnabled = true;
-            string msg = $"Created {res.Created} level(s).";
-            if (res.Skipped > 0) msg += $" Skipped {res.Skipped}: {string.Join(", ", res.SkippedNames)}.";
+            string msg = string.Format(S._("ifcimport.created_levels"), res.Created);
+            if (res.Skipped > 0) msg += string.Format(S._("ifcimport.skipped_levels"), res.Skipped, string.Join(", ", res.SkippedNames));
             if (StatusLeft != null) StatusLeft.Text = msg;
             // The Project Levels tab's own data is now stale (new levels exist) -- refresh it too.
             RequestRefresh();
@@ -989,21 +991,21 @@ namespace METools.LevelManager
         // -- Unit helpers --------------------------------------------------------
         private static (string Label, IfcLengthUnitKind Kind) DescribeRevitLengthUnit(Document doc)
         {
-            if (doc == null) return ("(no active document)", IfcLengthUnitKind.Unknown);
+            if (doc == null) return (S._("ifcimport.no_active_doc"), IfcLengthUnitKind.Unknown);
             try
             {
                 var fo = doc.GetUnits().GetFormatOptions(SpecTypeId.Length);
                 var uid = fo.GetUnitTypeId();
-                if (uid == UnitTypeId.Millimeters) return ("Millimetres (mm)", IfcLengthUnitKind.Millimeter);
-                if (uid == UnitTypeId.Centimeters) return ("Centimetres (cm)", IfcLengthUnitKind.Centimeter);
-                if (uid == UnitTypeId.Meters) return ("Metres (m)", IfcLengthUnitKind.Meter);
-                if (uid == UnitTypeId.Feet) return ("Feet (ft)", IfcLengthUnitKind.Foot);
-                if (uid == UnitTypeId.FeetFractionalInches) return ("Feet & fractional inches", IfcLengthUnitKind.Foot);
-                if (uid == UnitTypeId.Inches) return ("Inches (in)", IfcLengthUnitKind.Inch);
-                if (uid == UnitTypeId.FractionalInches) return ("Fractional inches", IfcLengthUnitKind.Inch);
+                if (uid == UnitTypeId.Millimeters) return (S._("ifcimport.mm"), IfcLengthUnitKind.Millimeter);
+                if (uid == UnitTypeId.Centimeters) return (S._("ifcimport.cm"), IfcLengthUnitKind.Centimeter);
+                if (uid == UnitTypeId.Meters) return (S._("ifcimport.m"), IfcLengthUnitKind.Meter);
+                if (uid == UnitTypeId.Feet) return (S._("ifcimport.ft"), IfcLengthUnitKind.Foot);
+                if (uid == UnitTypeId.FeetFractionalInches) return (S._("ifcimport.ft_frac"), IfcLengthUnitKind.Foot);
+                if (uid == UnitTypeId.Inches) return (S._("ifcimport.in"), IfcLengthUnitKind.Inch);
+                if (uid == UnitTypeId.FractionalInches) return (S._("ifcimport.in_frac"), IfcLengthUnitKind.Inch);
                 return (uid.TypeId, IfcLengthUnitKind.Unknown);
             }
-            catch { return ("(unknown)", IfcLengthUnitKind.Unknown); }
+            catch { return (S._("ifcimport.unknown"), IfcLengthUnitKind.Unknown); }
         }
 
         private static double RevitUnitToMeters(IfcLengthUnitKind kind)

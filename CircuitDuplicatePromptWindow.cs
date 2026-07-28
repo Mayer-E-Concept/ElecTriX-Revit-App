@@ -21,7 +21,8 @@ namespace METools.CircuitDuplicate
 
         public CircuitDuplicatePromptWindow(string oldBuilding, string oldApartment, int elementCount)
         {
-            Title = "ME-Tools -- Reassign House / Apartment";
+            S.SetLanguage(SettingsStore.Language ?? "en");
+            Title = S._("circdup.title");
             Width = 380; SizeToContent = SizeToContent.Height;
             ResizeMode = ResizeMode.NoResize;
             WindowStartupLocation = WindowStartupLocation.CenterScreen;
@@ -42,25 +43,22 @@ namespace METools.CircuitDuplicate
 
             sp.Children.Add(new TextBlock
             {
-                Text = $"{count} new element(s) already carry circuit-tagging data " +
-                       $"(House '{oldBuilding}', Apartment '{oldApartment}').",
+                Text = string.Format(S._(count == 1 ? "circdup.detected_1" : "circdup.detected_n"), count, oldBuilding, oldApartment),
                 FontSize = 12, Foreground = MeToolsTheme.BrText, TextWrapping = TextWrapping.Wrap,
                 Margin = new Thickness(0, 0, 0, 4),
             });
             sp.Children.Add(new TextBlock
             {
-                Text = "Looks like a copy of an already-tagged apartment. Give the copy its own " +
-                       "House/Apartment so it shows up as its own group in Circuit Tagger's Stats " +
-                       "-- or Skip to leave it as-is.",
+                Text = S._("circdup.hint"),
                 FontSize = 11, Foreground = MeToolsTheme.BrMuted, TextWrapping = TextWrapping.Wrap,
                 Margin = new Thickness(0, 0, 0, 14),
             });
 
-            sp.Children.Add(Label("House"));
+            sp.Children.Add(Label(S._("circdup.house")));
             _tbBuilding = Field(oldBuilding);
             sp.Children.Add(_tbBuilding);
 
-            sp.Children.Add(Label("Apartment"));
+            sp.Children.Add(Label(S._("circdup.apartment")));
             _tbApartment = Field(oldApartment);
             sp.Children.Add(_tbApartment);
 
@@ -72,7 +70,7 @@ namespace METools.CircuitDuplicate
 
             var skipBtn = new Button
             {
-                Content = "Skip", Height = 30, Padding = new Thickness(14, 0, 14, 0),
+                Content = S._("circdup.skip"), Height = 30, Padding = new Thickness(14, 0, 14, 0),
                 Background = MeToolsTheme.BrBtnBg, Foreground = MeToolsTheme.BrText,
                 BorderBrush = MeToolsTheme.BrBtnBorder, BorderThickness = new Thickness(1),
                 Cursor = Cursors.Hand,
@@ -81,7 +79,7 @@ namespace METools.CircuitDuplicate
 
             var applyBtn = new Button
             {
-                Content = "Apply", Height = 30, Padding = new Thickness(14, 0, 14, 0),
+                Content = S._("circdup.apply"), Height = 30, Padding = new Thickness(14, 0, 14, 0),
                 Margin = new Thickness(8, 0, 0, 0), FontWeight = FontWeights.SemiBold,
                 Background = MeToolsTheme.BrAccent, Foreground = MeToolsTheme.BrOnAccent,
                 BorderBrush = MeToolsTheme.BrAccent, BorderThickness = new Thickness(1),

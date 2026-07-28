@@ -21,6 +21,7 @@ namespace METools
 
         public ProjectHealthCheckWindow(HealthCheckResult result, ExternalEvent evt, ProjectHealthCheckHandler handler)
         {
+            S.SetLanguage(SettingsStore.Language ?? "en");
             _evt     = evt;
             _handler = handler;
             _handler.OnResult = r => Dispatcher.Invoke(() => Render(r));
@@ -30,14 +31,14 @@ namespace METools
                     StatusLeft.Text = string.Join("  |  ", msgs);
             });
 
-            InitWindow("ElectriX -- Project Health Check", 520);
+            InitWindow(S._("healthcheck.title"), 520);
             Build();
             Render(result);
         }
 
         private void Build()
         {
-            BuildStatusBar("Checks the tag family and shared-parameter bindings ElecTriX depends on.");
+            BuildStatusBar(S._("healthcheck.subtitle"));
 
             // Footer FIRST (Dock.Bottom must be added before the fill element).
             var footer = new Border
@@ -48,17 +49,17 @@ namespace METools
             };
             DockPanel.SetDock(footer, Dock.Bottom);
             var row = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
-            var fixBtn = FooterBtn("Fix All", primary: false, onClick: () =>
+            var fixBtn = FooterBtn(S._("healthcheck.fix_all"), primary: false, onClick: () =>
             {
-                StatusLeft.Text = "Fixing...";
+                StatusLeft.Text = S._("healthcheck.fixing");
                 _handler.DoFix = true;
                 _evt.Raise();
             });
             fixBtn.Margin = new Thickness(0, 0, 8, 0);
-            fixBtn.ToolTip = "Loads the ME-Tools_CircuitTag family and binds the 6 shared parameters, from the files bundled with the installer.";
-            var refreshBtn = FooterBtn("Refresh", primary: true, onClick: () =>
+            fixBtn.ToolTip = S._("healthcheck.fix_tip");
+            var refreshBtn = FooterBtn(S._("healthcheck.refresh"), primary: true, onClick: () =>
             {
-                StatusLeft.Text = "Checking...";
+                StatusLeft.Text = S._("healthcheck.checking");
                 _evt.Raise();
             });
             row.Children.Add(fixBtn);
@@ -88,60 +89,59 @@ namespace METools
                 Foreground = MeToolsTheme.BrMuted, Margin = new Thickness(0, 0, 0, 12),
             });
 
-            _body.Children.Add(Sec("Tag Family"));
+            _body.Children.Add(Sec(S._("healthcheck.tag_family")));
             _body.Children.Add(StatusRow(
                 "ME-Tools_CircuitTag",
                 result.TagFamilyLoaded,
                 result.TagFamilyLoaded
-                    ? "Loaded in this project."
-                    : "Not loaded -- Circuit Tagger will write parameters but place no tags."));
+                    ? S._("healthcheck.loaded")
+                    : S._("healthcheck.not_loaded")));
 
-            _body.Children.Add(Sec("Shared Parameters (Circuit Tagger)"));
+            _body.Children.Add(Sec(S._("healthcheck.shared_params")));
             foreach (var row in result.ParamRows)
             {
                 string detail;
                 if (row.IsHealthy)
-                    detail = "Bound to all 8 categories.";
+                    detail = S._("healthcheck.bound_all");
                 else if (!row.BoundAtAll)
-                    detail = "Not bound to any category in this project.";
+                    detail = S._("healthcheck.not_bound_any");
                 else
-                    detail = "Missing from: " + string.Join(", ", row.MissingCategories);
+                    detail = S._("healthcheck.missing_from") + string.Join(", ", row.MissingCategories);
 
                 _body.Children.Add(StatusRow(row.ParamName, row.IsHealthy, detail));
             }
 
-            _body.Children.Add(Sec("Environment"));
+            _body.Children.Add(Sec(S._("healthcheck.environment")));
 
             string folderDetail;
             if (!result.SharedFolderConfigured)
-                folderDetail = "Not configured -- set a shared folder in Comments' settings first.";
+                folderDetail = S._("healthcheck.folder_not_configured");
             else if (!result.SharedFolderReachable)
-                folderDetail = $"Configured ('{result.SharedFolderPath}') but not reachable right now -- " +
-                                "check the network path or VPN connection.";
+                folderDetail = string.Format(S._("healthcheck.folder_unreachable"), result.SharedFolderPath);
             else
-                folderDetail = $"Reachable: '{result.SharedFolderPath}'.";
+                folderDetail = string.Format(S._("healthcheck.folder_reachable"), result.SharedFolderPath);
             _body.Children.Add(StatusRow(
-                "Shared Folder (Comments & Activity Log)",
+                S._("healthcheck.shared_folder_title"),
                 result.SharedFolderConfigured && result.SharedFolderReachable,
                 folderDetail));
 
             _body.Children.Add(StatusRow(
-                "ME-Tools_CircuitTag.rfa (installer resource)",
+                S._("healthcheck.tag_rfa_title"),
                 result.TagFamilyResourcePresent,
                 result.TagFamilyResourcePresent
-                    ? "Present -- Fix All can use this file."
-                    : "Not found -- add it to the installer (setup.iss) so Fix All can load it."));
+                    ? S._("healthcheck.resource_present")
+                    : S._("healthcheck.resource_missing_tag")));
 
             _body.Children.Add(StatusRow(
-                "METools_SharedParameters.txt (installer resource)",
+                S._("healthcheck.shared_params_txt_title"),
                 result.SharedParamResourcePresent,
                 result.SharedParamResourcePresent
-                    ? "Present -- Fix All can use this file."
-                    : "Not found -- add it to the installer (setup.iss) so Fix All can bind it."));
+                    ? S._("healthcheck.resource_present")
+                    : S._("healthcheck.resource_missing_params")));
 
             StatusLeft.Text = result.AllHealthy
-                ? "All checks passed."
-                : "Some checks failed -- see details above.";
+                ? S._("healthcheck.all_passed")
+                : S._("healthcheck.some_failed");
         }
 
         private Border StatusRow(string title, bool healthy, string detail)

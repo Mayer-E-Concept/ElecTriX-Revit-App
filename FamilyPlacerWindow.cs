@@ -79,7 +79,8 @@ namespace METools.FamilyPlacer
             _handler.OnPlaced = n  => Dispatcher.Invoke(UpdateCount);
 
             // Window setup
-            InitWindow("Family Placer", 520);
+            S.SetLanguage(SettingsStore.Language ?? "en");
+            InitWindow(S._("placer.title"), 520);
             BuildUI();
             AddInitialSlot();
         }
@@ -96,7 +97,7 @@ namespace METools.FamilyPlacer
 
             // Titelleiste von MeToolsWindowBase
 
-            BuildStatusBar("0 families configured", "Revit 2025");
+            BuildStatusBar(string.Format(S._("placer.count_configured_n"), 0), "Revit 2025/2026");
             _statusCount = StatusLeft;
             _statusTxt   = StatusRight;
 
@@ -138,7 +139,7 @@ namespace METools.FamilyPlacer
             RootDock.Children.Add(scroll);
 
             // Template section
-            body.Children.Add(SectionLabel("Template"));
+            body.Children.Add(SectionLabel(S._("placer.template")));
             var tplRow = new Grid { Margin = new Thickness(0, 0, 0, 12) };
             tplRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             tplRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -149,11 +150,11 @@ namespace METools.FamilyPlacer
             _tplCombo.SelectionChanged += TplCombo_SelectionChanged;
             Grid.SetColumn(_tplCombo, 0);
 
-            var btnSave = MakeIconBtn("\uE74E", "Save current config as template", SaveTemplate);
+            var btnSave = MakeIconBtn("\uE74E", S._("placer.save_tpl_tip"), SaveTemplate);
             btnSave.Margin = new Thickness(5, 0, 0, 0);
             Grid.SetColumn(btnSave, 1);
 
-            var btnDel = MakeIconBtn("\uE74D", "Delete selected template", DeleteTemplate);
+            var btnDel = MakeIconBtn("\uE74D", S._("placer.delete_tpl"), DeleteTemplate);
             btnDel.Margin = new Thickness(4, 0, 0, 0);
             Grid.SetColumn(btnDel, 2);
 
@@ -163,22 +164,22 @@ namespace METools.FamilyPlacer
             body.Children.Add(tplRow);
 
             // Orientation section
-            body.Children.Add(SectionLabel("Arrangement"));
+            body.Children.Add(SectionLabel(S._("placer.arrangement")));
             var oriRow = new StackPanel
             {
                 Orientation = Orientation.Horizontal,
                 Margin      = new Thickness(0, 0, 0, 12)
             };
 
-            _btnOri1 = MakeOriBtn("↕  Stacked",     "Vertical",    true);
-            _btnOri2 = MakeOriBtn("↔  Side by Side", "Horizontal",  false);
+            _btnOri1 = MakeOriBtn(S._("placer.stacked"),      "Vertical",    true);
+            _btnOri2 = MakeOriBtn(S._("placer.side_by_side"), "Horizontal",  false);
             _btnOri1.Margin = new Thickness(0, 0, 5, 0);
             oriRow.Children.Add(_btnOri1);
             oriRow.Children.Add(_btnOri2);
             body.Children.Add(oriRow);
 
             // ── Level — always visible, sets workplane for placement ──────────
-            body.Children.Add(SectionLabel("Level"));
+            body.Children.Add(SectionLabel(S._("placer.level")));
             _levelCombo = StyledCombo(30, 12); _levelCombo.Margin = new Thickness(0, 0, 0, 14);
             foreach (var lv in _levels)
                 _levelCombo.Items.Add($"{lv.Name}  ({lv.Elevation:F2} m)");
@@ -210,7 +211,8 @@ namespace METools.FamilyPlacer
             hdr.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(28) });   // 10 gear
             hdr.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(4) });    // 11 gap
             hdr.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(28) });   // 12 del
-            AddHdr(hdr, "Family", 2); AddHdr(hdr, "Niveau", 4); AddHdr(hdr, "Off X", 6); AddHdr(hdr, "Off Y / Y=Frame", 8);
+            AddHdr(hdr, S._("placer.famille"), 2); AddHdr(hdr, S._("placer.niveau"), 4); AddHdr(hdr, S._("placer.off_x"), 6);
+            AddHdr(hdr, S._("placer.off_y") + " / " + S._("placer.y_frame"), 8);
             body.Children.Add(hdr);
 
             _slotPanel = new StackPanel { Margin = new Thickness(0, 0, 0, 6) };
@@ -219,7 +221,7 @@ namespace METools.FamilyPlacer
             // Add slot button
             var btnAdd = new Button
             {
-                Content             = "+ Add Slot",
+                Content             = S._("placer.add_slot"),
                 Height              = 30,
                 FontSize            = 12,
                 Background          = Brushes.Transparent,
@@ -246,10 +248,7 @@ namespace METools.FamilyPlacer
             body.Children.Add(new Separator { Margin = new Thickness(0, 0, 0, 10) });
 
             // Info box (same style as Lamp Placer)
-            body.Children.Add(InfoBox(
-                "Place: position the family (SPACEBAR rotates, click a wall face to host) and click once - it finishes after that one drop. "
-                + "Multi-Place: same, but click several positions and press ESC to finish. "
-                + "Wall detection and free work plane are supported."));
+            body.Children.Add(InfoBox(S._("placer.help")));
 
             // Place buttons row
             var btnRow = new Grid();
@@ -257,10 +256,10 @@ namespace METools.FamilyPlacer
             btnRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(5) });
             btnRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1.4, GridUnitType.Star) });
 
-            var btnPlace = MakePlaceBtn("▶  Place", false, PlaceSingle); btnPlace.Template = RoundedBtnTemplate();
+            var btnPlace = MakePlaceBtn(S._("placer.place"), false, PlaceSingle); btnPlace.Template = RoundedBtnTemplate();
             Grid.SetColumn(btnPlace, 0);
 
-            var btnMulti = MakePlaceBtn("⊕  Multi-Place", true, PlaceMulti); btnMulti.Template = RoundedBtnTemplate();
+            var btnMulti = MakePlaceBtn(S._("placer.multi_place"), true, PlaceMulti); btnMulti.Template = RoundedBtnTemplate();
             Grid.SetColumn(btnMulti, 2);
 
             btnRow.Children.Add(btnPlace);
@@ -440,7 +439,7 @@ namespace METools.FamilyPlacer
         private void UpdateCount()
         {
             int valid = _rows.Count(r => !string.IsNullOrEmpty(r.Slot.FamilyName));
-            _statusCount.Text = $"{valid} famil{(valid != 1 ? "ies" : "y")} configured";
+            _statusCount.Text = string.Format(S._(valid == 1 ? "placer.count_configured_1" : "placer.count_configured_n"), valid);
         }
 
         // Recalculate 3DZ_Niveau_Versatzfaktor for all slots based on height collisions.
@@ -541,7 +540,7 @@ namespace METools.FamilyPlacer
                 Orientation = _orientation,
                 LevelId     = _selectedLevelId,
             };
-            SetStatus("Click each position - SPACEBAR rotates - ESC to finish.");
+            SetStatus(S._("placer.multi_place_hint"));
             _extEvent.Raise();
         }
 
@@ -551,7 +550,7 @@ namespace METools.FamilyPlacer
         private void RefreshTemplateCombo()
         {
             _tplCombo.Items.Clear();
-            _tplCombo.Items.Add("— Select Template —");
+            _tplCombo.Items.Add(S._("placer.select_tpl"));
             foreach (var t in _templates)
                 _tplCombo.Items.Add(t.Name);
             _tplCombo.SelectedIndex = 0;
@@ -959,7 +958,7 @@ namespace METools.FamilyPlacer
 
             // Height
             var hSp = new StackPanel { Margin = new Thickness(0) };
-            hSp.Children.Add(Lbl("Niveau"));
+            hSp.Children.Add(Lbl(S._("placer.niveau")));
             _heightTxt = new TextBox
             {
                 Text   = Slot.Height.ToString("F0"),
@@ -977,7 +976,7 @@ namespace METools.FamilyPlacer
 
             // Offset X factor (horizontal)
             var oxSp = new StackPanel();
-            oxSp.Children.Add(Lbl("Off X"));
+            oxSp.Children.Add(Lbl(S._("placer.off_x")));
             _offXTxt = new TextBox
             {
                 Text   = Slot.OffsetX.ToString(),
@@ -995,7 +994,7 @@ namespace METools.FamilyPlacer
 
             // Offset Y factor (vertical)
             var oySp = new StackPanel();
-            oySp.Children.Add(Lbl("Off Y"));
+            oySp.Children.Add(Lbl(S._("placer.off_y")));
             _offYTxt = new TextBox
             {
                 Text   = Slot.OffsetY.ToString(),
@@ -1017,12 +1016,12 @@ namespace METools.FamilyPlacer
                 : yFrameDef;
             var yFrameCb = new CheckBox
             {
-                Content   = "Y=Frame",
+                Content   = S._("placer.y_frame"),
                 IsChecked = yFrameCur,
                 FontSize  = 9,
                 Foreground = METools.MeToolsTheme.BrPetrol,
                 Margin    = new Thickness(0, 2, 0, 0),
-                ToolTip   = "Y Offset = Frame (Y_Versatz_gleich_Rahmen): aligns element to the frame edge",
+                ToolTip   = S._("placer.y_frame_tip"),
             };
             // Set the default in ParamOverrides if not already set
             if (!Slot.ParamOverrides.ContainsKey("Y_Versatz_gleich_Rahmen") && yFrameDef)
@@ -1044,7 +1043,7 @@ namespace METools.FamilyPlacer
                 Foreground      = METools.MeToolsTheme.BrMuted,
                 VerticalAlignment = VerticalAlignment.Center,
                 Cursor          = Cursors.Hand,
-                ToolTip         = "Family parameters",
+                ToolTip         = S._("placer.family_params_tip"),
                 Template        = METools.MeToolsWindowBase.RoundedBtnTemplate(),
             };
             _gearBtn.Click += (s, e) => ToggleParamsPopup();
@@ -1108,7 +1107,7 @@ namespace METools.FamilyPlacer
 
             var header = new TextBlock
             {
-                Text       = "Family Parameters",
+                Text       = S._("placer.family_params"),
                 FontSize   = 11, FontWeight = FontWeights.Bold,
                 Foreground = MeToolsTheme.BrText,
                 Margin     = new Thickness(0, 0, 0, 6),
@@ -1157,12 +1156,12 @@ namespace METools.FamilyPlacer
             _paramFieldsPanel.Children.Clear();
             if (string.IsNullOrEmpty(Slot.FamilyName))
             {
-                _paramFieldsPanel.Children.Add(InfoLine("Select a family first."));
+                _paramFieldsPanel.Children.Add(InfoLine(S._("placer.select_family")));
                 _paramsBuiltKey = null;
                 return;
             }
 
-            _paramFieldsPanel.Children.Add(InfoLine("Loading..."));
+            _paramFieldsPanel.Children.Add(InfoLine(S._("placer.loading")));
             _requestParams?.Invoke(Slot.FamilyName, Slot.TypeName, infos =>
             {
                 _paramsBuiltKey = key;
@@ -1175,7 +1174,7 @@ namespace METools.FamilyPlacer
             _paramFieldsPanel.Children.Clear();
             if (infos == null || infos.Count == 0)
             {
-                _paramFieldsPanel.Children.Add(InfoLine("No editable instance parameters."));
+                _paramFieldsPanel.Children.Add(InfoLine(S._("placer.no_params")));
                 return;
             }
             int shown = 0;
@@ -1188,7 +1187,7 @@ namespace METools.FamilyPlacer
                 shown++;
             }
             if (shown == 0)
-                _paramFieldsPanel.Children.Add(InfoLine("No editable instance parameters."));
+                _paramFieldsPanel.Children.Add(InfoLine(S._("placer.no_params")));
             UpdateGearDot();
         }
 
@@ -1414,7 +1413,7 @@ namespace METools.FamilyPlacer
             _suppressFamilyTextChanged = true;
             try
             {
-                _familyText.Text = string.IsNullOrEmpty(Slot.FamilyName) ? "-- No Selection --" : Slot.FamilyName;
+                _familyText.Text = string.IsNullOrEmpty(Slot.FamilyName) ? S._("placer.no_selection") : Slot.FamilyName;
                 _familyText.Foreground = string.IsNullOrEmpty(Slot.FamilyName)
                     ? METools.MeToolsTheme.BrMuted : METools.MeToolsTheme.BrText;
             }
@@ -1462,7 +1461,7 @@ namespace METools.FamilyPlacer
             }
 
             var noSel = new Border { Padding = new Thickness(searching ? 6 : 14, 3, 6, 3), Cursor = Cursors.Hand, Background = Brushes.Transparent };
-            noSel.Child = new TextBlock { Text = "-- No Selection --", FontSize = 11, Foreground = MeToolsTheme.BrMuted };
+            noSel.Child = new TextBlock { Text = S._("placer.no_selection"), FontSize = 11, Foreground = MeToolsTheme.BrMuted };
             noSel.MouseEnter += (s, e) => noSel.Background = MeToolsTheme.BrActiveBg;
             noSel.MouseLeave += (s, e) => noSel.Background = Brushes.Transparent;
             noSel.MouseLeftButtonDown += (s, e) => { PickFamily(""); e.Handled = true; };
@@ -1472,7 +1471,7 @@ namespace METools.FamilyPlacer
             {
                 _familyPopupList.Children.Add(new TextBlock
                 {
-                    Text = "No matches.", FontSize = 10.5, FontStyle = FontStyles.Italic,
+                    Text = S._("placer.no_matches"), FontSize = 10.5, FontStyle = FontStyles.Italic,
                     Foreground = MeToolsTheme.BrMuted, Margin = new Thickness(8, 4, 8, 4),
                 });
             }
@@ -1528,7 +1527,7 @@ namespace METools.FamilyPlacer
 
         public SaveTemplateDialog()
         {
-            Title  = "Save Template";
+            Title  = S._("placer.save_tpl_title");
             Width  = 320;
             SizeToContent = SizeToContent.Height;
             ResizeMode = ResizeMode.NoResize;
@@ -1537,7 +1536,7 @@ namespace METools.FamilyPlacer
             var sp = new StackPanel { Margin = new Thickness(14) };
             sp.Children.Add(new TextBlock
             {
-                Text = "Template name:", FontSize = 12,
+                Text = S._("placer.tpl_name"), FontSize = 12,
                 Margin = new Thickness(0, 0, 0, 6)
             });
             var tb = new TextBox { Height = 28, FontSize = 12 };
@@ -1549,12 +1548,12 @@ namespace METools.FamilyPlacer
                 HorizontalAlignment = HorizontalAlignment.Right,
                 Margin = new Thickness(0, 10, 0, 0),
             };
-            var cancel = new Button { Content = "Cancel", Height = 28, MinWidth = 80,
+            var cancel = new Button { Content = S._("placer.cancel"), Height = 28, MinWidth = 80,
                 Margin = new Thickness(0, 0, 8, 0),
                 Background = MeToolsTheme.BrBtnBg, Foreground = MeToolsTheme.BrText,
                 BorderBrush = MeToolsTheme.BrBtnBorder, BorderThickness = new Thickness(1),
                 Cursor = Cursors.Hand, Template = METools.MeToolsWindowBase.RoundedBtnTemplate() };
-            var ok = new Button { Content = "Save", Height = 28, MinWidth = 80,
+            var ok = new Button { Content = S._("placer.save_tpl"), Height = 28, MinWidth = 80,
                 IsDefault = true,
                 Background = MeToolsTheme.BrPetrol,
                 Foreground = Brushes.White,

@@ -17,6 +17,7 @@ namespace METools
     {
         public SplashWindow()
         {
+            S.SetLanguage(SettingsStore.Language ?? "en");
             InitWindow("ME-Tools", width: 360, isDialog: true);
             ResizeMode = ResizeMode.NoResize;
             BuildContent();
@@ -51,7 +52,7 @@ namespace METools
             });
             panel.Children.Add(new TextBlock
             {
-                Text       = "for Autodesk Revit 2025",
+                Text       = S._("splash.tagline"),
                 FontSize   = 12, Foreground = MeToolsTheme.BrMuted,
                 HorizontalAlignment = HorizontalAlignment.Center,
                 Margin     = new Thickness(0, 0, 0, 20),
@@ -84,7 +85,7 @@ namespace METools
             });
 
             // OK button
-            var okBtn = FooterBtn("OK  ·  Continue", primary: true, onClick: () =>
+            var okBtn = FooterBtn(S._("splash.ok_continue"), primary: true, onClick: () =>
             {
                 try { DialogResult = true; } catch { }
                 Close();
@@ -97,7 +98,7 @@ namespace METools
             {
                 panel.Children.Add(new TextBlock
                 {
-                    Text = "To enter a license key → Settings in the ribbon",
+                    Text = S._("splash.settings_hint"),
                     FontSize = 10, Foreground = MeToolsTheme.BrMuted,
                     TextWrapping = TextWrapping.Wrap,
                     TextAlignment = TextAlignment.Center,
@@ -118,19 +119,19 @@ namespace METools
             {
                 bg    = Color.FromRgb(0x1D, 0x6A, 0x40);
                 dot   = Color.FromRgb(0x5D, 0xCA, 0xA5);
-                label = "[v]  Licensed";
+                label = S._("splash.licensed");
             }
             else if (expired)
             {
                 bg    = Color.FromRgb(0x80, 0x20, 0x20);
                 dot   = Color.FromRgb(0xFF, 0x70, 0x70);
-                label = "Trial expired — please activate";
+                label = S._("splash.trial_expired");
             }
             else
             {
                 bg    = Color.FromRgb(0x7A, 0x50, 0x10);
                 dot   = Color.FromRgb(0xFF, 0xC0, 0x50);
-                label = $"Beta access — {days} day{(days == 1 ? "" : "s")} remaining";
+                label = string.Format(S._(days == 1 ? "splash.beta_1" : "splash.beta_n"), days);
             }
 
             var badge = new Border
