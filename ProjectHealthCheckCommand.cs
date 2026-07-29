@@ -43,6 +43,7 @@ namespace METools
         public string ProjectTitle;
         public bool   TagFamilyLoaded;
         public List<ParamCheckRow> ParamRows = new List<ParamCheckRow>();
+        public string ErrorMessage; // set only when the check itself couldn't run (no doc, exception)
 
         // -- Environment checks: per-machine/per-install, not per-project --
         public string SharedFolderPath;
@@ -355,7 +356,11 @@ namespace METools
             try
             {
                 var doc = app.ActiveUIDocument?.Document;
-                if (doc == null) return;
+                if (doc == null)
+                {
+                    OnResult?.Invoke(new HealthCheckResult { ErrorMessage = S._("healthcheck.no_document") });
+                    return;
+                }
 
                 if (DoFix)
                 {
@@ -367,7 +372,12 @@ namespace METools
                 var result = ProjectHealthCheckCollector.Run(doc);
                 OnResult?.Invoke(result);
             }
-            catch { }
+            catch (Exception ex)
+            {
+                // Always invoke, success or failure -- otherwise the window has
+                // no way to know the refresh finished and stays on "Checking..." forever.
+                OnResult?.Invoke(new HealthCheckResult { ErrorMessage = string.Format(S._("healthcheck.refresh_failed"), ex.Message) });
+            }
         }
 
         public string GetName() => "ME-Tools Project Health Check Refresh";

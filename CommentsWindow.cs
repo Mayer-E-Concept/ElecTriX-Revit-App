@@ -57,6 +57,7 @@ namespace METools.Comments
                 RebuildList();
                 PopulateAssignCombo();
                 ResizeToFitContent();
+                if (StatusLeft != null) StatusLeft.Text = S._("comments.refreshed");
             });
             _handler.OnError  = msg  => Dispatcher.Invoke(() => { if (StatusLeft != null) StatusLeft.Text = msg; });
             _handler.OnCurrentLevel = (lvl, sb) => Dispatcher.Invoke(() =>
@@ -250,6 +251,7 @@ namespace METools.Comments
 
             var refreshBtn = MakeBtn(S._("comments.refresh"), true, () =>
             {
+                if (StatusLeft != null) StatusLeft.Text = S._("comments.refreshing");
                 _handler.Request = new CommentsRequest { Action = CommentsAction.Refresh };
                 _extEvent.Raise();
             });

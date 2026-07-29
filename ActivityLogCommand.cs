@@ -13,15 +13,28 @@ namespace METools.ActivityLog
 
         public void Execute(UIApplication app)
         {
+            var entries = new System.Collections.Generic.List<ActivityLogEntry>();
+            string warning = null;
             try
             {
                 var doc = app.ActiveUIDocument?.Document;
-                if (doc == null) return;
-                var projectId = ActivityLogStorage.GetProjectId(doc);
-                var entries = ActivityLogStorage.LoadAll(projectId, out string warning);
-                OnResult?.Invoke(entries, warning);
+                if (doc == null)
+                {
+                    warning = S._("activitylog.no_document");
+                }
+                else
+                {
+                    var projectId = ActivityLogStorage.GetProjectId(doc);
+                    entries = ActivityLogStorage.LoadAll(projectId, out warning);
+                }
             }
-            catch { }
+            catch (Exception ex)
+            {
+                warning = string.Format(S._("activitylog.refresh_failed"), ex.Message);
+            }
+            // Always invoke, success or failure -- otherwise the window has no
+            // way to know the refresh finished and stays on "Refreshing..." forever.
+            OnResult?.Invoke(entries, warning);
         }
 
         public string GetName() => "ME-Tools Activity Log Refresh";

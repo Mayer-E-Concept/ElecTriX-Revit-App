@@ -78,6 +78,7 @@ namespace METools.LevelManager
                 RebuildGroupBar();
                 RebuildZoneCombo();
                 RebuildList();
+                if (StatusLeft != null) StatusLeft.Text = S._("levelmanager.refreshed");
             });
             _handler.OnStatus = msg => Dispatcher.Invoke(() => { if (StatusLeft != null) StatusLeft.Text = msg; });
 

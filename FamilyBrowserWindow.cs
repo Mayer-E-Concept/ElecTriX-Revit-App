@@ -237,7 +237,7 @@ namespace METools
         {
             _families.Clear();
             var doc = _doc;
-            if (doc == null) { if (StatusLeft != null) StatusLeft.Text = "No document open."; return; }
+            if (doc == null) { if (StatusLeft != null) StatusLeft.Text = S.Get("browser.no_document"); return; }
 
             try
             {
@@ -276,11 +276,11 @@ namespace METools
                 BuildGroupBar();
                 _activeGroup = "";
                 Refilter();
-                if (StatusLeft != null) StatusLeft.Text = $"{_families.Count} families loaded";
+                if (StatusLeft != null) StatusLeft.Text = $"{_families.Count} " + S.Get("browser.families_loaded");
             }
             catch (Exception ex)
             {
-                if (StatusLeft != null) StatusLeft.Text = "Error: " + ex.Message;
+                if (StatusLeft != null) StatusLeft.Text = string.Format(S.Get("browser.error"), ex.Message);
             }
         }
 
@@ -601,7 +601,7 @@ namespace METools
             if (dlg.ShowDialog() != true) return;
 
             var doc = _doc;
-            if (doc == null) { if (StatusLeft != null) StatusLeft.Text = "No document open."; return; }
+            if (doc == null) { if (StatusLeft != null) StatusLeft.Text = S.Get("browser.no_document"); return; }
 
             int loaded = 0, skipped = 0, failed = 0;
             foreach (var path in dlg.FileNames)

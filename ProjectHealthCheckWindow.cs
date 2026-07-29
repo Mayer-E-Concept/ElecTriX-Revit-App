@@ -82,6 +82,12 @@ namespace METools
         {
             _body.Children.Clear();
 
+            if (!string.IsNullOrEmpty(result.ErrorMessage))
+            {
+                StatusLeft.Text = result.ErrorMessage;
+                return;
+            }
+
             _body.Children.Add(new TextBlock
             {
                 Text = string.IsNullOrEmpty(result.ProjectTitle) ? "" : result.ProjectTitle,

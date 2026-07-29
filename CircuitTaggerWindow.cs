@@ -463,6 +463,7 @@ namespace METools.FamilyPlacer
         private void RefreshStats()
         {
             if (_statsList == null) return;
+            UpdateStatusBar(S._("circuittagger.stats_refreshing"));
             _statsList.Children.Clear();
             _allRowCheckboxes.Clear();
             _selectedForClear.Clear();
@@ -471,10 +472,10 @@ namespace METools.FamilyPlacer
             StatsHeader(_statsList); // re-add header after clear
 
             var doc = _uiApp.ActiveUIDocument?.Document;
-            if (doc == null) return;
+            if (doc == null) { UpdateStatusBar(S._("circuittagger.no_tagged_found")); return; }
 
             var rows = CircuitTaggerHandler.ReadAllTaggedElements(doc);
-            if (rows.Count == 0) { _statsList.Children.Add(EmptyRow(S._("circuittagger.no_tagged_found"))); return; }
+            if (rows.Count == 0) { _statsList.Children.Add(EmptyRow(S._("circuittagger.no_tagged_found"))); UpdateStatusBar(S._("circuittagger.no_tagged_found")); return; }
 
             // Group: building -> apartment -> circuit base -> sub-circuits
             var byBuilding = rows
@@ -564,6 +565,7 @@ namespace METools.FamilyPlacer
                 }
             }
             if (!anyRow) _statsList.Children.Add(EmptyRow(S._("circuittagger.no_tagged_found")));
+            UpdateStatusBar(S._("circuittagger.stats_refreshed"));
         }
 
         // -- Category classification -- uses integer IDs (locale-independent) --
