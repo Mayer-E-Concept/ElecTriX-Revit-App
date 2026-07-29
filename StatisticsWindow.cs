@@ -20,6 +20,8 @@ namespace METools
         private readonly StatisticsHandler _handler;
         private List<StatRow> _rows;
         private string        _docTitle;
+        private readonly string _projectId;
+        private StatSnapshot    _snapshot;
 
         private ScrollViewer _scroll;
         private StackPanel   _body;
@@ -32,18 +34,31 @@ namespace METools
               "Sockets by workset", "Switches by workset", "Lamps by workset",
               "Per floor", "Cable & Containment", "Mechanical & Plumbing", "Spaces & Levels" };
 
-        public StatisticsWindow(ExternalEvent ev, StatisticsHandler handler, List<StatRow> rows, string docTitle)
+        public StatisticsWindow(ExternalEvent ev, StatisticsHandler handler, List<StatRow> rows, string docTitle,
+            string projectId = null, StatSnapshot snapshot = null)
         {
-            _ev       = ev;
-            _handler  = handler;
-            _rows     = rows ?? new List<StatRow>();
-            _docTitle = docTitle ?? "";
+            _ev        = ev;
+            _handler   = handler;
+            _rows      = rows ?? new List<StatRow>();
+            _docTitle  = docTitle ?? "";
+            _projectId = projectId;
+            _snapshot  = snapshot;
 
             _handler.OnResult = (rr, tt) => Dispatcher.Invoke(() =>
             {
                 _rows     = rr ?? new List<StatRow>();
                 _docTitle = tt ?? "";
                 StatusLeft.Text = _docTitle;
+                Rebuild();
+            });
+            _handler.OnSnapshotSaved = pid => Dispatcher.Invoke(() =>
+            {
+                // Reload from disk rather than reconstructing in-memory --
+                // this is the same file LoadSnapshot() would read later, so
+                // showing exactly that (not just what Save() was passed)
+                // catches any serialization surprise immediately.
+                _snapshot = StatisticsSnapshotStorage.Load(pid);
+                StatusLeft.Text = S.Get("stats.snapshot_saved");
                 Rebuild();
             });
 
@@ -93,6 +108,8 @@ namespace METools
             foreach (var h in _rows.Where(x => x.Section == "Highlights"))
                 tiles.Children.Add(Tile(TrLabel(h.Label), h.Count));
             _body.Children.Add(tiles);
+
+            BuildCompareSection();
 
             // Grouped sections (only categories with count > 0)
             // Per-floor section gets a compact grouped layout
@@ -159,9 +176,95 @@ namespace METools
             var refresh = MiniBtn(S.Get("stats.refresh"), true, () => { StatusLeft.Text = S.Get("stats.refreshing"); _ev.Raise(); });
             refresh.Margin = new Thickness(0, 0, 6, 0);
             var export = MiniBtn(S.Get("stats.export"), false, ExportCsv);
+            export.Margin = new Thickness(0, 0, 6, 0);
+            var saveSnapshot = MiniBtn(S.Get("stats.save_snapshot"), false, () =>
+            {
+                StatusLeft.Text = S.Get("stats.saving_snapshot");
+                _handler.SaveSnapshotRequested = true;
+                _ev.Raise();
+            });
             btnRow.Children.Add(refresh);
             btnRow.Children.Add(export);
+            btnRow.Children.Add(saveSnapshot);
             _body.Children.Add(btnRow);
+
+            ResizeToFitContent();
+        }
+
+        // Shows what changed since the last saved snapshot -- only the rows
+        // that actually differ, not the whole list again. Nothing here ever
+        // modifies the snapshot itself; it's purely a read-only comparison
+        // until the user explicitly clicks Save Snapshot again.
+        private void BuildCompareSection()
+        {
+            _body.Children.Add(SectionHeader(S.Get("stats.compare_title")));
+
+            if (_snapshot == null)
+            {
+                _body.Children.Add(new TextBlock
+                {
+                    Text = S.Get("stats.no_snapshot_yet"), FontSize = 11, FontStyle = FontStyles.Italic,
+                    Foreground = MeToolsTheme.BrMuted, TextWrapping = TextWrapping.Wrap,
+                    Margin = new Thickness(0, 0, 0, 8),
+                });
+                return;
+            }
+
+            var diffs = StatisticsSnapshotStorage.ComputeDiff(_rows, _snapshot);
+
+            _body.Children.Add(new TextBlock
+            {
+                Text = string.Format(S.Get("stats.compared_to"), _snapshot.SavedAtUtc.ToLocalTime().ToString("g")),
+                FontSize = 10.5, Foreground = MeToolsTheme.BrMuted, Margin = new Thickness(0, 0, 0, 6),
+            });
+
+            if (diffs.Count == 0)
+            {
+                _body.Children.Add(new TextBlock
+                {
+                    Text = S.Get("stats.no_changes"), FontSize = 11.5, Foreground = MeToolsTheme.BrMuted,
+                    Margin = new Thickness(0, 0, 0, 8),
+                });
+                return;
+            }
+
+            foreach (var d in diffs.OrderBy(x => x.Section).ThenBy(x => x.Label, StringComparer.OrdinalIgnoreCase))
+                _body.Children.Add(DiffLine(d));
+        }
+
+        private Grid DiffLine(StatDiffRow d)
+        {
+            var g = new Grid { Margin = new Thickness(0, 2, 0, 2) };
+            g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var label = new TextBlock
+            {
+                Text = TrLabel(d.Label), FontSize = 12, Foreground = MeToolsTheme.BrText,
+                VerticalAlignment = VerticalAlignment.Center,
+            };
+            Grid.SetColumn(label, 0); g.Children.Add(label);
+
+            string unit = d.IsLength ? " m" : "";
+            string deltaText = (d.Delta > 0 ? "+" : "") + (d.IsLength ? d.Delta.ToString("F1") : d.Delta.ToString("0")) + unit;
+            var deltaBrush = d.Delta > 0 ? MeToolsTheme.BrGreen : d.Delta < 0 ? MeToolsTheme.BrOrange : MeToolsTheme.BrMuted;
+
+            var valueText = new TextBlock
+            {
+                FontSize = 12, VerticalAlignment = VerticalAlignment.Center,
+                Inlines =
+                {
+                    new System.Windows.Documents.Run((d.IsLength ? d.OldValue.ToString("F1") : d.OldValue.ToString("0")) + unit)
+                        { Foreground = MeToolsTheme.BrMuted },
+                    new System.Windows.Documents.Run("  \u2192  ") { Foreground = MeToolsTheme.BrMuted },
+                    new System.Windows.Documents.Run((d.IsLength ? d.NewValue.ToString("F1") : d.NewValue.ToString("0")) + unit)
+                        { Foreground = MeToolsTheme.BrText, FontWeight = FontWeights.Bold },
+                    new System.Windows.Documents.Run("   " + deltaText) { Foreground = deltaBrush, FontWeight = FontWeights.Bold },
+                },
+            };
+            Grid.SetColumn(valueText, 1); g.Children.Add(valueText);
+
+            return g;
         }
 
         private Border Tile(string label, int count)

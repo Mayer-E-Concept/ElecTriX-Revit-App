@@ -5,8 +5,10 @@ using Autodesk.Revit.DB;
 using Autodesk.Revit.UI;
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Text;
+using System.Text.Json;
 
 namespace METools
 {
@@ -33,6 +35,132 @@ namespace METools
             Section = section;
             Label   = label;
             LengthM = lengthM;
+        }
+    }
+
+    // -- Snapshot + compare -------------------------------------------------
+    // StatRow uses plain public fields (not { get; set; } properties), which
+    // System.Text.Json does not serialize by default -- rather than reach for
+    // JsonSerializerOptions.IncludeFields and depend on that being set
+    // correctly everywhere this is touched, a small dedicated DTO with real
+    // properties keeps the snapshot file's shape independent of StatRow's own
+    // internal representation.
+    public class StatSnapshotRow
+    {
+        public string Section { get; set; } = "";
+        public string Label   { get; set; } = "";
+        public int    Count   { get; set; }
+        public double LengthM { get; set; }
+    }
+
+    public class StatSnapshot
+    {
+        public string DocTitle { get; set; } = "";
+        public DateTime SavedAtUtc { get; set; }
+        public List<StatSnapshotRow> Rows { get; set; } = new List<StatSnapshotRow>();
+    }
+
+    // One changed row between a saved snapshot and the current count.
+    public class StatDiffRow
+    {
+        public string Section  { get; set; } = "";
+        public string Label    { get; set; } = "";
+        public double OldValue { get; set; }
+        public double NewValue { get; set; }
+        public bool   IsLength { get; set; } // true = show as metres, false = whole count
+        public double Delta => NewValue - OldValue;
+    }
+
+    // One JSON file per project (keyed by the same stable, model-stamped
+    // project id CommentsStorage already uses), stored locally per-machine --
+    // deliberately NOT on the shared network folder, since "compare to my own
+    // last look" is a personal reference point, not a team-shared one.
+    public static class StatisticsSnapshotStorage
+    {
+        private static readonly string DataDir = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "METools");
+
+        private static string SnapshotPath(string projectId) => Path.Combine(DataDir, $"stats-snapshot-{projectId}.json");
+
+        public static void Save(string projectId, List<StatRow> rows, string docTitle)
+        {
+            if (string.IsNullOrEmpty(projectId)) return;
+            try
+            {
+                Directory.CreateDirectory(DataDir);
+                var snap = new StatSnapshot
+                {
+                    DocTitle   = docTitle ?? "",
+                    SavedAtUtc = DateTime.UtcNow,
+                    Rows       = rows.Select(r => new StatSnapshotRow
+                    {
+                        Section = r.Section, Label = r.Label, Count = r.Count, LengthM = r.LengthM,
+                    }).ToList(),
+                };
+                var json = JsonSerializer.Serialize(snap, new JsonSerializerOptions { WriteIndented = true });
+                File.WriteAllText(SnapshotPath(projectId), json);
+            }
+            catch { }
+        }
+
+        public static StatSnapshot Load(string projectId)
+        {
+            if (string.IsNullOrEmpty(projectId)) return null;
+            try
+            {
+                var path = SnapshotPath(projectId);
+                if (!File.Exists(path)) return null;
+                return JsonSerializer.Deserialize<StatSnapshot>(File.ReadAllText(path));
+            }
+            catch { return null; }
+        }
+
+        // Only the rows that actually changed (added, removed, or a different
+        // count/length) -- an unchanged project shows nothing here, which is
+        // the point: this is for spotting what moved, not re-showing everything.
+        public static List<StatDiffRow> ComputeDiff(List<StatRow> current, StatSnapshot old)
+        {
+            var result = new List<StatDiffRow>();
+            if (old?.Rows == null) return result;
+
+            string Key(string section, string label) => section + "\u0001" + label;
+
+            var oldMap = old.Rows.ToDictionary(r => Key(r.Section, r.Label), r => r);
+            var seen = new HashSet<string>();
+
+            foreach (var r in current)
+            {
+                string key = Key(r.Section, r.Label);
+                seen.Add(key);
+                bool isLength = r.LengthM > 0;
+                double newVal = isLength ? r.LengthM : r.Count;
+
+                double oldVal = 0;
+                bool oldIsLength = isLength;
+                if (oldMap.TryGetValue(key, out var oldRow))
+                {
+                    oldIsLength = oldRow.LengthM > 0;
+                    oldVal = oldIsLength ? oldRow.LengthM : oldRow.Count;
+                }
+
+                if (Math.Abs(newVal - oldVal) > 0.001)
+                    result.Add(new StatDiffRow { Section = r.Section, Label = r.Label, OldValue = oldVal, NewValue = newVal, IsLength = isLength });
+            }
+
+            // Rows present in the snapshot but gone entirely now (e.g. a floor
+            // that had fixtures before and has none at all now, so Collect()
+            // never emits a row for it -- still worth surfacing as a removal).
+            foreach (var kv in oldMap)
+            {
+                if (seen.Contains(kv.Key)) continue;
+                var oldRow = kv.Value;
+                bool isLength = oldRow.LengthM > 0;
+                double oldVal = isLength ? oldRow.LengthM : oldRow.Count;
+                if (oldVal == 0) continue;
+                result.Add(new StatDiffRow { Section = oldRow.Section, Label = oldRow.Label, OldValue = oldVal, NewValue = 0, IsLength = isLength });
+            }
+
+            return result;
         }
     }
 
@@ -387,6 +515,12 @@ namespace METools
     public class StatisticsHandler : IExternalEventHandler
     {
         public Action<List<StatRow>, string> OnResult;
+        public Action<string> OnSnapshotSaved; // invoked with the project id right after a successful save
+
+        // Set true before Raise() to also save a snapshot of this refresh --
+        // needs a valid API context because GetOrCreateProjectId() may need
+        // to stamp a new id into the document the first time it's called.
+        public bool SaveSnapshotRequested { get; set; }
 
         public void Execute(UIApplication app)
         {
@@ -394,6 +528,15 @@ namespace METools
             {
                 var doc  = app.ActiveUIDocument.Document;
                 var rows = StatisticsCollector.Collect(doc);
+
+                if (SaveSnapshotRequested)
+                {
+                    SaveSnapshotRequested = false;
+                    var projectId = METools.Comments.CommentsStorage.GetOrCreateProjectId(doc);
+                    StatisticsSnapshotStorage.Save(projectId, rows, doc.Title ?? "");
+                    OnSnapshotSaved?.Invoke(projectId);
+                }
+
                 OnResult?.Invoke(rows, doc.Title ?? "");
             }
             catch { }
@@ -430,7 +573,14 @@ namespace METools
             var handler = new StatisticsHandler();
             var ev      = ExternalEvent.Create(handler);
 
-            _window = new StatisticsWindow(ev, handler, rows, doc.Title ?? "");
+            // Open() runs inside IExternalCommand.Execute() -- a valid API
+            // context -- so it's safe to call this here even on a project
+            // that hasn't been stamped with a project id yet (which needs a
+            // transaction the first time).
+            var projectId = METools.Comments.CommentsStorage.GetOrCreateProjectId(doc);
+            var snapshot  = StatisticsSnapshotStorage.Load(projectId);
+
+            _window = new StatisticsWindow(ev, handler, rows, doc.Title ?? "", projectId, snapshot);
             _window.Closed += (s, e) => _window = null;
             _window.Show();
         }

@@ -233,6 +233,10 @@ namespace METools.LevelManager
 
             root.Children.Add(ctrlRow);
 
+            var bulkFloorPlanBtn = ActionBtn(S._("levelmanager.create_missing_floor_plans"), true, OnCreateMissingFloorPlansClicked);
+            bulkFloorPlanBtn.Height = 26; bulkFloorPlanBtn.FontSize = 11; bulkFloorPlanBtn.Margin = new Thickness(0, 0, 0, 10);
+            root.Children.Add(bulkFloorPlanBtn);
+
             // ── Section view ─────────────────────────────────────────────
             _rowsPanel = new StackPanel();
             var scroller = new ScrollViewer
@@ -544,6 +548,7 @@ namespace METools.LevelManager
                     Text = S._("levelmanager.select_a_level"), FontSize = 11, FontStyle = FontStyles.Italic,
                     Foreground = MeToolsTheme.BrMuted, Margin = new Thickness(2, 0, 0, 0),
                 });
+                ResizeToFitContent();
                 return;
             }
 
@@ -587,6 +592,25 @@ namespace METools.LevelManager
             storyCb.Unchecked += (s, e) => SendToggleBuildingStory(lvl.Id, false);
             sp.Children.Add(storyCb);
 
+            // Copy/Monitor status -- read-only text, deliberately NOT a
+            // checkbox: there is no Revit API to start or stop a monitoring
+            // relationship (that only exists through Revit's own Copy/Monitor
+            // tool in Collaborate), so this must never look interactive.
+            sp.Children.Add(new TextBlock
+            {
+                Text = S._("levelmanager.monitors_link"), FontSize = 10, Foreground = MeToolsTheme.BrMuted,
+                Margin = new Thickness(0, 0, 0, 2),
+            });
+            sp.Children.Add(new TextBlock
+            {
+                Text = !lvl.IsMonitoringLink ? S._("levelmanager.monitoring_no")
+                    : string.IsNullOrEmpty(lvl.MonitoredLinkName) ? S._("levelmanager.monitoring_yes_unknown")
+                    : string.Format(S._("levelmanager.monitoring_yes"), lvl.MonitoredLinkName),
+                FontSize = 12,
+                Foreground = lvl.IsMonitoringLink ? MeToolsTheme.BrGreen : MeToolsTheme.BrMuted,
+                TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 10),
+            });
+
             // Action buttons.
             var btnRow1 = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 6) };
             var goBtn    = ActionBtn(S._("levelmanager.go_to_level"), true, () => SendLevelAction(LevelManagerAction.NavigateToLevel, lvl.Id));
@@ -606,6 +630,7 @@ namespace METools.LevelManager
             sp.Children.Add(btnRow2);
 
             _detailPanel.Children.Add(card);
+            ResizeToFitContent();
         }
 
         private void SendToggleBuildingStory(ElementId levelId, bool value)
@@ -678,6 +703,13 @@ namespace METools.LevelManager
         {
             if (StatusLeft != null) StatusLeft.Text = S._("levelmanager.refreshing");
             _handler.Request = new LevelManagerRequest { Action = LevelManagerAction.Refresh };
+            _extEvent.Raise();
+        }
+
+        private void OnCreateMissingFloorPlansClicked()
+        {
+            if (StatusLeft != null) StatusLeft.Text = S._("levelmanager.creating_missing_floor_plans");
+            _handler.Request = new LevelManagerRequest { Action = LevelManagerAction.CreateMissingFloorPlans };
             _extEvent.Raise();
         }
 

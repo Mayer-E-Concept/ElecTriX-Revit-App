@@ -38,6 +38,7 @@ namespace METools.LampPlacer
         ComboBox   _presetCmb;
         StackPanel _presetSp, _presetEntriesHost;
         TextBox    _presetNameTb;
+        TextBox    _roomFilterTb;
         System.Collections.Generic.List<PresetRow> _presetRows;
         Button     _btnArea, _btnGrid, _btnLine;
         Button     _mainBtn, _multiBtn;
@@ -711,6 +712,26 @@ namespace METools.LampPlacer
             bottom.Children.Add(saveBtn); bottom.Children.Add(updBtn); bottom.Children.Add(delBtn);
             sp.Children.Add(bottom);
 
+            // -- Apply to every room whose name matches, in one pass --
+            sp.Children.Add(new Border { Height = 1, Background = MeToolsTheme.BrBorder, Margin = new Thickness(0, 10, 0, 8) });
+            sp.Children.Add(new TextBlock { Text = S.Get("lamp.apply_matching_rooms"), FontSize = 11, FontWeight = FontWeights.SemiBold,
+                Foreground = MeToolsTheme.BrText, Margin = new Thickness(2, 0, 0, 4) });
+            sp.Children.Add(new TextBlock { Text = S.Get("lamp.apply_matching_rooms_hint"), FontSize = 10.5,
+                Foreground = MeToolsTheme.BrMuted, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(2, 0, 0, 6) });
+            _roomFilterTb = new TextBox
+            {
+                Height = 28, FontSize = 12,
+                Background = MeToolsTheme.BrInput, Foreground = MeToolsTheme.BrInputFg,
+                BorderBrush = MeToolsTheme.BrBorder, BorderThickness = new Thickness(1),
+                CaretBrush = MeToolsTheme.BrText, Padding = new Thickness(6, 0, 6, 0),
+                VerticalContentAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 0, 6),
+            };
+            SetRoomFilterPlaceholder();
+            sp.Children.Add(_roomFilterTb);
+            var applyAllBtn = MiniBtn(S.Get("lamp.apply_to_all_matching"), false, ApplyToMatchingRooms);
+            applyAllBtn.HorizontalAlignment = HorizontalAlignment.Left;
+            sp.Children.Add(applyAllBtn);
+
             RebuildPresetCombo();
             NewPreset();
             return sp;
@@ -816,6 +837,53 @@ namespace METools.LampPlacer
             RebuildPresetCombo();
             NewPreset();
             StatusLeft.Text = ("Deleted preset: " + name);
+        }
+
+        // No shared placeholder helper exists in this file (SetPlaceholder is
+        // local to a different window) -- simplest to handle it inline here,
+        // same GotFocus/LostFocus technique used for the rest of the app.
+        void SetRoomFilterPlaceholder()
+        {
+            string placeholder = S.Get("lamp.room_filter_placeholder");
+            _roomFilterTb.Text = placeholder;
+            _roomFilterTb.Foreground = MeToolsTheme.BrMuted;
+            _roomFilterTb.GotFocus += (s, e) =>
+            {
+                if (_roomFilterTb.Text == placeholder) { _roomFilterTb.Text = ""; _roomFilterTb.Foreground = MeToolsTheme.BrInputFg; }
+            };
+            _roomFilterTb.LostFocus += (s, e) =>
+            {
+                if (string.IsNullOrWhiteSpace(_roomFilterTb.Text)) { _roomFilterTb.Text = placeholder; _roomFilterTb.Foreground = MeToolsTheme.BrMuted; }
+            };
+        }
+
+        // Saves whatever is currently in the preset editor (same as Save
+        // Preset), then applies it to every room whose name contains the
+        // filter text -- no per-room picking, and unlike the single-room
+        // Update Room button, this never renames the matched rooms (they
+        // already have names that matched the filter on purpose).
+        void ApplyToMatchingRooms()
+        {
+            string placeholder = S.Get("lamp.room_filter_placeholder");
+            string filter = (_roomFilterTb?.Text ?? "").Trim();
+            if (string.IsNullOrEmpty(filter) || filter == placeholder)
+            { StatusLeft.Text = S.Get("lamp.enter_room_filter"); return; }
+
+            var preset = BuildPresetFromRows();
+            if (preset == null) return;
+            LampPresetStore.Save(preset);
+            RebuildPresetCombo(preset.Name);
+            SyncConfig();
+
+            _h.Request = new LampRequest
+            {
+                Action = LampAction.ApplyPresetToMatchingRooms,
+                Config = _cfg,
+                PresetName = preset.Name,
+                RoomNameFilter = filter,
+            };
+            StatusLeft.Text = string.Format(S.Get("lamp.applying_to_rooms"), filter);
+            _evt.Raise();
         }
 
         void SetDist(DistributionMode m)

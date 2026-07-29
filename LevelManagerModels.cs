@@ -28,12 +28,20 @@ namespace METools.LevelManager
         public string LevelTypeName    { get; set; } = ""; // the Level's own Type name
         public string ElevationBaseText { get; set; } = ""; // "Project Base Point" / "Survey Point", via LEVEL_RELATIVE_BASE_TYPE
         public bool   IsBuildingStory  { get; set; }        // "Building Story" instance parameter
+
+        // Copy/Monitor status -- read-only display only. There is no Revit
+        // API to programmatically start or stop a monitoring relationship
+        // (confirmed: that only exists through Revit's own Copy/Monitor tool
+        // in Collaborate), so this is never shown as an interactive toggle.
+        public bool   IsMonitoringLink   { get; set; }
+        public string MonitoredLinkName  { get; set; } = ""; // resolved link instance name, if monitoring
     }
 
     public enum LevelManagerAction
     {
         Refresh, AddLevel,
         ToggleBuildingStory, DeleteLevel, CreateFloorPlan, CreateCeilingPlan, NavigateToLevel,
+        CreateMissingFloorPlans,
     }
 
     // Carries one request from the window to the ExternalEvent handler.

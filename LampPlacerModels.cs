@@ -27,7 +27,7 @@ namespace METools.LampPlacer
     public enum LineRotation      { AlongLine, Perpendicular }
     public enum RotationMode      { Auto, Deg0, Deg90 }
     public enum DimensionMode     { None, Auto, Custom }  // None=off, Auto=automatic, Custom=user picks points
-    public enum LampAction        { PlaceSingle, PlaceMulti, Redistribute, RefreshRoom, PlaceLine, PlaceGrid, UpdatePreset }
+    public enum LampAction        { PlaceSingle, PlaceMulti, Redistribute, RefreshRoom, PlaceLine, PlaceGrid, UpdatePreset, ApplyPresetToMatchingRooms }
 
     public class LampConfig
     {
@@ -75,5 +75,6 @@ namespace METools.LampPlacer
         public LampConfig  Config   { get; set; } = new LampConfig();
         public ElementId   SymbolId { get; set; } = ElementId.InvalidElementId;
         public string      PresetName { get; set; } = "";
+        public string      RoomNameFilter { get; set; } = ""; // for ApplyPresetToMatchingRooms -- substring match, case-insensitive
     }
 }

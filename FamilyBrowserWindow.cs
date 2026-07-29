@@ -513,10 +513,8 @@ namespace METools
                 BorderBrush = MeToolsTheme.BrPetrol,
                 BorderThickness = new Thickness(1),
                 VerticalAlignment = VerticalAlignment.Center,
-                Margin     = new Thickness(8, 0, 0, 0),
                 ToolTip    = "Click to enter placement mode for this family (like drag-and-drop)",
                 Cursor     = Cursors.Hand,
-                Visibility = System.Windows.Visibility.Collapsed,
                 Template   = RoundedBtnTemplate(),
             };
             btnPlace.MouseEnter += (s, e) => btnPlace.Background = MeToolsTheme.BrPetrolDark;
@@ -536,12 +534,67 @@ namespace METools
                 _placeEv.Raise();
                 if (StatusLeft != null) StatusLeft.Text = $"Placement mode: {capturedFam.Name} — click in Revit to place.";
             };
-            System.Windows.Controls.Grid.SetColumn(btnPlace, 2);
-            grid.Children.Add(btnPlace);
 
-            // Show Place button on hover
-            row.MouseEnter += (s, e) => { row.Background = MeToolsTheme.BrActiveBg; btnPlace.Visibility = System.Windows.Visibility.Visible; };
-            row.MouseLeave += (s, e) => { row.Background = MeToolsTheme.BrSurface;  btnPlace.Visibility = System.Windows.Visibility.Collapsed; };
+            // "Select Instances" button — selects every placed instance of this
+            // family in the active view. Selection.SetElementIds() only changes
+            // UI selection state, not the document, so (like the FilteredElementCollector
+            // call in btnPlace above) it's safe to call directly here rather than
+            // needing an ExternalEvent -- that's only required for actual document edits.
+            var btnSelect = new System.Windows.Controls.Button
+            {
+                Content    = S.Get("browser.select_instances"),
+                Height     = 24, Padding = new Thickness(10, 0, 10, 0),
+                FontSize   = 10,
+                Background = MeToolsTheme.BrBtnBg,
+                Foreground = MeToolsTheme.BrText,
+                BorderBrush = MeToolsTheme.BrBtnBorder,
+                BorderThickness = new Thickness(1),
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin     = new Thickness(6, 0, 0, 0),
+                ToolTip    = S.Get("browser.select_instances_tip"),
+                Cursor     = Cursors.Hand,
+                Template   = RoundedBtnTemplate(),
+            };
+            btnSelect.Click += (s, e) =>
+            {
+                e.Handled = true;
+                var doc = _doc;
+                var uidoc = _uiApp?.ActiveUIDocument;
+                if (doc == null || uidoc == null) return;
+
+                try
+                {
+                    var ids = new FilteredElementCollector(doc, uidoc.ActiveView.Id)
+                        .OfClass(typeof(FamilyInstance)).Cast<FamilyInstance>()
+                        .Where(fi => fi.Symbol?.Family?.Name == capturedFam.Name)
+                        .Select(fi => fi.Id)
+                        .ToList();
+
+                    if (ids.Count == 0)
+                    {
+                        if (StatusLeft != null) StatusLeft.Text = string.Format(S.Get("browser.no_instances_in_view"), capturedFam.Name);
+                        return;
+                    }
+
+                    uidoc.Selection.SetElementIds(ids);
+                    if (StatusLeft != null) StatusLeft.Text = string.Format(S.Get("browser.instances_selected"), ids.Count, capturedFam.Name);
+                }
+                catch (Exception ex)
+                {
+                    if (StatusLeft != null) StatusLeft.Text = string.Format(S.Get("browser.error"), ex.Message);
+                }
+            };
+
+            var actionButtons = new StackPanel { Orientation = Orientation.Horizontal, Visibility = System.Windows.Visibility.Collapsed };
+            actionButtons.Children.Add(btnPlace);
+            actionButtons.Children.Add(btnSelect);
+            System.Windows.Controls.Grid.SetColumn(actionButtons, 2);
+            grid.Children.Add(actionButtons);
+
+            // Show action buttons (and hide the type-count badge, so they
+            // don't visually overlap in the same column) on hover.
+            row.MouseEnter += (s, e) => { row.Background = MeToolsTheme.BrActiveBg; actionButtons.Visibility = System.Windows.Visibility.Visible; badge.Visibility = System.Windows.Visibility.Collapsed; };
+            row.MouseLeave += (s, e) => { row.Background = MeToolsTheme.BrSurface;  actionButtons.Visibility = System.Windows.Visibility.Collapsed; badge.Visibility = System.Windows.Visibility.Visible; };
 
             return row;
         }

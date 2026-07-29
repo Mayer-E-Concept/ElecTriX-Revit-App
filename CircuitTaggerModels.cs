@@ -8,6 +8,7 @@ namespace METools.FamilyPlacer
     {
         public Autodesk.Revit.DB.ElementId ElementId { get; set; }
         public string CategoryName  { get; set; }
+        public int    CategoryId    { get; set; } // BuiltInCategory int ID -- locale-independent, see CatShort
         public string FamilyName    { get; set; }
         public string RoomName      { get; set; }
         public string CircuitLabel  { get; set; }

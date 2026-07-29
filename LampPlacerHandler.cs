@@ -71,6 +71,9 @@ namespace METools.LampPlacer
             if (Request.Action == LampAction.UpdatePreset)
             { UpdatePreset(uidoc, doc); return; }
 
+            if (Request.Action == LampAction.ApplyPresetToMatchingRooms)
+            { ApplyPresetToMatchingRooms(uidoc, doc); return; }
+
             if (Request.Action == LampAction.PlaceLine)
             { PlaceAlongLine(uidoc, doc); return; }
 
@@ -228,10 +231,21 @@ namespace METools.LampPlacer
 
         // Places a room preset: each entry's family is spread independently by its count,
         // then the room is renamed to the preset's name.
-        private void PlacePreset(UIDocument uidoc, Document doc, Room room, LampPreset preset)
+        // renameRoom/suppressStatus default to the original single-room
+        // behavior (used when a person applies a preset to one room they
+        // picked by hand) so that call site needs no changes. The bulk
+        // "apply to all matching rooms" path passes renameRoom: false --
+        // renaming every matched room to the same preset name would destroy
+        // exactly the distinguishing names ("Bedroom 1", "Bedroom 2"...) that
+        // made them match the filter in the first place -- and
+        // suppressStatus: true, aggregating one summary across all rooms
+        // instead of each room's message overwriting the last.
+        private int PlacePreset(UIDocument uidoc, Document doc, Room room, LampPreset preset, bool renameRoom = true, bool suppressStatus = false)
         {
+            void Status(string msg) { if (!suppressStatus) OnStatus?.Invoke(msg); }
+
             if (preset == null || preset.Entries == null || preset.Entries.Count == 0)
-            { OnStatus?.Invoke("Empty preset."); return; }
+            { Status("Empty preset."); return 0; }
 
             var cfg = Request.Config;
             double wallFt   = ToFeet(cfg.WallMargin);
@@ -239,7 +253,7 @@ namespace METools.LampPlacer
             Level fallbackLvl = ResolveFallbackLevel(doc, cfg);
 
             var bb = room.get_BoundingBox(null);
-            if (bb == null) { OnStatus?.Invoke("Room has no bounding box."); return; }
+            if (bb == null) { Status("Room has no bounding box."); return 0; }
             double floorZ = room.Level?.Elevation ?? 0;
             double ukdZ = (fallbackLvl != null && _wallOffsetFt.HasValue)
                 ? fallbackLvl.Elevation + _wallOffsetFt.Value
@@ -271,11 +285,11 @@ namespace METools.LampPlacer
                 }
             }
 
-            if (plan.Count == 0) { OnStatus?.Invoke("Nothing to place for this preset."); return; }
+            if (plan.Count == 0) { Status("Nothing to place for this preset."); return 0; }
 
             int placed = RunPlacement(uidoc, doc, null, cfg, plan, "Preset: " + preset.Name);
 
-            if (placed > 0)
+            if (placed > 0 && renameRoom)
                 using (var tx = new Transaction(doc, "ME-Tools: Rename Room"))
                 {
                     tx.Start();
@@ -287,6 +301,51 @@ namespace METools.LampPlacer
                     catch { }
                     tx.Commit();
                 }
+
+            return placed;
+        }
+
+        // Applies a saved preset to every room whose name contains the given
+        // filter text (case-insensitive substring match) -- no interactive
+        // room picking, built for "apply this preset to every Bedroom-named
+        // room in one pass" instead of repeating PlacePreset room by room by
+        // hand. Deliberately does NOT rename matched rooms to the preset's
+        // name (unlike the single-room path) -- these rooms already have
+        // names that matched the filter (e.g. "Bedroom 1", "Bedroom 2"), and
+        // renaming all of them to just "Bedroom" would destroy exactly what
+        // made them distinguishable in the first place.
+        private void ApplyPresetToMatchingRooms(UIDocument uidoc, Document doc)
+        {
+            var preset = LampPresetStore.Get(Request.PresetName);
+            if (preset == null || preset.Entries == null || preset.Entries.Count == 0)
+            { OnStatus?.Invoke("Preset is empty or not found."); return; }
+
+            string filter = (Request.RoomNameFilter ?? "").Trim();
+            if (string.IsNullOrEmpty(filter))
+            { OnStatus?.Invoke("Enter a room name filter first (e.g. \"Bedroom\")."); return; }
+
+            var allRooms = new FilteredElementCollector(doc)
+                .OfClass(typeof(SpatialElement)).OfCategory(BuiltInCategory.OST_Rooms)
+                .Cast<Room>().Where(r => r != null && r.Area > 0).ToList();
+
+            var matching = allRooms
+                .Where(r => (r.Name ?? "").IndexOf(filter, StringComparison.OrdinalIgnoreCase) >= 0)
+                .ToList();
+
+            if (matching.Count == 0)
+            { OnStatus?.Invoke($"No rooms found matching \"{filter}\"."); return; }
+
+            int roomsWithPlacements = 0, totalPlaced = 0, roomsSkipped = 0;
+            foreach (var room in matching)
+            {
+                int placed = PlacePreset(uidoc, doc, room, preset, renameRoom: false, suppressStatus: true);
+                if (placed > 0) { roomsWithPlacements++; totalPlaced += placed; }
+                else roomsSkipped++;
+            }
+
+            string summary = $"Applied \"{preset.Name}\" to {roomsWithPlacements} of {matching.Count} matching room(s) -- {totalPlaced} fixture(s) placed.";
+            if (roomsSkipped > 0) summary += $" {roomsSkipped} room(s) skipped (nothing placeable).";
+            OnStatus?.Invoke(summary);
         }
 
 

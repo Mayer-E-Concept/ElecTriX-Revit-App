@@ -1244,6 +1244,7 @@ namespace METools.FamilyPlacer
                     {
                         ElementId    = ref_.ElementId,
                         CategoryName = el.Category?.Name ?? "Element",
+                        CategoryId   = el.Category?.Id?.IntegerValue ?? 0,
                         FamilyName   = (el as FamilyInstance)?.Symbol?.Family?.Name ?? el.Name ?? "",
                         RoomName     = GetRoomNameForEl(doc, el as FamilyInstance, phase),
                     });
@@ -1366,7 +1367,7 @@ namespace METools.FamilyPlacer
                         CornerRadius = new CornerRadius(3), Padding = new Thickness(5, 1, 5, 1),
                         Margin = new Thickness(6, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center,
                         Background = MeToolsTheme.BrActiveBg, BorderBrush = MeToolsTheme.BrPetrol, BorderThickness = new Thickness(1),
-                        Child = new TextBlock { Text = CatShort(info.CategoryName), FontSize = 9,
+                        Child = new TextBlock { Text = CatShort(info.CategoryId), FontSize = 9,
                             Foreground = MeToolsTheme.BrPetrol, FontWeight = FontWeights.SemiBold },
                     };
                     var famTb  = new TextBlock { Text = info.FamilyName, FontSize = 11, Foreground = MeToolsTheme.BrText,
@@ -1596,12 +1597,20 @@ namespace METools.FamilyPlacer
 
         private void UpdateStatusBar(string msg) { if (StatusLeft != null) StatusLeft.Text = msg; }
 
-        private static string CatShort(string cat)
+        // Locale-independent -- matches the same confirmed category IDs used
+        // by CatIsSocket/CatIsLamp/CatIsSwitch. The previous version matched
+        // against el.Category.Name (e.g. "Lighting Fixtures"), which is
+        // Revit's OWN display language for categories -- a separate setting
+        // from ME-Tools' own UI language -- so this silently broke the
+        // moment Revit itself ran in German or Romanian instead of English.
+        private static string CatShort(int categoryId)
         {
-            if (cat.Contains("Lighting") && cat.Contains("Fixture")) return "LAMP";
-            if (cat.Contains("Electrical") && cat.Contains("Fixture")) return "SOCK";
-            if (cat.Contains("Device")) return "SW";
-            if (cat.Contains("Equipment")) return "PANEL";
+            if (categoryId == -2001120) return "LAMP";                    // OST_LightingFixtures
+            if (categoryId == -2001060) return "SOCK";                    // OST_ElectricalFixtures
+            if (categoryId == -2008087 || categoryId == -2008090
+                || categoryId == -2008093 || categoryId == -2008094
+                || categoryId == -2008095) return "SW";                   // OST_LightingDevices + related
+            if (categoryId == -2001040) return "PANEL";                   // OST_ElectricalEquipment
             return "EL";
         }
 

@@ -453,7 +453,136 @@ namespace METools
             };
             p.Children.Add(_lbCurrentWorksets);
 
+            // -- Share your whole ME-Tools configuration with a colleague --
+            p.Children.Add(new Separator { Margin = new Thickness(0, 20, 0, 16), Background = MeToolsTheme.BrBorder });
+            p.Children.Add(Sec(S._("settings.config.title")));
+            p.Children.Add(InfoBox(S._("settings.config.hint")));
+            var configBtnRow = new StackPanel { Orientation = Orientation.Horizontal };
+            var exportBtn = FooterBtn(S._("settings.config.export"), true, OnExportConfig);
+            exportBtn.Margin = new Thickness(0, 0, 8, 0);
+            var importBtn = FooterBtn(S._("settings.config.import"), false, OnImportConfig);
+            configBtnRow.Children.Add(exportBtn);
+            configBtnRow.Children.Add(importBtn);
+            p.Children.Add(configBtnRow);
+
             return p;
+        }
+
+        // -- Combined configuration export/import: worksets + default heights
+        // + Circuit Tagger's tag style, as one shareable file. Each piece is
+        // read/written through its own store's existing Load/Save methods
+        // (CircuitTaggerSettings, FamilyHeightStore) rather than duplicating
+        // their file formats here -- only the worksets list has no dedicated
+        // store class, so that one reuses the exact same JSON shape
+        // LoadWorksetsIntoList()/OnSaveWorksets() already read and write.
+        private class MeToolsConfigExport
+        {
+            public string ExportedAtUtc { get; set; } = DateTime.UtcNow.ToString("o");
+            public string ExportedFrom  { get; set; } = Environment.MachineName;
+            public List<string> Worksets { get; set; } = new List<string>();
+            public Dictionary<string, double> FamilyHeights { get; set; } = new Dictionary<string, double>();
+            public METools.FamilyPlacer.CircuitTaggerSettingsData CircuitTagger { get; set; } = new METools.FamilyPlacer.CircuitTaggerSettingsData();
+        }
+
+        private List<string> ReadWorksetsList()
+        {
+            var result = new List<string>();
+            try
+            {
+                var path = WorksetsConfigPath;
+                if (!File.Exists(path)) return result;
+                var json = File.ReadAllText(path, System.Text.Encoding.UTF8);
+                using var doc = JsonDocument.Parse(json);
+                if (!doc.RootElement.TryGetProperty("worksets", out var arr)) return result;
+                foreach (var el in arr.EnumerateArray())
+                {
+                    var name = el.GetString()?.Trim();
+                    if (!string.IsNullOrEmpty(name)) result.Add(name);
+                }
+            }
+            catch { }
+            return result;
+        }
+
+        private void WriteWorksetsList(List<string> worksets)
+        {
+            var path = WorksetsConfigPath;
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            using var stream = File.Open(path, FileMode.Create, FileAccess.Write);
+            using var writer = new Utf8JsonWriter(stream, new JsonWriterOptions { Indented = true });
+            writer.WriteStartObject(); writer.WriteStartArray("worksets");
+            foreach (var ws in worksets ?? new List<string>()) writer.WriteStringValue(ws);
+            writer.WriteEndArray(); writer.WriteEndObject();
+        }
+
+        private void OnExportConfig()
+        {
+            try
+            {
+                var export = new MeToolsConfigExport
+                {
+                    Worksets      = ReadWorksetsList(),
+                    FamilyHeights = new Dictionary<string, double>(FamilyHeightStore.All()),
+                    CircuitTagger = METools.FamilyPlacer.CircuitTaggerSettings.Load(),
+                };
+
+                var dlg = new Microsoft.Win32.SaveFileDialog
+                {
+                    Title = S._("settings.config.export_dialog_title"),
+                    Filter = "ME-Tools config (*.json)|*.json",
+                    FileName = "ME-Tools-config-" + DateTime.Now.ToString("yyyyMMdd") + ".json",
+                };
+                if (dlg.ShowDialog() != true) return;
+
+                var json = JsonSerializer.Serialize(export, new JsonSerializerOptions { WriteIndented = true });
+                File.WriteAllText(dlg.FileName, json, System.Text.Encoding.UTF8);
+                MessageBox.Show(string.Format(S._("settings.config.exported"), Path.GetFileName(dlg.FileName)),
+                    S._("settings.config.title"), MessageBoxButton.OK, MessageBoxImage.None);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(string.Format(S._("settings.save_failed"), ex.Message), S._("settings.save_failed_title"), MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
+        }
+
+        private void OnImportConfig()
+        {
+            try
+            {
+                var dlg = new Microsoft.Win32.OpenFileDialog
+                {
+                    Title = S._("settings.config.import_dialog_title"),
+                    Filter = "ME-Tools config (*.json)|*.json",
+                    CheckFileExists = true,
+                };
+                if (dlg.ShowDialog() != true) return;
+
+                var json = File.ReadAllText(dlg.FileName, System.Text.Encoding.UTF8);
+                var import = JsonSerializer.Deserialize<MeToolsConfigExport>(json);
+                if (import == null)
+                { MessageBox.Show(S._("settings.config.import_failed_bad_file"), S._("settings.config.title"), MessageBoxButton.OK, MessageBoxImage.Warning); return; }
+
+                var result = MessageBox.Show(
+                    string.Format(S._("settings.config.import_confirm"), import.ExportedFrom ?? "?", import.ExportedAtUtc ?? "?"),
+                    S._("settings.config.title"), MessageBoxButton.YesNo, MessageBoxImage.Question);
+                if (result != MessageBoxResult.Yes) return;
+
+                WriteWorksetsList(import.Worksets ?? new List<string>());
+                FamilyHeightStore.SaveAll(import.FamilyHeights ?? new Dictionary<string, double>());
+                METools.FamilyPlacer.CircuitTaggerSettings.Save(import.CircuitTagger ?? new METools.FamilyPlacer.CircuitTaggerSettingsData());
+
+                // Reflect the freshly-imported worksets list immediately if
+                // this tab is what's currently on screen.
+                LoadWorksetsIntoList();
+
+                MessageBox.Show(
+                    string.Format(S._("settings.config.imported"), (import.Worksets?.Count ?? 0), (import.FamilyHeights?.Count ?? 0)),
+                    S._("settings.config.title"), MessageBoxButton.OK, MessageBoxImage.None);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(string.Format(S._("settings.save_failed"), ex.Message), S._("settings.save_failed_title"), MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
         }
 
         // Reads the ACTUAL worksets that exist in the currently open Revit document
