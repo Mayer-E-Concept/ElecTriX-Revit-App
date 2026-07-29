@@ -21,9 +21,20 @@ namespace METools.LevelManager
         public string GroupKey { get; set; } = "";
         // Auto-detected trailing tag — e.g. "H1", "H2", or "" when none.
         public string ZoneKey  { get; set; } = "";
+
+        // -- Detail/actions panel fields (read on Refresh, shown only for
+        // whichever row is currently selected -- these aren't part of the
+        // compact section view itself) --
+        public string LevelTypeName    { get; set; } = ""; // the Level's own Type name
+        public string ElevationBaseText { get; set; } = ""; // "Project Base Point" / "Survey Point", via LEVEL_RELATIVE_BASE_TYPE
+        public bool   IsBuildingStory  { get; set; }        // "Building Story" instance parameter
     }
 
-    public enum LevelManagerAction { Refresh, AddLevel }
+    public enum LevelManagerAction
+    {
+        Refresh, AddLevel,
+        ToggleBuildingStory, DeleteLevel, CreateFloorPlan, CreateCeilingPlan, NavigateToLevel,
+    }
 
     // Carries one request from the window to the ExternalEvent handler.
     public class LevelManagerRequest
@@ -31,6 +42,10 @@ namespace METools.LevelManager
         public LevelManagerAction Action        { get; set; } = LevelManagerAction.Refresh;
         public string             NewName        { get; set; } = "";
         public double             NewElevationM  { get; set; } = 0.0; // meters, converted to feet in the handler
+
+        // -- Used by the per-level actions (toggle/delete/create/navigate) --
+        public ElementId TargetLevelId        { get; set; } = ElementId.InvalidElementId;
+        public bool      NewBuildingStoryValue { get; set; }
     }
 
     // ── Name parsing ────────────────────────────────────────────────────────

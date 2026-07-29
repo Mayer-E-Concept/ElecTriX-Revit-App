@@ -16,21 +16,30 @@ namespace METools.LevelManager
 
         public void Execute(UIApplication app)
         {
-            var doc = app.ActiveUIDocument?.Document;
-            if (doc == null) { OnStatus?.Invoke("No active document."); return; }
+            var uiDoc = app.ActiveUIDocument;
+            var doc = uiDoc?.Document;
+            if (doc == null) { OnStatus?.Invoke(S._("levelmanager.no_active_document")); return; }
 
             try
             {
-                if (Request.Action == LevelManagerAction.AddLevel)
-                    AddLevel(doc);
+                switch (Request.Action)
+                {
+                    case LevelManagerAction.AddLevel:            AddLevel(doc); break;
+                    case LevelManagerAction.ToggleBuildingStory: ToggleBuildingStory(doc); break;
+                    case LevelManagerAction.DeleteLevel:         DeleteLevel(doc); break;
+                    case LevelManagerAction.CreateFloorPlan:     CreateFloorPlan(doc); break;
+                    case LevelManagerAction.CreateCeilingPlan:   CreateCeilingPlan(doc); break;
+                    case LevelManagerAction.NavigateToLevel:     NavigateToLevel(uiDoc); break;
+                }
 
-                // AddLevel falls through to Refresh so the list (and any new
-                // group/zone discovered from the new name) is always current.
+                // Every action above (except pure navigation) changes the list
+                // in some way, and Refresh is cheap -- simplest to just always
+                // re-read it so the displayed list is never stale.
                 Refresh(doc);
             }
             catch (Exception ex)
             {
-                OnStatus?.Invoke("Error: " + ex.Message);
+                OnStatus?.Invoke(string.Format(S._("levelmanager.error"), ex.Message));
             }
         }
 
@@ -45,6 +54,10 @@ namespace METools.LevelManager
                     Name        = l.Name,
                     ElevationFt = l.Elevation,
                     ElevationM  = UnitUtils.ConvertFromInternalUnits(l.Elevation, UnitTypeId.Meters),
+
+                    LevelTypeName     = ReadLevelTypeName(doc, l),
+                    ElevationBaseText = ReadElevationBaseText(doc, l),
+                    IsBuildingStory   = ReadBuildingStory(l),
                 })
                 .OrderBy(r => r.ElevationFt)
                 .ToList();
@@ -53,11 +66,45 @@ namespace METools.LevelManager
             OnLoaded?.Invoke(rows);
         }
 
+        // -- Detail-panel field readers -- each defensive on its own, since
+        // none of these should ever prevent the row itself from showing. --
+        private static string ReadLevelTypeName(Document doc, Level l)
+        {
+            try { return (doc.GetElement(l.GetTypeId()) as ElementType)?.Name ?? ""; }
+            catch { return ""; }
+        }
+
+        // Elevation Base ("Project Base Point" vs "Survey Point") is a Level
+        // TYPE parameter (LEVEL_RELATIVE_BASE_TYPE), read via AsValueString()
+        // so the exact underlying int-to-option mapping never has to be
+        // guessed at -- Revit hands back the same display string it shows
+        // in the UI.
+        private static string ReadElevationBaseText(Document doc, Level l)
+        {
+            try
+            {
+                var lt = doc.GetElement(l.GetTypeId());
+                var p = lt?.get_Parameter(BuiltInParameter.LEVEL_RELATIVE_BASE_TYPE);
+                return p?.AsValueString() ?? "";
+            }
+            catch { return ""; }
+        }
+
+        // Name-based lookup rather than a BuiltInParameter enum value --
+        // "Building Story" is a well-documented, stable Revit parameter name
+        // (confirmed unchanged since Revit 2013), but its exact BuiltInParameter
+        // enum id wasn't confirmed, so this avoids guessing at that specifically.
+        private static bool ReadBuildingStory(Level l)
+        {
+            try { return l.LookupParameter("Building Story")?.AsInteger() == 1; }
+            catch { return false; }
+        }
+
         private void AddLevel(Document doc)
         {
             var name = (Request.NewName ?? "").Trim();
             if (string.IsNullOrEmpty(name))
-            { OnStatus?.Invoke("Enter a name for the new level."); return; }
+            { OnStatus?.Invoke(S._("levelmanager.enter_level_name")); return; }
 
             // Reject an exact duplicate name up front — Revit's own exception
             // message for this is generic, so we give a clearer one first.
@@ -65,7 +112,7 @@ namespace METools.LevelManager
                 .OfClass(typeof(Level)).Cast<Level>()
                 .Any(l => string.Equals(l.Name, name, StringComparison.OrdinalIgnoreCase));
             if (nameTaken)
-            { OnStatus?.Invoke($"A level named \"{name}\" already exists."); return; }
+            { OnStatus?.Invoke(string.Format(S._("levelmanager.name_taken"), name)); return; }
 
             double elevationFt = UnitUtils.ConvertToInternalUnits(Request.NewElevationM, UnitTypeId.Meters);
 
@@ -78,18 +125,145 @@ namespace METools.LevelManager
                     if (level == null)
                     {
                         tx.RollBack();
-                        OnStatus?.Invoke("Revit could not create the level.");
+                        OnStatus?.Invoke(S._("levelmanager.create_failed_generic"));
                         return;
                     }
                     level.Name = name;
                     tx.Commit();
-                    OnStatus?.Invoke($"✓ Level \"{name}\" created at {Request.NewElevationM:0.###} m.");
+                    OnStatus?.Invoke(string.Format(S._("levelmanager.level_created"), name, Request.NewElevationM.ToString("0.###")));
                 }
                 catch (Exception ex)
                 {
                     if (tx.HasStarted() && !tx.HasEnded()) tx.RollBack();
-                    OnStatus?.Invoke("Could not create level: " + ex.Message);
+                    OnStatus?.Invoke(string.Format(S._("levelmanager.create_failed"), ex.Message));
                 }
+            }
+        }
+
+        private void ToggleBuildingStory(Document doc)
+        {
+            var level = doc.GetElement(Request.TargetLevelId) as Level;
+            if (level == null) return;
+
+            using (var tx = new Transaction(doc, "ME-Tools: Toggle Building Story"))
+            {
+                tx.Start();
+                try
+                {
+                    var p = level.LookupParameter("Building Story");
+                    if (p != null && !p.IsReadOnly) p.Set(Request.NewBuildingStoryValue ? 1 : 0);
+                    tx.Commit();
+                }
+                catch (Exception ex)
+                {
+                    if (tx.HasStarted() && !tx.HasEnded()) tx.RollBack();
+                    OnStatus?.Invoke(string.Format(S._("levelmanager.toggle_failed"), ex.Message));
+                }
+            }
+        }
+
+        private void DeleteLevel(Document doc)
+        {
+            var level = doc.GetElement(Request.TargetLevelId) as Level;
+            if (level == null) return;
+            string name = level.Name;
+
+            using (var tx = new Transaction(doc, "ME-Tools: Delete Level"))
+            {
+                tx.Start();
+                try
+                {
+                    doc.Delete(Request.TargetLevelId);
+                    tx.Commit();
+                    OnStatus?.Invoke(string.Format(S._("levelmanager.level_deleted"), name));
+                }
+                catch (Exception ex)
+                {
+                    if (tx.HasStarted() && !tx.HasEnded()) tx.RollBack();
+                    OnStatus?.Invoke(string.Format(S._("levelmanager.delete_failed"), ex.Message));
+                }
+            }
+        }
+
+        private void CreateFloorPlan(Document doc)
+        {
+            var level = doc.GetElement(Request.TargetLevelId) as Level;
+            if (level == null) return;
+
+            try
+            {
+                var vft = new FilteredElementCollector(doc)
+                    .OfClass(typeof(ViewFamilyType))
+                    .Cast<ViewFamilyType>()
+                    .FirstOrDefault(v => v.ViewFamily == ViewFamily.FloorPlan);
+                if (vft == null) { OnStatus?.Invoke(S._("levelmanager.no_floor_plan_type")); return; }
+
+                using (var tx = new Transaction(doc, "ME-Tools: Create Floor Plan"))
+                {
+                    tx.Start();
+                    ViewPlan.Create(doc, vft.Id, Request.TargetLevelId);
+                    tx.Commit();
+                }
+                OnStatus?.Invoke(string.Format(S._("levelmanager.floor_plan_created"), level.Name));
+            }
+            catch (Exception ex)
+            {
+                OnStatus?.Invoke(string.Format(S._("levelmanager.floor_plan_failed"), ex.Message));
+            }
+        }
+
+        private void CreateCeilingPlan(Document doc)
+        {
+            var level = doc.GetElement(Request.TargetLevelId) as Level;
+            if (level == null) return;
+
+            try
+            {
+                var vft = new FilteredElementCollector(doc)
+                    .OfClass(typeof(ViewFamilyType))
+                    .Cast<ViewFamilyType>()
+                    .FirstOrDefault(v => v.ViewFamily == ViewFamily.CeilingPlan);
+                if (vft == null) { OnStatus?.Invoke(S._("levelmanager.no_ceiling_plan_type")); return; }
+
+                using (var tx = new Transaction(doc, "ME-Tools: Create Ceiling Plan"))
+                {
+                    tx.Start();
+                    ViewPlan.Create(doc, vft.Id, Request.TargetLevelId);
+                    tx.Commit();
+                }
+                OnStatus?.Invoke(string.Format(S._("levelmanager.ceiling_plan_created"), level.Name));
+            }
+            catch (Exception ex)
+            {
+                OnStatus?.Invoke(string.Format(S._("levelmanager.ceiling_plan_failed"), ex.Message));
+            }
+        }
+
+        // Switches the active view to an existing floor plan for the target
+        // level, if one already exists (does not create one -- that's what
+        // Create Floor Plan is for).
+        private void NavigateToLevel(UIDocument uiDoc)
+        {
+            var doc = uiDoc?.Document;
+            var level = doc?.GetElement(Request.TargetLevelId) as Level;
+            if (doc == null || level == null) return;
+
+            try
+            {
+                var plan = new FilteredElementCollector(doc)
+                    .OfClass(typeof(ViewPlan)).Cast<ViewPlan>()
+                    .FirstOrDefault(v => !v.IsTemplate && v.ViewType == ViewType.FloorPlan
+                        && v.GenLevel != null && v.GenLevel.Id == Request.TargetLevelId);
+
+                if (plan == null)
+                { OnStatus?.Invoke(S._("levelmanager.navigate_failed")); return; }
+
+                uiDoc.ActiveView = plan;
+                OnStatus?.Invoke(string.Format(S._("levelmanager.navigated"), level.Name));
+            }
+            catch (Exception ex)
+            {
+                OnStatus?.Invoke(string.Format(S._("levelmanager.navigate_error"), ex.Message));
             }
         }
 

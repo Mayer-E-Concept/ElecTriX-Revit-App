@@ -42,6 +42,17 @@ namespace METools.LevelManager
         private TextBlock  _countLabel;
         private Border     _selectedRowBorder;
 
+        // Search box (filters the section view by name)
+        private TextBox _tbSearch;
+        private string  _searchText = "";
+
+        // Selected-level details/actions panel -- shown below the list once a
+        // level is clicked. Kept separate from the compact section-view rows
+        // themselves (which stay dense/unchanged) rather than crowding every
+        // row with a type name, checkbox and four buttons.
+        private StackPanel _detailPanel;
+        private LevelRow   _selectedLevel;
+
         private TextBox _tbName, _tbElevation;
 
         // Stable color per auto-discovered group, cycling through the brand palette.
@@ -135,6 +146,7 @@ namespace METools.LevelManager
             _ifcRoot.Visibility           = ifcMode ? System.Windows.Visibility.Visible   : System.Windows.Visibility.Collapsed;
             UpdateToggle(_tabProjectBtn, !ifcMode);
             UpdateToggle(_tabIfcBtn, ifcMode);
+            ResizeToFitContent();
         }
 
         // ═════════════════════════════════════════════════════════════════
@@ -157,6 +169,24 @@ namespace METools.LevelManager
                 Margin  = new Thickness(0, 0, 0, 10),
             };
             root.Children.Add(groupScroller);
+
+            // ── Search box ────────────────────────────────────────────────
+            _tbSearch = new TextBox
+            {
+                Height = 28, FontSize = 12, VerticalContentAlignment = VerticalAlignment.Center,
+                Padding = new Thickness(8, 0, 8, 0), Margin = new Thickness(0, 0, 0, 8),
+                Background = MeToolsTheme.BrInput, Foreground = MeToolsTheme.BrText,
+                BorderBrush = MeToolsTheme.BrBorder, BorderThickness = new Thickness(1),
+                CaretBrush = MeToolsTheme.BrText,
+            };
+            SetPlaceholder(_tbSearch, S._("levelmanager.search_placeholder"));
+            _tbSearch.TextChanged += (s, e) =>
+            {
+                var t = _tbSearch.Text;
+                _searchText = (t == S._("levelmanager.search_placeholder")) ? "" : t;
+                RebuildList();
+            };
+            root.Children.Add(_tbSearch);
 
             // ── Zone + spacing mode + refresh ───────────────────────────
             var ctrlRow = new Grid { Margin = new Thickness(0, 0, 0, 10) };
@@ -218,6 +248,11 @@ namespace METools.LevelManager
                 Child = scroller, Margin = new Thickness(0, 0, 0, 14),
             };
             root.Children.Add(scrollerBorder);
+
+            // ── Selected level: details + actions ────────────────────────
+            _detailPanel = new StackPanel { Margin = new Thickness(0, 0, 0, 14) };
+            root.Children.Add(_detailPanel);
+            RebuildDetailPanel();
 
             // ── Add level panel ─────────────────────────────────────────
             root.Children.Add(Sec(S._("levelmanager.add_level")));
@@ -362,6 +397,14 @@ namespace METools.LevelManager
             _rowsPanel.Children.Clear();
             _selectedRowBorder = null;
 
+            // _all is a whole new List<LevelRow> after every refresh, so a
+            // previously-selected row object no longer exists as such -- find
+            // the level with the same Id in the fresh data (it may have new
+            // values, e.g. after toggling Building Story) and keep it selected,
+            // or clear the selection if that level was deleted.
+            if (_selectedLevel != null)
+                _selectedLevel = _all.FirstOrDefault(r => r.Id == _selectedLevel.Id);
+
             for (int i = 0; i < filtered.Count; i++)
             {
                 double h = RowHeightEven;
@@ -370,12 +413,20 @@ namespace METools.LevelManager
                     double deltaM = filtered[i - 1].ElevationM - filtered[i].ElevationM;
                     h = Math.Min(MaxGapScale, Math.Max(MinGapScale, deltaM * PxPerMeter));
                 }
-                _rowsPanel.Children.Add(BuildRow(filtered[i], h));
+                var rowBorder = BuildRow(filtered[i], h);
+                if (_selectedLevel != null && filtered[i].Id == _selectedLevel.Id)
+                {
+                    rowBorder.Background = MeToolsTheme.BrActiveBg;
+                    _selectedRowBorder = rowBorder;
+                }
+                _rowsPanel.Children.Add(rowBorder);
             }
 
             _countLabel.Text = filtered.Count == _all.Count
                 ? string.Format(S._(_all.Count == 1 ? "levelmanager.count_1" : "levelmanager.count_n"), _all.Count)
                 : string.Format(S._(_all.Count == 1 ? "levelmanager.showing_1" : "levelmanager.showing_n"), filtered.Count, _all.Count);
+
+            RebuildDetailPanel();
         }
 
         private bool MatchesFilter(LevelRow r)
@@ -384,7 +435,9 @@ namespace METools.LevelManager
                 : _groupFilter == "__other__" ? string.IsNullOrEmpty(r.GroupKey)
                 : r.GroupKey == _groupFilter;
             bool zoneOk = _zoneFilter == "" || r.ZoneKey == _zoneFilter;
-            return groupOk && zoneOk;
+            bool searchOk = string.IsNullOrEmpty(_searchText)
+                || (r.Name ?? "").IndexOf(_searchText, StringComparison.OrdinalIgnoreCase) >= 0;
+            return groupOk && zoneOk && searchOk;
         }
 
         private Border BuildRow(LevelRow row, double height)
@@ -469,8 +522,127 @@ namespace METools.LevelManager
             if (_selectedRowBorder != null) _selectedRowBorder.Background = Brushes.Transparent;
             container.Background = MeToolsTheme.BrActiveBg;
             _selectedRowBorder = container;
+            _selectedLevel = row;
 
             _tbElevation.Text = (row.ElevationM + 3.0).ToString("0.000", CultureInfo.InvariantCulture);
+            RebuildDetailPanel();
+        }
+
+        // ═════════════════════════════════════════════════════════════════
+        // SELECTED LEVEL: DETAILS + ACTIONS
+        // (kept separate from the compact section-view rows themselves)
+        // ═════════════════════════════════════════════════════════════════
+        private void RebuildDetailPanel()
+        {
+            if (_detailPanel == null) return;
+            _detailPanel.Children.Clear();
+
+            if (_selectedLevel == null)
+            {
+                _detailPanel.Children.Add(new TextBlock
+                {
+                    Text = S._("levelmanager.select_a_level"), FontSize = 11, FontStyle = FontStyles.Italic,
+                    Foreground = MeToolsTheme.BrMuted, Margin = new Thickness(2, 0, 0, 0),
+                });
+                return;
+            }
+
+            var lvl = _selectedLevel;
+            var card = new Border
+            {
+                BorderBrush = MeToolsTheme.BrBorder, BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(5), Background = MeToolsTheme.BrSurface,
+                Padding = new Thickness(12, 10, 12, 10),
+            };
+            var sp = new StackPanel();
+            card.Child = sp;
+
+            sp.Children.Add(new TextBlock
+            {
+                Text = lvl.Name, FontSize = 13, FontWeight = FontWeights.SemiBold,
+                Foreground = MeToolsTheme.BrText, Margin = new Thickness(0, 0, 0, 8),
+            });
+
+            // Read-only info: Level Type + Elevation Base, side by side.
+            var infoGrid = new Grid { Margin = new Thickness(0, 0, 0, 10) };
+            infoGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            infoGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            var typeInfo = new StackPanel();
+            typeInfo.Children.Add(new TextBlock { Text = S._("levelmanager.level_type"), FontSize = 10, Foreground = MeToolsTheme.BrMuted });
+            typeInfo.Children.Add(new TextBlock { Text = string.IsNullOrEmpty(lvl.LevelTypeName) ? "—" : lvl.LevelTypeName, FontSize = 12, Foreground = MeToolsTheme.BrText, TextWrapping = TextWrapping.Wrap });
+            Grid.SetColumn(typeInfo, 0); infoGrid.Children.Add(typeInfo);
+            var baseInfo = new StackPanel();
+            baseInfo.Children.Add(new TextBlock { Text = S._("levelmanager.elevation_base"), FontSize = 10, Foreground = MeToolsTheme.BrMuted });
+            baseInfo.Children.Add(new TextBlock { Text = string.IsNullOrEmpty(lvl.ElevationBaseText) ? "—" : lvl.ElevationBaseText, FontSize = 12, Foreground = MeToolsTheme.BrText, TextWrapping = TextWrapping.Wrap });
+            Grid.SetColumn(baseInfo, 1); infoGrid.Children.Add(baseInfo);
+            sp.Children.Add(infoGrid);
+
+            // Building Story checkbox -- toggles immediately on click.
+            var storyCb = new CheckBox
+            {
+                Content = S._("levelmanager.building_story"), IsChecked = lvl.IsBuildingStory,
+                Foreground = MeToolsTheme.BrText, FontSize = 12, Margin = new Thickness(0, 0, 0, 10),
+            };
+            storyCb.Checked   += (s, e) => SendToggleBuildingStory(lvl.Id, true);
+            storyCb.Unchecked += (s, e) => SendToggleBuildingStory(lvl.Id, false);
+            sp.Children.Add(storyCb);
+
+            // Action buttons.
+            var btnRow1 = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 6) };
+            var goBtn    = ActionBtn(S._("levelmanager.go_to_level"), true, () => SendLevelAction(LevelManagerAction.NavigateToLevel, lvl.Id));
+            var floorBtn = ActionBtn(S._("levelmanager.create_floor_plan"), true, () => SendLevelAction(LevelManagerAction.CreateFloorPlan, lvl.Id));
+            goBtn.Margin = new Thickness(0, 0, 6, 0);
+            floorBtn.Margin = new Thickness(0, 0, 6, 0);
+            btnRow1.Children.Add(goBtn);
+            btnRow1.Children.Add(floorBtn);
+            sp.Children.Add(btnRow1);
+
+            var btnRow2 = new StackPanel { Orientation = Orientation.Horizontal };
+            var ceilingBtn = ActionBtn(S._("levelmanager.create_ceiling_plan"), true, () => SendLevelAction(LevelManagerAction.CreateCeilingPlan, lvl.Id));
+            var deleteBtn  = ActionBtn(S._("levelmanager.delete"), true, () => OnDeleteLevelClicked(lvl));
+            ceilingBtn.Margin = new Thickness(0, 0, 6, 0);
+            btnRow2.Children.Add(ceilingBtn);
+            btnRow2.Children.Add(deleteBtn);
+            sp.Children.Add(btnRow2);
+
+            _detailPanel.Children.Add(card);
+        }
+
+        private void SendToggleBuildingStory(ElementId levelId, bool value)
+        {
+            _handler.Request = new LevelManagerRequest
+            {
+                Action = LevelManagerAction.ToggleBuildingStory,
+                TargetLevelId = levelId,
+                NewBuildingStoryValue = value,
+            };
+            _extEvent.Raise();
+        }
+
+        private void SendLevelAction(LevelManagerAction action, ElementId levelId)
+        {
+            if (StatusLeft != null)
+            {
+                StatusLeft.Text = action == LevelManagerAction.NavigateToLevel ? S._("levelmanager.navigating")
+                    : action == LevelManagerAction.CreateFloorPlan ? S._("levelmanager.creating_floor_plan")
+                    : action == LevelManagerAction.CreateCeilingPlan ? S._("levelmanager.creating_ceiling_plan")
+                    : StatusLeft.Text;
+            }
+            _handler.Request = new LevelManagerRequest { Action = action, TargetLevelId = levelId };
+            _extEvent.Raise();
+        }
+
+        private void OnDeleteLevelClicked(LevelRow lvl)
+        {
+            var result = MessageBox.Show(
+                string.Format(S._("levelmanager.delete_confirm_msg"), lvl.Name),
+                S._("levelmanager.delete_confirm_title"), MessageBoxButton.YesNo, MessageBoxImage.Warning);
+            if (result != MessageBoxResult.Yes) return;
+
+            _selectedLevel = null; // the row is about to disappear
+            if (StatusLeft != null) StatusLeft.Text = S._("levelmanager.deleting");
+            _handler.Request = new LevelManagerRequest { Action = LevelManagerAction.DeleteLevel, TargetLevelId = lvl.Id };
+            _extEvent.Raise();
         }
 
         private Color ColorForGroup(string groupKey)
@@ -686,6 +858,13 @@ namespace METools.LevelManager
 
         private void LoadIfcSource(string path)
         {
+            if (!System.IO.File.Exists(path))
+            {
+                if (StatusLeft != null)
+                    StatusLeft.Text = string.Format(S._("ifcimport.file_not_found"), System.IO.Path.GetFileName(path), path);
+                return;
+            }
+
             var parsed = IfcLiteReader.Parse(path);
             if (!parsed.Success)
             {
@@ -712,6 +891,7 @@ namespace METools.LevelManager
                     FontSize = 11, FontStyle = FontStyles.Italic, Foreground = MeToolsTheme.BrMuted,
                     TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 6),
                 });
+                ResizeToFitContent();
                 return;
             }
 
@@ -816,6 +996,7 @@ namespace METools.LevelManager
 
             _ifcImportBtn = ActionBtn(S._("ifcimport.import_selected"), false, OnIfcImportClicked);
             _ifcResultsPanel.Children.Add(_ifcImportBtn);
+            ResizeToFitContent();
         }
 
         private Border IfcUnitTile(string title, string label, bool warn)

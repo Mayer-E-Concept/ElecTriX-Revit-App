@@ -171,7 +171,7 @@ namespace METools
             if (idx == 3) { LoadWorksetsIntoList(); LoadCurrentProjectWorksets(); }
             if (idx == 4) LoadHeightsIntoList();
 
-            ResizeToFitActiveTab();
+            ResizeToFitContent();
         }
 
         // InitWindow's Loaded handler (see MeToolsWindowBase.cs) measures the
@@ -182,41 +182,6 @@ namespace METools
         // visible -- so a later tab with more content (License, Worksets)
         // never gets to grow the window, and looks cut off until the user
         // manually drags it bigger. This re-measures on every tab switch:
-        // briefly go back to SizeToContent so WPF computes the new tab's
-        // natural height, force that layout pass to happen immediately
-        // (UpdateLayout, rather than waiting for the next dispatcher cycle),
-        // then re-freeze to Manual at the new size -- same reasoning as the
-        // original fix, just re-applied per tab instead of once at startup.
-        private void ResizeToFitActiveTab()
-        {
-            if (!IsLoaded) return; // constructor-time call (via Build() -> ShowTab) runs before
-                                    // the window actually has a screen presence -- UpdateLayout/
-                                    // ActualHeight are unreliable then, and locking in whatever
-                                    // they produce is what caused the tiny-sliver-on-open bug.
-                                    // The base class's Loaded handler does the correct first
-                                    // measure once the window is genuinely shown; this only
-                                    // needs to run for real tab switches after that.
-            try
-            {
-                SizeToContent = SizeToContent.Height;
-                UpdateLayout();
-                Height = ActualHeight;
-                SizeToContent = SizeToContent.Manual;
-
-                // The window's vertical position was set once, centered on
-                // whichever tab loaded first (usually Appearance -- short).
-                // Growing taller for a tab like Worksets only extends the
-                // bottom edge, since Top never moves -- so a sufficiently
-                // tall tab can run off the bottom of the screen. Pull Top up
-                // to compensate whenever that would happen, clamped so it
-                // never goes above the screen's own top edge either.
-                var wa = System.Windows.SystemParameters.WorkArea;
-                double bottom = Top + ActualHeight;
-                if (bottom > wa.Bottom)
-                    Top = System.Math.Max(wa.Top, Top - (bottom - wa.Bottom));
-            }
-            catch { }
-        }
 
         private void StyleTabBtn(Button b, bool active)
         {
@@ -702,7 +667,7 @@ namespace METools
                 {
                     _heightsHost.Children.Add(InfoBox(S._("settings.heights.none_found")));
                     _heightsLoaded = true;
-                    ResizeToFitActiveTab();
+                    ResizeToFitContent();
                     return;
                 }
 
@@ -724,7 +689,7 @@ namespace METools
                     _heightsHost.Children.Add(BuildHeightRow(en, overrides));
                 }
                 _heightsLoaded = true;
-                ResizeToFitActiveTab();
+                ResizeToFitContent();
             }), System.Windows.Threading.DispatcherPriority.Background);
         }
 

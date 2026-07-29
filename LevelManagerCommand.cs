@@ -107,15 +107,23 @@ namespace METools.LevelManager
                             if (modelPath != null) path = ModelPathUtils.ConvertModelPathToUserVisiblePath(modelPath);
                         }
                         catch { }
-
-                        if (!string.IsNullOrEmpty(path) && path.EndsWith(".rvt", StringComparison.OrdinalIgnoreCase))
-                        {
-                            string withoutRvt = path.Substring(0, path.Length - 4);
-                            if (withoutRvt.EndsWith(".ifc", StringComparison.OrdinalIgnoreCase)) path = withoutRvt;
-                        }
                     }
 
-                    if (string.IsNullOrEmpty(path) || !File.Exists(path)) return; // can't locate the real file on disk
+                    // Both InSessionPath and the ExternalFileUtils fallback can
+                    // resolve to the generated ".rvt" cache file rather than the
+                    // real ".ifc" -- this isn't specific to one API, so the strip
+                    // has to run unconditionally on whichever path was found,
+                    // not just on the fallback path. (Previously this only ran
+                    // inside the fallback branch, so it silently never fired
+                    // whenever InSessionPath succeeded -- which it usually does,
+                    // making the bug easy to miss.)
+                    if (!string.IsNullOrEmpty(path) && path.EndsWith(".rvt", StringComparison.OrdinalIgnoreCase))
+                    {
+                        string withoutRvt = path.Substring(0, path.Length - 4);
+                        if (withoutRvt.EndsWith(".ifc", StringComparison.OrdinalIgnoreCase)) path = withoutRvt;
+                    }
+
+                    if (string.IsNullOrEmpty(path)) return; // truly nothing to offer -- name matched but no path at all resolved
                     if (found.Any(f => string.Equals(f.Item2, path, StringComparison.OrdinalIgnoreCase))) return;
 
                     string displayName = rawName.EndsWith(".rvt", StringComparison.OrdinalIgnoreCase)

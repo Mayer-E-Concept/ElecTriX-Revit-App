@@ -58,8 +58,7 @@ namespace METools
             FontFamily            = new FontFamily("Segoe UI");
             FontSize              = 12;
 
-            // Kein weißer Rand: WindowChrome entfernt + Background = Titelleiste
-            Background = new SolidColorBrush(MeToolsTheme.CPetrolDark);
+            // Kein weißer Rand: WindowChrome entfernt + Background = Titelleiste            Background = new SolidColorBrush(MeToolsTheme.CPetrolDark);
             var chrome = new System.Windows.Shell.WindowChrome
             {
                 CaptionHeight         = 0,
@@ -99,6 +98,49 @@ namespace METools
             // but remains a separate, movable window.
             if (RevitHandle != System.IntPtr.Zero)
                 try { new System.Windows.Interop.WindowInteropHelper(this).Owner = RevitHandle; } catch { }
+        }
+
+        // InitWindow's Loaded handler freezes Height and switches SizeToContent
+        // to Manual after the very first layout pass, specifically to avoid a
+        // resize-grip glitch (see the comment there). The side effect: if a
+        // window's own content later grows substantially -- switching to a
+        // tab with much more content, or a results panel that only appears
+        // once data loads -- the window never grows to fit it, silently
+        // cutting off whatever's at the bottom (e.g. an action button).
+        // Any window whose content can change size after its first paint
+        // should call this after that content changes, to briefly re-enable
+        // auto-sizing, force an immediate layout pass, and re-freeze at the
+        // new height -- same technique as the original startup fix, just
+        // re-applied on demand instead of once.
+        protected void ResizeToFitContent()
+        {
+            if (!IsLoaded) return; // constructor-time call runs before the window has a
+                                    // screen presence -- UpdateLayout/ActualHeight are
+                                    // unreliable then, and locking in whatever they
+                                    // produce is what caused a tiny-sliver-on-open bug.
+                                    // The Loaded handler above does the correct first
+                                    // measure once the window is genuinely shown; this
+                                    // only needs to run for real content changes after that.
+            try
+            {
+                SizeToContent = SizeToContent.Height;
+                UpdateLayout();
+                Height = ActualHeight;
+                SizeToContent = SizeToContent.Manual;
+
+                // The window's vertical position was set once, centered on
+                // whatever content loaded first (usually short). Growing
+                // taller only extends the bottom edge, since Top never moves --
+                // so a sufficiently tall result can run off the bottom of the
+                // screen. Pull Top up to compensate whenever that would
+                // happen, clamped so it never goes above the screen's own
+                // top edge either.
+                var wa = System.Windows.SystemParameters.WorkArea;
+                double bottom = Top + ActualHeight;
+                if (bottom > wa.Bottom)
+                    Top = System.Math.Max(wa.Top, Top - (bottom - wa.Bottom));
+            }
+            catch { }
         }
 
         // ── Titelleiste (immer gleich für ALLE Fenster) ───────────────────
