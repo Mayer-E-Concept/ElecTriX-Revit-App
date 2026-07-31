@@ -34,7 +34,33 @@ namespace METools.ActivityLog
             return Path.Combine(folder, $"METools_ActivityLog_{projectId}.jsonl");
         }
 
-        public static string GetProjectId(Document doc) => METools.Comments.CommentsStorage.GetOrCreateProjectId(doc);
+        // The project id is stamped into the model once and never changes for
+        // the life of that document -- but GetOrCreateProjectId() reads it back
+        // out of Extensible Storage on every call. ActivityLogWatcher calls
+        // this on every tracked transaction, so a tiny per-document session
+        // cache turns that repeated Extensible-Storage read into a dictionary
+        // lookup. Reference-keyed on Document (fine within a session); pruned
+        // by ActivityLogWatcher's own DocumentClosing handling isn't needed
+        // because the cache self-limits to open docs and the values are just
+        // short strings.
+        private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<Document, string> _projectIdCache
+            = new System.Runtime.CompilerServices.ConditionalWeakTable<Document, string>();
+
+        public static string GetProjectId(Document doc)
+        {
+            if (doc == null) return null;
+            if (_projectIdCache.TryGetValue(doc, out var cached)) return cached;
+
+            var id = METools.Comments.CommentsStorage.GetOrCreateProjectId(doc);
+            if (!string.IsNullOrWhiteSpace(id))
+            {
+                // Only cache a real id -- if it came back empty (e.g. read-only
+                // doc that couldn't be stamped yet), don't pin that empty
+                // result; let a later call try again.
+                try { _projectIdCache.Add(doc, id); } catch { }
+            }
+            return id;
+        }
 
         // Appends one entry. Safe to call often -- failures (folder not
         // configured, momentarily locked file, network hiccup) are swallowed

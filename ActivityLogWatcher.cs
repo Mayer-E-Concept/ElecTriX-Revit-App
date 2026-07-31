@@ -44,6 +44,15 @@ namespace METools.ActivityLog
             BuiltInCategory.OST_Wire,
         };
 
+        // Same set as TrackedCategories, as an int HashSet -- built once, so
+        // the per-element "is this a category I care about?" check in
+        // Snapshot() is an O(1) lookup instead of a linear .Any() scan over
+        // the array. That check runs for every added AND every modified
+        // element in every transaction, so on a big edit it was 13 * N
+        // comparisons per commit for no reason.
+        private static readonly HashSet<int> _trackedCatIds =
+            new HashSet<int>(System.Array.ConvertAll(TrackedCategories, c => (int)c));
+
         // Per-open-document element cache. Reference equality on Document is
         // fine here -- this only needs to be correct within the current
         // Revit session, never across restarts.
@@ -81,6 +90,12 @@ namespace METools.ActivityLog
 
         private static void PrimeCache(Document doc)
         {
+            // If the feature isn't configured, nothing is ever logged, so
+            // there's no reason to scan the model to prime the delete-tracking
+            // cache. Matches the same guard in OnDocumentChanged.
+            var folder = METools.Comments.CommentsStorage.GetSharedFolder();
+            if (string.IsNullOrWhiteSpace(folder)) return;
+
             var map = new Dictionary<long, ElementSnapshot>();
             foreach (var cat in TrackedCategories)
             {
@@ -106,17 +121,39 @@ namespace METools.ActivityLog
                 if (doc == null || doc.IsFamilyDocument) return;
                 if (METools.LicenseManager.IsTrialExpired) return; // silent gate, matches CommentsWatcher
 
+                // Cheapest possible early-out first: if this transaction added,
+                // modified and deleted nothing at all, there is nothing to do.
+                var addedIds    = e.GetAddedElementIds();
+                var modifiedIds = e.GetModifiedElementIds();
+                var deletedIds  = e.GetDeletedElementIds();
+                if (addedIds.Count == 0 && modifiedIds.Count == 0 && deletedIds.Count == 0) return;
+
                 var folder = METools.Comments.CommentsStorage.GetSharedFolder();
                 if (string.IsNullOrWhiteSpace(folder)) return; // feature not configured -- nothing to log to
-
-                var projectId = ActivityLogStorage.GetProjectId(doc);
-                if (string.IsNullOrWhiteSpace(projectId)) return;
 
                 if (!_cache.TryGetValue(doc, out var map))
                 {
                     map = new Dictionary<long, ElementSnapshot>();
                     _cache[doc] = map;
                 }
+
+                // Decide up front whether ANY of the changed elements could be
+                // relevant, using only cheap checks -- added/modified elements
+                // are gated by a live category lookup, deletions by whether the
+                // id is in our cache at all. If nothing qualifies (the common
+                // case on a shared model, where most commits are architectural/
+                // structural), bail out BEFORE the more expensive project-id
+                // read (Extensible Storage) and username/transaction-name work.
+                bool anyRelevant = false;
+                foreach (var id in addedIds)    { if (IsTrackedLive(doc, id)) { anyRelevant = true; break; } }
+                if (!anyRelevant)
+                    foreach (var id in modifiedIds) { if (IsTrackedLive(doc, id)) { anyRelevant = true; break; } }
+                if (!anyRelevant)
+                    foreach (var id in deletedIds)  { if (map.ContainsKey(id.IntegerValue)) { anyRelevant = true; break; } }
+                if (!anyRelevant) return;
+
+                var projectId = ActivityLogStorage.GetProjectId(doc);
+                if (string.IsNullOrWhiteSpace(projectId)) return;
 
                 string user = "";
                 try { user = (sender as Autodesk.Revit.ApplicationServices.Application)?.Username ?? ""; } catch { }
@@ -130,8 +167,10 @@ namespace METools.ActivityLog
                 var now = DateTime.UtcNow;
 
                 // Added: refresh the cache from the live element, log only
-                // for elements in a tracked category.
-                foreach (var id in e.GetAddedElementIds())
+                // for elements in a tracked category. (addedIds/modifiedIds/
+                // deletedIds were already fetched once above for the early-out
+                // check -- reused here rather than re-querying the event.)
+                foreach (var id in addedIds)
                 {
                     Element el;
                     try { el = doc.GetElement(id); } catch { el = null; }
@@ -158,7 +197,7 @@ namespace METools.ActivityLog
                 }
 
                 // Modified: same refresh, different action label.
-                foreach (var id in e.GetModifiedElementIds())
+                foreach (var id in modifiedIds)
                 {
                     Element el;
                     try { el = doc.GetElement(id); } catch { el = null; }
@@ -187,7 +226,7 @@ namespace METools.ActivityLog
                 // Deleted: element is already gone -- use whatever the cache
                 // has from the last time it was seen as Added/Modified, or
                 // from the initial PrimeCache scan.
-                foreach (var id in e.GetDeletedElementIds())
+                foreach (var id in deletedIds)
                 {
                     if (!map.TryGetValue(id.IntegerValue, out var snap)) continue; // never tracked -- not our category, skip quietly
                     map.Remove(id.IntegerValue);
@@ -210,13 +249,28 @@ namespace METools.ActivityLog
             catch { }
         }
 
+        // Cheap "should I care about this element?" check -- category only,
+        // no family/type/level resolution. Used by the up-front relevance
+        // gate so the expensive Snapshot() work only happens once an element
+        // is already known to be in a tracked category.
+        private static bool IsTrackedLive(Document doc, ElementId id)
+        {
+            try
+            {
+                var el = doc.GetElement(id);
+                var catId = el?.Category?.Id?.IntegerValue;
+                return catId != null && _trackedCatIds.Contains(catId.Value);
+            }
+            catch { return false; }
+        }
+
         private static ElementSnapshot Snapshot(Document doc, Element el)
         {
             try
             {
                 var catId = el.Category?.Id?.IntegerValue;
                 if (catId == null) return null;
-                bool tracked = TrackedCategories.Any(c => (int)c == catId.Value);
+                bool tracked = _trackedCatIds.Contains(catId.Value);
                 if (!tracked) return null;
 
                 string family = "", type = "";

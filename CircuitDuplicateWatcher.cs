@@ -28,6 +28,17 @@ namespace METools.CircuitDuplicate
         private static ExternalEvent _event;
         private static bool _promptOpen; // one prompt at a time, even if DocumentChanged fires in bursts
 
+        // Built once, not per-transaction. RequiredCategories is a fixed
+        // compile-time list, so rebuilding this HashSet on every DocumentChanged
+        // that added any element (which is most of them) was pure waste.
+        // Lazily initialised on first use rather than in a static initialiser,
+        // since ProjectHealthCheckCollector.RequiredCategories lives in another
+        // type and this keeps the ordering dependency-free.
+        private static HashSet<ElementId> _trackedCatIds;
+        private static HashSet<ElementId> TrackedCatIds =>
+            _trackedCatIds ?? (_trackedCatIds = new HashSet<ElementId>(
+                METools.ProjectHealthCheckCollector.RequiredCategories.Select(c => new ElementId(c.Cat))));
+
         // Must be called from a valid API context (App.OnStartup does this) --
         // NOT lazily on first use from a button click. See CommentsHandler's
         // Ensure() for the exact failure mode this avoids.
@@ -58,8 +69,7 @@ namespace METools.CircuitDuplicate
                 var doc = e.GetDocument();
                 if (doc == null) return;
 
-                var trackedCatIds = new HashSet<ElementId>(
-                    METools.ProjectHealthCheckCollector.RequiredCategories.Select(c => new ElementId(c.Cat)));
+                var trackedCatIds = TrackedCatIds;
 
                 string oldBuilding = null, oldApartment = null;
                 var matches = new List<ElementId>();
