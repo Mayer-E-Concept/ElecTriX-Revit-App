@@ -145,15 +145,28 @@ namespace METools
                     ? S._("healthcheck.resource_present")
                     : S._("healthcheck.resource_missing_params")));
 
+            _body.Children.Add(Sec(S._("healthcheck.circuit_tagging")));
+            _body.Children.Add(StatusRow(
+                S._("healthcheck.untagged_title"),
+                result.UntaggedCount == 0 ? MeToolsTheme.CGreen : MeToolsTheme.COrange,
+                result.UntaggedCount == 0
+                    ? S._("healthcheck.untagged_none")
+                    : string.Format(S._(result.UntaggedCount == 1 ? "healthcheck.untagged_found_1" : "healthcheck.untagged_found_n"), result.UntaggedCount)));
+
             StatusLeft.Text = result.AllHealthy
                 ? S._("healthcheck.all_passed")
                 : S._("healthcheck.some_failed");
         }
 
         private Border StatusRow(string title, bool healthy, string detail)
-        {
-            var color = healthy ? MeToolsTheme.CGreen : MeToolsTheme.CRed;
+            => StatusRow(title, healthy ? MeToolsTheme.CGreen : MeToolsTheme.CRed, detail);
 
+        // Color-parameterized core -- lets the untagged-elements row below use
+        // orange for "some found" rather than red, since that's informational
+        // (a normal state for an in-progress project), not a failure the way
+        // every other row here is.
+        private Border StatusRow(string title, Color color, string detail)
+        {
             var grid = new Grid { Margin = new Thickness(0, 0, 0, 8) };
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });

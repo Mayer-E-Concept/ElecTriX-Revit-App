@@ -52,6 +52,14 @@ namespace METools
         public bool   TagFamilyResourcePresent;
         public bool   SharedParamResourcePresent;
 
+        // Informational only -- deliberately NOT part of AllHealthy below.
+        // Untagged elements are a normal, expected state of a project that's
+        // still being worked on, not a broken setup the way a missing shared
+        // parameter is; folding this into the pass/fail status would make
+        // every in-progress project show "some checks failed" until 100% of
+        // elements are tagged, which isn't what this check is for.
+        public int UntaggedCount;
+
         public bool AllHealthy =>
             TagFamilyLoaded && ParamRows.All(r => r.IsHealthy)
             && SharedFolderConfigured && SharedFolderReachable
@@ -170,6 +178,18 @@ namespace METools
                 result.SharedParamResourcePresent = System.IO.File.Exists(ProjectHealthCheckFixer.SharedParamPath);
             }
             catch { result.TagFamilyResourcePresent = false; result.SharedParamResourcePresent = false; }
+
+            // 5) Untagged elements -- reuses Circuit Tagger's own FindUntagged
+            // rather than a separate scan, so "untagged" always means exactly
+            // the same thing here as it does in Circuit Tagger's own Stats
+            // tab. Informational (see UntaggedCount's own comment) -- wrapped
+            // defensively like everything else above so a problem with this
+            // one check can never take down the rest of the health check.
+            try
+            {
+                result.UntaggedCount = METools.FamilyPlacer.CircuitTaggerHandler.FindUntagged(doc).Count;
+            }
+            catch { result.UntaggedCount = 0; }
 
             return result;
         }

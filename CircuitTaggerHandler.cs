@@ -631,6 +631,46 @@ namespace METools.FamilyPlacer
             return rows;
         }
 
+        // The opposite check from ReadAllTaggedElements above: elements in a
+        // taggable category whose circuit tag (Stromkreis Tag) is empty --
+        // i.e. never tagged at all, not just missing one particular field.
+        // Built for a QA pass before issuing drawings: catches sockets/lamps/
+        // switches someone placed but never got around to tagging. Reuses
+        // the exact same category list, phase resolution, and room/level
+        // helpers as ReadAllTaggedElements, so "tagged" and "untagged" always
+        // agree on what counts as the same universe of elements.
+        public static List<UntaggedElementInfo> FindUntagged(Document doc)
+        {
+            var result = new List<UntaggedElementInfo>();
+            Phase phase = null;
+            try { phase = new FilteredElementCollector(doc).OfClass(typeof(Phase)).Cast<Phase>().LastOrDefault(); } catch { }
+
+            foreach (var cat in GetElectricalCategories())
+            {
+                try
+                {
+                    foreach (var fi in new FilteredElementCollector(doc)
+                        .OfCategory(cat).WhereElementIsNotElementType()
+                        .OfClass(typeof(FamilyInstance)).Cast<FamilyInstance>())
+                    {
+                        var sk = fi.LookupParameter(PARAM_STROMKREIS)?.AsString() ?? "";
+                        if (!string.IsNullOrWhiteSpace(sk)) continue; // already tagged -- not what this is looking for
+
+                        result.Add(new UntaggedElementInfo
+                        {
+                            ElementId    = fi.Id,
+                            CategoryName = fi.Category?.Name ?? "",
+                            FamilyName   = fi.Symbol?.Family?.Name ?? fi.Name ?? "",
+                            LevelName    = GetLevelName(doc, fi),
+                            RoomName     = GetRoomName(doc, fi, phase),
+                        });
+                    }
+                }
+                catch { }
+            }
+            return result;
+        }
+
         // Same method as FixLevelCommand.CurrentLevelId(FamilyInstance) / Activity
         // Log's ResolveLevel: INSTANCE_SCHEDULE_ONLY_LEVEL_PARAM first, since
         // plain Element.LevelId is frequently InvalidElementId for these CAx

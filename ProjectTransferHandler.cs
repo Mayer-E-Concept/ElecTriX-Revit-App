@@ -27,6 +27,9 @@ namespace METools.ProjectTransfer
         public Action<List<OpenDocInfo>>   OnTargetsLoaded{ get; set; }
         public Action<TransferResult>      OnCopyDone     { get; set; }
         public Action<string>              OnStatus       { get; set; }
+        // Pre-flight warning: names of items that would be skipped (already
+        // exist in target by name), and how many would still copy cleanly.
+        public Action<List<string>, int>   OnConflictsFound { get; set; }
 
         public void Execute(UIApplication app)
         {
@@ -234,11 +237,12 @@ namespace METools.ProjectTransfer
 
         // Removes ids matching the conflict predicate from the list in place,
         // returning how many were removed.
-        private static int FilterOutConflicts(Document sourceDoc, List<ElementId> ids, Func<ElementId, bool> isConflict)
+        private static List<string> FilterOutConflicts(List<ElementId> ids, Func<ElementId, bool> isConflict, Func<ElementId, string> nameOf)
         {
             var toRemove = ids.Where(isConflict).ToList();
+            var names = toRemove.Select(nameOf).ToList();
             foreach (var id in toRemove) ids.Remove(id);
-            return toRemove.Count;
+            return names;
         }
 
         private void Copy(UIApplication app)
@@ -297,17 +301,36 @@ namespace METools.ProjectTransfer
             var targetSheetNumbers  = new FilteredElementCollector(targetDoc).OfClass(typeof(ViewSheet)).Cast<ViewSheet>().Select(v => v.SheetNumber).ToHashSet(StringComparer.OrdinalIgnoreCase);
             var targetViewNames     = new FilteredElementCollector(targetDoc).OfClass(typeof(View)).ToElements().Select(e => e.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-            int skippedFilters = FilterOutConflicts(sourceDoc, buckets[0].Ids, id => targetFilterNames.Contains(sourceDoc.GetElement(id).Name));
-            int skippedViews   = FilterOutConflicts(sourceDoc, buckets[1].Ids, id => targetViewNames.Contains(sourceDoc.GetElement(id).Name));
-            int skippedSheets  = FilterOutConflicts(sourceDoc, buckets[2].Ids, id => targetSheetNumbers.Contains((sourceDoc.GetElement(id) as ViewSheet)?.SheetNumber ?? ""));
-            int skippedSchedules = FilterOutConflicts(sourceDoc, buckets[3].Ids, id => targetScheduleNames.Contains(sourceDoc.GetElement(id).Name));
+            var conflictFilters   = FilterOutConflicts(buckets[0].Ids, id => targetFilterNames.Contains(sourceDoc.GetElement(id).Name),
+                id => sourceDoc.GetElement(id).Name);
+            var conflictViews     = FilterOutConflicts(buckets[1].Ids, id => targetViewNames.Contains(sourceDoc.GetElement(id).Name),
+                id => sourceDoc.GetElement(id).Name);
+            var conflictSheets    = FilterOutConflicts(buckets[2].Ids, id => targetSheetNumbers.Contains((sourceDoc.GetElement(id) as ViewSheet)?.SheetNumber ?? ""),
+                id => { var v = sourceDoc.GetElement(id) as ViewSheet; return v == null ? "" : $"{v.SheetNumber} - {v.Name}"; });
+            var conflictSchedules = FilterOutConflicts(buckets[3].Ids, id => targetScheduleNames.Contains(sourceDoc.GetElement(id).Name),
+                id => sourceDoc.GetElement(id).Name);
+
+            // Pre-flight: if this transfer would skip anything and the window
+            // hasn't already confirmed once, stop here and report exactly
+            // which named items collide -- before the transaction even
+            // starts -- rather than only surfacing "N skipped" after the
+            // copy already ran. If the user confirms, the window re-sends
+            // this same request with ConfirmedSkipConflicts = true, which
+            // re-runs this same filtering (buckets are rebuilt fresh from
+            // Request.ItemIds each call) and proceeds straight to copying.
+            var allConflictNames = conflictFilters.Concat(conflictViews).Concat(conflictSheets).Concat(conflictSchedules).ToList();
+            if (allConflictNames.Count > 0 && !Request.ConfirmedSkipConflicts)
+            {
+                OnConflictsFound?.Invoke(allConflictNames, ids.Count - allConflictNames.Count);
+                return;
+            }
 
             var result = new TransferResult { Requested = ids.Count };
             void ReportSkip(string label, int n) { if (n > 0) result.Lines.Add($"{label}: {Plural(n, "item", "items")} skipped -- already exist in target by name"); }
-            ReportSkip("Filters", skippedFilters);
-            ReportSkip("Views", skippedViews);
-            ReportSkip("Sheets", skippedSheets);
-            ReportSkip("Schedules", skippedSchedules);
+            ReportSkip("Filters", conflictFilters.Count);
+            ReportSkip("Views", conflictViews.Count);
+            ReportSkip("Sheets", conflictSheets.Count);
+            ReportSkip("Schedules", conflictSchedules.Count);
 
             using (var tx = new Transaction(targetDoc, "ME-Tools: Project Transfer"))
             {

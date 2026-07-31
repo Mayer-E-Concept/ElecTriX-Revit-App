@@ -15,6 +15,7 @@ namespace METools.Comments
 
         public Action<List<ProjectComment>> OnLoaded;
         public Action<string> OnError;
+        public Action<int> OnBulkStatusDone; // count of comments actually updated
         public Action<string, string> OnCurrentLevel; // (levelName, scopeBoxName); "" if none
         public Action<bool, string> OnGoToElementResult; // (success, message-if-any)
 
@@ -122,6 +123,43 @@ namespace METools.Comments
                                     }
                                 }, out string err);
                                 if (!ok) OnError?.Invoke(err);
+                                OnLoaded?.Invoke(CommentsStorage.LoadAll(projectId));
+                            }
+                            catch (Exception ex) { OnError?.Invoke(ex.Message); }
+                        });
+                        break;
+                    }
+
+                    // Same idea as SetStatus above, but one Mutate call over
+                    // every checked comment instead of one call per comment --
+                    // both cheaper (a single read-modify-write of the shared
+                    // file instead of N of them) and correct under concurrency
+                    // in a way that firing SetStatus N times in a row wouldn't
+                    // be: ExternalEvent.Raise() coalesces rapid successive
+                    // raises, so looping Raise() from the window would risk
+                    // only the last-set Request actually running.
+                    case CommentsAction.BulkSetStatus:
+                    {
+                        string resolver = SafeUsername(app);
+                        var ids = new HashSet<string>(req.CommentIds ?? new List<string>());
+                        var newStatus = req.NewStatus;
+                        Task.Run(() =>
+                        {
+                            try
+                            {
+                                int updated = 0;
+                                bool ok = CommentsStorage.Mutate(projectId, list =>
+                                {
+                                    foreach (var c in list.Where(x => ids.Contains(x.Id)))
+                                    {
+                                        c.Status      = newStatus;
+                                        c.ResolvedBy  = resolver;
+                                        c.ResolvedUtc = DateTime.UtcNow;
+                                        updated++;
+                                    }
+                                }, out string err);
+                                if (!ok) OnError?.Invoke(err);
+                                OnBulkStatusDone?.Invoke(updated);
                                 OnLoaded?.Invoke(CommentsStorage.LoadAll(projectId));
                             }
                             catch (Exception ex) { OnError?.Invoke(ex.Message); }

@@ -51,6 +51,8 @@ namespace METools.FamilyPlacer
 
         // Lists
         private StackPanel _selectionList, _statsList;
+        private StackPanel _untaggedPanel;
+        private List<UntaggedElementInfo> _lastUntaggedResults;
 
         // Stats tab: circuit labels checked for bulk "Clear Selected", and the
         // button that triggers it -- persists across RefreshStats() calls that
@@ -385,6 +387,23 @@ namespace METools.FamilyPlacer
             _statsList = new StackPanel();
             StatsHeader(_statsList);
             container.Child = _statsList; sp.Children.Add(container);
+
+            // -- Find Untagged Elements: QA pass before issuing drawings --
+            sp.Children.Add(new Border { Height = 1, Background = MeToolsTheme.BrBorder, Margin = new Thickness(0, 14, 0, 10) });
+            var untaggedHdrRow = new Grid { Margin = new Thickness(0, 0, 0, 6) };
+            untaggedHdrRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            untaggedHdrRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            var untaggedHdrTb = SecH(S._("circuittagger.find_untagged"));
+            Grid.SetColumn(untaggedHdrTb, 0); untaggedHdrRow.Children.Add(untaggedHdrTb);
+            var btnFindUntagged = SmallBtn(S._("circuittagger.find_untagged_btn"), false, OnFindUntaggedClicked);
+            btnFindUntagged.Padding = new Thickness(16, 0, 16, 0);
+            Grid.SetColumn(btnFindUntagged, 1); untaggedHdrRow.Children.Add(btnFindUntagged);
+            sp.Children.Add(untaggedHdrRow);
+            sp.Children.Add(InfoBox(S._("circuittagger.find_untagged_hint")));
+
+            _untaggedPanel = new StackPanel();
+            sp.Children.Add(_untaggedPanel);
+
             return sp;
         }
 
@@ -566,6 +585,84 @@ namespace METools.FamilyPlacer
             }
             if (!anyRow) _statsList.Children.Add(EmptyRow(S._("circuittagger.no_tagged_found")));
             UpdateStatusBar(S._("circuittagger.stats_refreshed"));
+        }
+
+        // Runs synchronously, same as RefreshStats -- FindUntagged is a
+        // read-only scan (FilteredElementCollector + parameter reads), which
+        // this codebase already treats as safe to call directly from a
+        // button click without an ExternalEvent (matches RefreshStats above
+        // and Family Browser's Select Instances).
+        private void OnFindUntaggedClicked()
+        {
+            var doc = _uiApp.ActiveUIDocument?.Document;
+            if (doc == null) return;
+
+            UpdateStatusBar(S._("circuittagger.finding_untagged"));
+            _lastUntaggedResults = CircuitTaggerHandler.FindUntagged(doc);
+            RenderUntaggedResults();
+            UpdateStatusBar(string.Format(
+                S._(_lastUntaggedResults.Count == 1 ? "circuittagger.untagged_found_1" : "circuittagger.untagged_found_n"),
+                _lastUntaggedResults.Count));
+        }
+
+        private void RenderUntaggedResults()
+        {
+            if (_untaggedPanel == null) return;
+            _untaggedPanel.Children.Clear();
+
+            var results = _lastUntaggedResults;
+            if (results == null) return;
+
+            if (results.Count == 0)
+            {
+                _untaggedPanel.Children.Add(new TextBlock
+                {
+                    Text = S._("circuittagger.no_untagged_found"), FontSize = 11.5,
+                    Foreground = MeToolsTheme.BrGreen, Margin = new Thickness(0, 2, 0, 4),
+                });
+                return;
+            }
+
+            var selectAllBtn = SmallBtn(S._("circuittagger.select_all_untagged"), true, OnSelectAllUntaggedClicked);
+            selectAllBtn.Margin = new Thickness(0, 0, 0, 8);
+            selectAllBtn.HorizontalAlignment = HorizontalAlignment.Left;
+            _untaggedPanel.Children.Add(selectAllBtn);
+
+            // Grouped by level, same visual language as the tagged Stats list
+            // (GroupHeader), so this reads as part of the same tool rather
+            // than a bolted-on list.
+            foreach (var lvlGrp in results.GroupBy(r => string.IsNullOrEmpty(r.LevelName) ? S._("circuittagger.no_level") : r.LevelName)
+                                          .OrderBy(g => g.Key, StringComparer.OrdinalIgnoreCase))
+            {
+                _untaggedPanel.Children.Add(GroupHeader(lvlGrp.Key + $" ({lvlGrp.Count()})", MeToolsTheme.CPetrol));
+
+                foreach (var item in lvlGrp.OrderBy(r => r.RoomName, StringComparer.OrdinalIgnoreCase))
+                {
+                    var row = new TextBlock
+                    {
+                        FontSize = 11, Foreground = MeToolsTheme.BrText, Margin = new Thickness(14, 2, 0, 2),
+                        Text = $"{item.FamilyName}  \u2014  {(string.IsNullOrEmpty(item.RoomName) ? "?" : item.RoomName)}",
+                    };
+                    _untaggedPanel.Children.Add(row);
+                }
+            }
+        }
+
+        private void OnSelectAllUntaggedClicked()
+        {
+            var uidoc = _uiApp?.ActiveUIDocument;
+            var results = _lastUntaggedResults;
+            if (uidoc == null || results == null || results.Count == 0) return;
+
+            try
+            {
+                uidoc.Selection.SetElementIds(results.Select(r => r.ElementId).ToList());
+                UpdateStatusBar(string.Format(S._("circuittagger.untagged_selected"), results.Count));
+            }
+            catch (Exception ex)
+            {
+                UpdateStatusBar(string.Format(S._("circuittagger.error"), ex.Message));
+            }
         }
 
         // -- Category classification -- uses integer IDs (locale-independent) --

@@ -28,7 +28,15 @@ namespace METools.Comments
     {
         private static DateTime _lastCheck = DateTime.MinValue;
         private static readonly TimeSpan CheckInterval = TimeSpan.FromSeconds(45);
-        private static readonly HashSet<string> _shownIds = new HashSet<string>();
+        // Concurrent, not a plain HashSet: this is now touched from background
+        // Task.Run work (see CheckFor), and Idling/ViewActivated can each kick
+        // off a check whose background task is still running when the next
+        // one starts -- a plain HashSet isn't safe under that kind of
+        // concurrent access. TryAdd below also makes "have I shown this?" and
+        // "mark it shown" one atomic step, so two overlapping checks can't
+        // both decide to pop up the same comment.
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> _shownIds
+            = new System.Collections.Concurrent.ConcurrentDictionary<string, byte>();
 
         public static void Register(UIControlledApplication app)
         {
@@ -78,29 +86,50 @@ namespace METools.Comments
                 string me = "";
                 try { me = uidoc.Application.Application.Username; } catch { }
 
-                var candidates = CommentsStorage.LoadAll(projectId).Where(c =>
-                    c.Status == CommentStatus.Open &&
-                    !string.Equals(c.Author, me, StringComparison.OrdinalIgnoreCase) &&
-                    !_shownIds.Contains(c.Id));
+                // Everything above needs live Revit API access (doc, uidoc),
+                // so it stays on the main thread -- but it's all cheap. The one
+                // genuinely slow part is the network read below (LoadAll reads
+                // and parses the shared comments file), which doesn't need the
+                // API at all, so it moves to a background thread. Captured
+                // here, on the main thread, while it's guaranteed to be
+                // available -- used to marshal back only for the final step
+                // that needs it (showing the popup is a WPF operation and has
+                // to happen on this thread).
+                var dispatcher = System.Windows.Threading.Dispatcher.CurrentDispatcher;
 
-                if (onlyLevelName != null)
+                System.Threading.Tasks.Task.Run(() =>
                 {
-                    candidates = candidates.Where(c => string.Equals(c.LevelName, onlyLevelName, StringComparison.OrdinalIgnoreCase));
-                    // Only narrow by Scope Box when the comment actually has one
-                    // recorded -- older comments saved before this fix won't, and
-                    // should still match on level name alone rather than being
-                    // silently excluded forever.
-                    if (!string.IsNullOrWhiteSpace(onlyScopeBoxName))
-                        candidates = candidates.Where(c =>
-                            string.IsNullOrWhiteSpace(c.ScopeBoxName) ||
-                            string.Equals(c.ScopeBoxName, onlyScopeBoxName, StringComparison.OrdinalIgnoreCase));
-                }
+                    try
+                    {
+                        var candidates = CommentsStorage.LoadAll(projectId).Where(c =>
+                            c.Status == CommentStatus.Open &&
+                            !string.Equals(c.Author, me, StringComparison.OrdinalIgnoreCase) &&
+                            !_shownIds.ContainsKey(c.Id));
 
-                var toShow = candidates.OrderBy(c => c.CreatedUtc).FirstOrDefault();
-                if (toShow == null) return;
+                        if (onlyLevelName != null)
+                        {
+                            candidates = candidates.Where(c => string.Equals(c.LevelName, onlyLevelName, StringComparison.OrdinalIgnoreCase));
+                            // Only narrow by Scope Box when the comment actually has one
+                            // recorded -- older comments saved before this fix won't, and
+                            // should still match on level name alone rather than being
+                            // silently excluded forever.
+                            if (!string.IsNullOrWhiteSpace(onlyScopeBoxName))
+                                candidates = candidates.Where(c =>
+                                    string.IsNullOrWhiteSpace(c.ScopeBoxName) ||
+                                    string.Equals(c.ScopeBoxName, onlyScopeBoxName, StringComparison.OrdinalIgnoreCase));
+                        }
 
-                _shownIds.Add(toShow.Id);
-                ShowPopup(toShow);
+                        var toShow = candidates.OrderBy(c => c.CreatedUtc).FirstOrDefault();
+                        if (toShow == null) return;
+
+                        // TryAdd is the atomic "claim this one" step -- if another
+                        // overlapping check already claimed it first, this returns
+                        // false and we skip showing a duplicate popup.
+                        if (!_shownIds.TryAdd(toShow.Id, 0)) return;
+                        dispatcher.Invoke(() => ShowPopup(toShow));
+                    }
+                    catch { }
+                });
             }
             catch { }
         }

@@ -45,10 +45,11 @@ namespace METools.ProjectTransfer
             _extEvent = extEvent;
             _handler  = handler;
 
-            _handler.OnSourceLoaded  = items => Dispatcher.Invoke(() => { _all = items; RebuildCategoryBar(); RebuildSubGroupBar(); RebuildList(); });
-            _handler.OnTargetsLoaded = docs  => Dispatcher.Invoke(() => RebuildTargetCombo(docs));
+            _handler.OnSourceLoaded  = items => Dispatcher.Invoke(() => { _all = items; RebuildCategoryBar(); RebuildSubGroupBar(); RebuildList(); ResizeToFitContent(); });
+            _handler.OnTargetsLoaded = docs  => Dispatcher.Invoke(() => { RebuildTargetCombo(docs); ResizeToFitContent(); });
             _handler.OnStatus        = msg   => Dispatcher.Invoke(() => { if (StatusLeft != null) StatusLeft.Text = msg; });
             _handler.OnCopyDone      = res   => Dispatcher.Invoke(() => ShowCopyResult(res));
+            _handler.OnConflictsFound = (names, willCopyCount) => Dispatcher.Invoke(() => ShowConflictsAndConfirm(names, willCopyCount));
 
             S.SetLanguage(SettingsStore.Language ?? "en");
             InitWindow(S._("transfer.title"), width: 600);
@@ -437,6 +438,38 @@ namespace METools.ProjectTransfer
                 Action      = TransferAction.Copy,
                 TargetTitle = target,
                 ItemIds     = _selected.ToList(),
+            };
+            _extEvent.Raise();
+        }
+
+        // Pre-flight warning: shown before anything is actually copied,
+        // naming exactly which items already exist in the target by name and
+        // would be skipped. Confirming re-sends the exact same Copy request
+        // with ConfirmedSkipConflicts set, which proceeds straight to
+        // copying (skipping only those items, same as it always has) instead
+        // of only reporting the skip after the fact.
+        private void ShowConflictsAndConfirm(List<string> conflictNames, int willCopyCount)
+        {
+            string list = string.Join("\n", conflictNames.Take(15).Select(n => "  \u2022 " + n));
+            if (conflictNames.Count > 15)
+                list += "\n  " + string.Format(S._("transfer.and_n_more"), conflictNames.Count - 15);
+
+            string message = string.Format(S._("transfer.conflicts_message"), conflictNames.Count, list, willCopyCount);
+            var result = MessageBox.Show(message, S._("transfer.conflicts_title"), MessageBoxButton.YesNo, MessageBoxImage.Warning);
+            if (result != MessageBoxResult.Yes)
+            {
+                if (StatusLeft != null) StatusLeft.Text = S._("transfer.copy_cancelled");
+                return;
+            }
+
+            var target = SelectedTargetTitle();
+            if (StatusLeft != null) StatusLeft.Text = S._("transfer.copying");
+            _handler.Request = new TransferRequest
+            {
+                Action      = TransferAction.Copy,
+                TargetTitle = target,
+                ItemIds     = _selected.ToList(),
+                ConfirmedSkipConflicts = true,
             };
             _extEvent.Raise();
         }

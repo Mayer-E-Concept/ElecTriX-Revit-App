@@ -38,6 +38,11 @@ namespace METools.ProjectTransfer
         public string          TargetTitle    { get; set; } = "";   // matches OpenDocInfo.Title
         public string          TargetFilePath { get; set; } = "";   // for OpenTargetFile
         public List<ElementId> ItemIds        { get; set; } = new List<ElementId>();
+        // Set true to skip the pre-flight conflict warning and proceed
+        // straight to copying (skipping only the colliding items, same as
+        // before) -- the window sets this when re-sending Copy after the
+        // user has already confirmed once.
+        public bool             ConfirmedSkipConflicts { get; set; }
     }
 
     public class TransferResult

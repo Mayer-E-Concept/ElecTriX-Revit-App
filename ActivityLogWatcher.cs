@@ -165,6 +165,11 @@ namespace METools.ActivityLog
                 catch { }
 
                 var now = DateTime.UtcNow;
+                // Collected here (main thread, needs live Revit API access for
+                // Snapshot/doc.GetElement) and written to the network file
+                // afterward on a background thread -- see the Task.Run below
+                // this method's three loops for why.
+                var entriesToWrite = new List<ActivityLogEntry>();
 
                 // Added: refresh the cache from the live element, log only
                 // for elements in a tracked category. (addedIds/modifiedIds/
@@ -181,7 +186,7 @@ namespace METools.ActivityLog
 
                     map[id.IntegerValue] = snap;
 
-                    ActivityLogStorage.Append(projectId, new ActivityLogEntry
+                    entriesToWrite.Add(new ActivityLogEntry
                     {
                         TimestampUtc     = now,
                         User             = user,
@@ -208,7 +213,7 @@ namespace METools.ActivityLog
 
                     map[id.IntegerValue] = snap;
 
-                    ActivityLogStorage.Append(projectId, new ActivityLogEntry
+                    entriesToWrite.Add(new ActivityLogEntry
                     {
                         TimestampUtc     = now,
                         User             = user,
@@ -231,7 +236,7 @@ namespace METools.ActivityLog
                     if (!map.TryGetValue(id.IntegerValue, out var snap)) continue; // never tracked -- not our category, skip quietly
                     map.Remove(id.IntegerValue);
 
-                    ActivityLogStorage.Append(projectId, new ActivityLogEntry
+                    entriesToWrite.Add(new ActivityLogEntry
                     {
                         TimestampUtc     = now,
                         User             = user,
@@ -243,6 +248,33 @@ namespace METools.ActivityLog
                         LevelId          = snap.LevelId,
                         ElementId        = id.IntegerValue.ToString(),
                         TransactionNames = txNames,
+                    });
+                }
+
+                // The actual network write happens off the main thread.
+                // ActivityLogStorage.Append() retries up to 3 times with a
+                // 100ms sleep on contention (normal on a shared central model
+                // with several people committing tracked-category edits close
+                // together), and each attempt itself waits on a network call
+                // that can be slow to fail on a degraded connection -- doing
+                // that synchronously here, on Revit's own main thread, is what
+                // was actually freezing Revit for a beat on every relevant
+                // commit. Same Task.Run pattern CommentsHandler already uses
+                // for its own network I/O, just applied here too.
+                //
+                // Trade-off, stated plainly: if Revit closes in the brief
+                // window before this finishes, that entry can be lost. For an
+                // activity log (not model data) that's a clearly acceptable
+                // trade against blocking the main thread on every edit.
+                if (entriesToWrite.Count > 0)
+                {
+                    System.Threading.Tasks.Task.Run(() =>
+                    {
+                        foreach (var entry in entriesToWrite)
+                        {
+                            try { ActivityLogStorage.Append(projectId, entry); }
+                            catch { }
+                        }
                     });
                 }
             }

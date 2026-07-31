@@ -29,6 +29,8 @@ namespace METools.Comments
         private StackPanel _statusBar_Filters;
         private StackPanel _rowsPanel;
         private TextBlock  _countLabel;
+        private Button     _btnMarkSelectedDone;
+        private readonly HashSet<string> _selectedForBulk = new HashSet<string>();
 
         // Pending "reference an item" state for the comment currently being
         // composed -- cleared after the comment is actually added.
@@ -60,6 +62,13 @@ namespace METools.Comments
                 if (StatusLeft != null) StatusLeft.Text = S._("comments.refreshed");
             });
             _handler.OnError  = msg  => Dispatcher.Invoke(() => { if (StatusLeft != null) StatusLeft.Text = msg; });
+            _handler.OnBulkStatusDone = count => Dispatcher.Invoke(() =>
+            {
+                _selectedForBulk.Clear();
+                UpdateMarkSelectedDoneButton();
+                if (StatusLeft != null)
+                    StatusLeft.Text = string.Format(S._(count == 1 ? "comments.marked_done_1" : "comments.marked_done_n"), count);
+            });
             _handler.OnCurrentLevel = (lvl, sb) => Dispatcher.Invoke(() =>
             {
                 _currentLevel = lvl ?? "";
@@ -88,6 +97,37 @@ namespace METools.Comments
 
         private void BuildUi()
         {
+            // Footer FIRST (Dock.Bottom before the fill element) -- same
+            // reasoning as ActivityLogWindow.Build(): DockPanel needs its
+            // docked children added before the "fill" element for
+            // LastChildFill to work, and this is what keeps these two
+            // buttons always visible regardless of how tall the scrollable
+            // content above ends up being (previously they were the LAST
+            // items inside that same scroller, which is exactly why they
+            // needed scrolling to reach even with zero comments loaded --
+            // the settings + leave-a-comment sections above them were
+            // already tall enough on their own to push them past the fold).
+            var footer = new Border
+            {
+                Background = MeToolsTheme.BrFooter,
+                BorderBrush = MeToolsTheme.BrBorder, BorderThickness = new Thickness(0, 1, 0, 0),
+                Padding = new Thickness(14, 10, 14, 10),
+            };
+            DockPanel.SetDock(footer, Dock.Bottom);
+            var footerBtnRow = new StackPanel { Orientation = Orientation.Horizontal };
+            var refreshBtn = MakeBtn(S._("comments.refresh"), true, () =>
+            {
+                if (StatusLeft != null) StatusLeft.Text = S._("comments.refreshing");
+                _handler.Request = new CommentsRequest { Action = CommentsAction.Refresh };
+                _extEvent.Raise();
+            });
+            var exportBtn = MakeBtn(S._("comments.export"), false, OnExportClicked);
+            refreshBtn.Margin = new Thickness(0, 0, 8, 0);
+            footerBtnRow.Children.Add(refreshBtn);
+            footerBtnRow.Children.Add(exportBtn);
+            footer.Child = footerBtnRow;
+            RootDock.Children.Add(footer);
+
             var scroller = new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, MaxHeight = 480 };
             var root = new StackPanel { Margin = new Thickness(16) };
             scroller.Content = root;
@@ -246,18 +286,14 @@ namespace METools.Comments
             _countLabel = new TextBlock { FontSize = 10.5, Foreground = MeToolsTheme.BrMuted, Margin = new Thickness(2, 0, 0, 6) };
             root.Children.Add(_countLabel);
 
+            _btnMarkSelectedDone = MakeBtn(S._("comments.mark_selected_done"), false, OnMarkSelectedDoneClicked);
+            _btnMarkSelectedDone.IsEnabled = false;
+            _btnMarkSelectedDone.HorizontalAlignment = HorizontalAlignment.Left;
+            _btnMarkSelectedDone.Margin = new Thickness(0, 0, 0, 8);
+            root.Children.Add(_btnMarkSelectedDone);
+
             _rowsPanel = new StackPanel();
             root.Children.Add(_rowsPanel);
-
-            var refreshBtn = MakeBtn(S._("comments.refresh"), true, () =>
-            {
-                if (StatusLeft != null) StatusLeft.Text = S._("comments.refreshing");
-                _handler.Request = new CommentsRequest { Action = CommentsAction.Refresh };
-                _extEvent.Raise();
-            });
-            refreshBtn.HorizontalAlignment = HorizontalAlignment.Left;
-            refreshBtn.Margin = new Thickness(0, 10, 0, 0);
-            root.Children.Add(refreshBtn);
         }
 
         private string SoundLabel() => _soundOn ? S._("comments.sound_on") : S._("comments.sound_off");
@@ -364,18 +400,6 @@ namespace METools.Comments
                 : S._("comments.type_a_name_prev") + string.Join(", ", names);
         }
 
-        private void ResizeToFitContent()
-        {
-            try
-            {
-                SizeToContent = SizeToContent.Height;
-                UpdateLayout();
-                Height = ActualHeight;
-                SizeToContent = SizeToContent.Manual;
-            }
-            catch { }
-        }
-
         private void RebuildList()
         {
             _rowsPanel.Children.Clear();
@@ -435,14 +459,31 @@ namespace METools.Comments
             border.Child = stack;
 
             var topRow = new Grid();
+            topRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             topRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             topRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            if (c.Status == CommentStatus.Open)
+            {
+                var cb = new CheckBox
+                {
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Margin = new Thickness(0, 0, 8, 0),
+                    IsChecked = _selectedForBulk.Contains(c.Id),
+                    ToolTip = S._("comments.select_for_bulk_tip"),
+                };
+                cb.Checked   += (s, e) => { _selectedForBulk.Add(c.Id); UpdateMarkSelectedDoneButton(); };
+                cb.Unchecked += (s, e) => { _selectedForBulk.Remove(c.Id); UpdateMarkSelectedDoneButton(); };
+                Grid.SetColumn(cb, 0);
+                topRow.Children.Add(cb);
+            }
+
             var meta = new TextBlock
             {
                 FontSize = 11, Foreground = MeToolsTheme.BrMuted,
                 Text = $"{LocalTime(c.CreatedUtc):g}",
             };
-            Grid.SetColumn(meta, 0);
+            Grid.SetColumn(meta, 1);
             topRow.Children.Add(meta);
 
             var statusChip = new Border
@@ -451,7 +492,7 @@ namespace METools.Comments
                 Padding = new Thickness(6, 1, 6, 1), HorizontalAlignment = HorizontalAlignment.Right,
             };
             statusChip.Child = new TextBlock { Text = StatusLabel(c.Status), FontSize = 9.5, Foreground = Brushes.White };
-            Grid.SetColumn(statusChip, 1);
+            Grid.SetColumn(statusChip, 2);
             topRow.Children.Add(statusChip);
             stack.Children.Add(topRow);
 
@@ -601,6 +642,85 @@ namespace METools.Comments
         {
             _handler.Request = new CommentsRequest { Action = CommentsAction.SetStatus, CommentId = id, NewStatus = status };
             _extEvent.Raise();
+        }
+
+        private void UpdateMarkSelectedDoneButton()
+        {
+            if (_btnMarkSelectedDone == null) return;
+            int n = _selectedForBulk.Count;
+            _btnMarkSelectedDone.IsEnabled = n > 0;
+            _btnMarkSelectedDone.Content = n > 0
+                ? string.Format(S._("comments.mark_selected_done_n"), n)
+                : S._("comments.mark_selected_done");
+        }
+
+        private void OnMarkSelectedDoneClicked()
+        {
+            if (_selectedForBulk.Count == 0) return;
+            var ids = _selectedForBulk.ToList();
+            if (StatusLeft != null) StatusLeft.Text = S._("comments.marking_selected_done");
+            _handler.Request = new CommentsRequest
+            {
+                Action = CommentsAction.BulkSetStatus,
+                CommentIds = ids,
+                NewStatus = CommentStatus.Done,
+            };
+            _extEvent.Raise();
+        }
+
+        // Exports whatever is currently loaded (_all) -- not re-read from
+        // disk, so this always matches exactly what's on screen, filters and
+        // all being ignored deliberately: a close-out record should cover
+        // every comment on the project, not just whichever filter happened
+        // to be selected when Export was clicked.
+        private void OnExportClicked()
+        {
+            if (_all == null || _all.Count == 0)
+            {
+                MessageBox.Show(S._("comments.export_none"), S._("comments.export_title"), MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            var dlg = new Microsoft.Win32.SaveFileDialog
+            {
+                Title = S._("comments.export_dialog_title"), Filter = "CSV files (*.csv)|*.csv",
+                FileName = $"Comments_{DateTime.Now:yyyyMMdd_HHmm}", DefaultExt = ".csv",
+            };
+            if (dlg.ShowDialog() != true) return;
+
+            try
+            {
+                var sb = new System.Text.StringBuilder();
+                sb.AppendLine("CreatedLocal,Author,Level,ScopeBox,Text,Status,AssignedTo,ResolvedBy,ResolvedLocal,ReferencedElement");
+                foreach (var c in _all.OrderBy(x => x.CreatedUtc))
+                {
+                    sb.AppendLine(string.Join(",",
+                        Q($"{LocalTime(c.CreatedUtc):yyyy-MM-dd HH:mm}"), Q(c.Author), Q(c.LevelName), Q(c.ScopeBoxName),
+                        Q(c.Text), Q(c.Status.ToString()), Q(c.AssignedTo), Q(c.ResolvedBy),
+                        Q(c.ResolvedUtc.HasValue ? $"{LocalTime(c.ResolvedUtc.Value):yyyy-MM-dd HH:mm}" : ""),
+                        Q(c.ReferencedSummary)));
+                }
+                System.IO.File.WriteAllText(dlg.FileName, sb.ToString(), System.Text.Encoding.UTF8);
+                if (StatusLeft != null) StatusLeft.Text = string.Format(S._("comments.exported_rows"), _all.Count);
+                MessageBox.Show(string.Format(S._("comments.exported_rows_path"), _all.Count, dlg.FileName),
+                    S._("comments.export_complete"), MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(string.Format(S._("comments.export_failed"), ex.Message), S._("comments.export_error"), MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
+        }
+
+        // Comment text is free-form user input, far more likely than Circuit
+        // Tagger's short codes to contain commas, quotes, or line breaks --
+        // this quoting is what keeps such a comment from corrupting the CSV's
+        // column structure.
+        private static string Q(string s)
+        {
+            s = s ?? "";
+            if (s.Contains(",") || s.Contains("\"") || s.Contains("\n") || s.Contains("\r"))
+                return "\"" + s.Replace("\"", "\"\"") + "\"";
+            return s;
         }
 
         private static DateTime LocalTime(DateTime utc) => utc.Kind == DateTimeKind.Utc ? utc.ToLocalTime() : utc;

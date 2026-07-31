@@ -27,6 +27,9 @@ namespace METools.ActivityLog
         private ComboBox _userCmb;
         private Button _btnAll, _btnAdded, _btnModified, _btnDeleted;
         private ActivityAction? _actionFilter; // null = All
+
+        private Button _btnDateAll, _btnDateToday, _btnDate7, _btnDate30;
+        private DateTime? _dateFilterSinceUtc; // null = all time
         private TextBox _searchBox;
         private StackPanel _body;
         private ScrollViewer _scroll;
@@ -117,6 +120,19 @@ namespace METools.ActivityLog
             actionRow.Children.Add(_btnDeleted);
             filterSp.Children.Add(actionRow);
 
+            var dateRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 8) };
+            _btnDateAll   = ToggleBtn(S._("activitylog.date_all"),    true,  () => SetDateFilter(null));
+            _btnDateToday = ToggleBtn(S._("activitylog.date_today"),  false, () => SetDateFilter(DateTime.UtcNow.Date));
+            _btnDate7     = ToggleBtn(S._("activitylog.date_7days"),  false, () => SetDateFilter(DateTime.UtcNow.Date.AddDays(-7)));
+            _btnDate30    = ToggleBtn(S._("activitylog.date_30days"), false, () => SetDateFilter(DateTime.UtcNow.Date.AddDays(-30)));
+            foreach (var b in new[] { _btnDateAll, _btnDateToday, _btnDate7, _btnDate30 })
+                b.Margin = new Thickness(0, 0, 6, 0);
+            dateRow.Children.Add(_btnDateAll);
+            dateRow.Children.Add(_btnDateToday);
+            dateRow.Children.Add(_btnDate7);
+            dateRow.Children.Add(_btnDate30);
+            filterSp.Children.Add(dateRow);
+
             var searchRow = new StackPanel { Orientation = Orientation.Horizontal };
             _userCmb = MeToolsWindowBase.StyledCombo(28, 12);
             _userCmb.Width = 160;
@@ -160,6 +176,16 @@ namespace METools.ActivityLog
             RenderList();
         }
 
+        private void SetDateFilter(DateTime? sinceUtc)
+        {
+            _dateFilterSinceUtc = sinceUtc;
+            UpdateToggle(_btnDateAll,   sinceUtc == null);
+            UpdateToggle(_btnDateToday, sinceUtc == DateTime.UtcNow.Date);
+            UpdateToggle(_btnDate7,     sinceUtc == DateTime.UtcNow.Date.AddDays(-7));
+            UpdateToggle(_btnDate30,    sinceUtc == DateTime.UtcNow.Date.AddDays(-30));
+            RenderList();
+        }
+
         private void PopulateUserFilter()
         {
             var users = _all.Select(x => x.User).Where(u => !string.IsNullOrWhiteSpace(u))
@@ -186,6 +212,8 @@ namespace METools.ActivityLog
             var filtered = _all.AsEnumerable();
             if (_actionFilter.HasValue)
                 filtered = filtered.Where(x => x.Action == _actionFilter.Value);
+            if (_dateFilterSinceUtc.HasValue)
+                filtered = filtered.Where(x => x.TimestampUtc >= _dateFilterSinceUtc.Value);
             if (!string.IsNullOrEmpty(userFilter))
                 filtered = filtered.Where(x => string.Equals(x.User, userFilter, StringComparison.OrdinalIgnoreCase));
             if (hasSearch)

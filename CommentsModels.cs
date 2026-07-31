@@ -56,7 +56,7 @@ namespace METools.Comments
         public List<ProjectComment> Comments { get; set; } = new List<ProjectComment>();
     }
 
-    public enum CommentsAction { Refresh, Add, SetStatus, Delete, JumpToLevel, GoToElement, SetAssignedTo }
+    public enum CommentsAction { Refresh, Add, SetStatus, Delete, JumpToLevel, GoToElement, SetAssignedTo, BulkSetStatus }
 
     public class CommentsRequest
     {
@@ -65,6 +65,7 @@ namespace METools.Comments
         public string ScopeBoxName { get; set; } = "";
         public string Text { get; set; } = "";
         public string CommentId { get; set; } = "";
+        public List<string> CommentIds { get; set; } = new List<string>(); // for BulkSetStatus
         public CommentStatus NewStatus { get; set; }
         public string ReferencedElementId { get; set; } = "";
         public string ReferencedSummary { get; set; } = "";

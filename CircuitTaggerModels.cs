@@ -14,6 +14,19 @@ namespace METools.FamilyPlacer
         public string CircuitLabel  { get; set; }
     }
 
+    // One element found by FindUntagged -- in a taggable category, but its
+    // circuit tag (Stromkreis Tag) is empty. Deliberately minimal (no circuit
+    // fields at all, since by definition none are set) -- just enough to find
+    // and select the element for review.
+    public class UntaggedElementInfo
+    {
+        public Autodesk.Revit.DB.ElementId ElementId { get; set; }
+        public string CategoryName { get; set; } = "";
+        public string FamilyName   { get; set; } = "";
+        public string LevelName    { get; set; } = "";
+        public string RoomName     { get; set; } = "";
+    }
+
     public class CircuitStatRow
     {
         public string CircuitBase       { get; set; } // e.g. "1F1" (without sub-index)

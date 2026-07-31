@@ -52,7 +52,18 @@ namespace METools
                 // snap-to-right-edge bug: WPF's auto-size engine kept re-solving the
                 // window bounds against this Loaded-time right-anchor math on every
                 // resize pass. Locking Height + switching to Manual stops that fight.
-                Height        = ActualHeight;
+                //
+                // Clamped to the actual available screen height (minus a small
+                // margin) rather than frozen at whatever raw content wanted --
+                // on a smaller or heavily-scaled display, a window's natural
+                // content height can genuinely exceed the screen's usable area,
+                // which otherwise pushes the window's own footer/buttons off
+                // the bottom edge with no way to reach them. Every window here
+                // uses a DockPanel with an inner ScrollViewer as the "fill"
+                // element, so clamping the outer window doesn't hide anything --
+                // it just leaves that scroller less room, and it absorbs the
+                // difference as internal scrolling instead.
+                Height        = System.Math.Min(ActualHeight, wa.Height - 40);
                 SizeToContent = SizeToContent.Manual;
             };
             FontFamily            = new FontFamily("Segoe UI");
@@ -125,7 +136,14 @@ namespace METools
             {
                 SizeToContent = SizeToContent.Height;
                 UpdateLayout();
-                Height = ActualHeight;
+
+                // Same clamp as InitWindow's own Loaded handler, and for the
+                // same reason: content that grew past the screen's usable
+                // height shouldn't be allowed to push the window itself past
+                // it too -- the inner ScrollViewer (DockPanel "fill" element)
+                // absorbs the difference as internal scrolling instead.
+                var wa = System.Windows.SystemParameters.WorkArea;
+                Height        = System.Math.Min(ActualHeight, wa.Height - 40);
                 SizeToContent = SizeToContent.Manual;
 
                 // The window's vertical position was set once, centered on
@@ -135,8 +153,7 @@ namespace METools
                 // screen. Pull Top up to compensate whenever that would
                 // happen, clamped so it never goes above the screen's own
                 // top edge either.
-                var wa = System.Windows.SystemParameters.WorkArea;
-                double bottom = Top + ActualHeight;
+                double bottom = Top + Height;
                 if (bottom > wa.Bottom)
                     Top = System.Math.Max(wa.Top, Top - (bottom - wa.Bottom));
             }
