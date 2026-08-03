@@ -119,7 +119,25 @@ namespace METools.ActivityLog
             var navHandler = new ActivityLogNavigateHandler();
             var navEvt      = ExternalEvent.Create(navHandler);
 
-            _window = new ActivityLogWindow(entries, warning, evt, handler, navEvt, navHandler);
+            // Time Tracker -- same shared-folder idea as Activity Log, now
+            // shown as extra tabs in this same window rather than a separate
+            // tool. See TimeTrackerHandler.cs.
+            var ttProjectId = METools.TimeTracker.TimeTrackerStorage.GetProjectId(doc);
+            var ttEntries   = METools.TimeTracker.TimeTrackerStorage.LoadAll(ttProjectId, out string ttWarning);
+            var ttHandler   = new METools.TimeTracker.TimeTrackerRefreshHandler();
+            var ttEvt       = ExternalEvent.Create(ttHandler);
+            string currentUser = "";
+            try { currentUser = uiApp.Application?.Username ?? ""; } catch { }
+            if (string.IsNullOrWhiteSpace(currentUser))
+                try { currentUser = Environment.UserName; } catch { }
+            // A live "currently tracking" indicator for the document that's
+            // open right now -- otherwise My Sessions looks inert the first
+            // time anyone opens it, since nothing shows up as a *finished*
+            // session until a tracked document actually closes.
+            var liveSessionStartUtc = METools.TimeTracker.TimeTrackerWatcher.GetCurrentSessionStart(doc);
+
+            _window = new ActivityLogWindow(entries, warning, evt, handler, navEvt, navHandler,
+                                             ttEntries, ttWarning, ttEvt, ttHandler, currentUser, liveSessionStartUtc);
             _window.Closed += (s, e) => _window = null;
             _window.Show();
         }

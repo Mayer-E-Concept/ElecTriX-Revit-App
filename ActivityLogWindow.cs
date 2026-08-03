@@ -1,5 +1,15 @@
-// ActivityLogWindow.cs -- ME-Tools | Activity Log
+// ActivityLogWindow.cs -- ME-Tools | Activity Log & Time Tracker
 // Mayer E-Concept SRL
+//
+// Three tabs sharing one window/footer/status bar:
+//   - Activity      : unchanged filter bar + card list (Added/Modified/Deleted).
+//   - Team Totals   : Time Tracker -- total time/sessions/last-active per user.
+//   - My Sessions   : Time Tracker -- your own daily totals, expandable.
+// Time Tracker was previously its own tool/window; merged in here because
+// both are the same underlying idea -- per-user, per-project history read
+// from the same shared network folder. The background tracking itself
+// (TimeTrackerWatcher/TimeTrackerStorage) is untouched by this -- only the
+// UI entry point moved. See TimeTrackerHandler.cs for the refresh handler.
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -18,6 +28,7 @@ namespace METools.ActivityLog
 {
     public class ActivityLogWindow : MeToolsWindowBase
     {
+        // ── Activity tab ─────────────────────────────────────────────────────
         private readonly ExternalEvent            _evt;
         private readonly ActivityLogRefreshHandler _handler;
         private readonly ExternalEvent             _navEvt;
@@ -33,17 +44,39 @@ namespace METools.ActivityLog
         private TextBox _searchBox;
         private StackPanel _body;
         private ScrollViewer _scroll;
-        private Border _warningBox; // shown above the list when the shared folder isn't configured
+        private Border _warningBox; // shown above the Activity list when the shared folder isn't configured
+        private Border _filterBar; // only relevant to the Activity tab -- hidden on the other two
+
+        // ── Team Totals / My Sessions tabs (Time Tracker) ───────────────────
+        private readonly ExternalEvent _ttEvt;
+        private readonly METools.TimeTracker.TimeTrackerRefreshHandler _ttHandler;
+        private readonly string _currentUser;
+        private List<METools.TimeTracker.TimeSessionEntry> _ttAll = new List<METools.TimeTracker.TimeSessionEntry>();
+        private DateTime? _liveSessionStartUtc; // the document open right now, if being tracked -- see TimeTrackerWatcher.GetCurrentSessionStart
+        private StackPanel _panTeam, _panMine;
+
+        // ── Tabs ─────────────────────────────────────────────────────────────
+        private Border _tabActivity, _tabTeam, _tabMine, _activeTab;
+        private StackPanel _activePanel;
 
         protected override string AppKey => "ActivityLog";
 
-        public ActivityLogWindow(List<ActivityLogEntry> entries, string warning, ExternalEvent evt, ActivityLogRefreshHandler handler,
-                                  ExternalEvent navEvt, ActivityLogNavigateHandler navHandler)
+        public ActivityLogWindow(
+            List<ActivityLogEntry> entries, string warning, ExternalEvent evt, ActivityLogRefreshHandler handler,
+            ExternalEvent navEvt, ActivityLogNavigateHandler navHandler,
+            List<METools.TimeTracker.TimeSessionEntry> ttEntries, string ttWarning,
+            ExternalEvent ttEvt, METools.TimeTracker.TimeTrackerRefreshHandler ttHandler,
+            string currentUser, DateTime? liveSessionStartUtc)
         {
             _evt     = evt;
             _handler = handler;
             _navEvt     = navEvt;
             _navHandler = navHandler;
+            _ttEvt     = ttEvt;
+            _ttHandler = ttHandler;
+            _currentUser = currentUser ?? "";
+            _liveSessionStartUtc = liveSessionStartUtc;
+
             _navHandler.OnDone = (success, msg) => Dispatcher.Invoke(() =>
             {
                 StatusLeft.Text = success ? S._("activitylog.switched_level") : string.Format(S._("activitylog.couldnt_go"), msg);
@@ -55,23 +88,40 @@ namespace METools.ActivityLog
                 RenderList();
                 StatusLeft.Text = string.IsNullOrEmpty(w) ? string.Format(S._("activitylog.entries_count"), _all.Count) : w;
             });
+            _ttHandler.OnResult = (result, w, liveStart) => Dispatcher.Invoke(() =>
+            {
+                _ttAll = result ?? new List<METools.TimeTracker.TimeSessionEntry>();
+                _liveSessionStartUtc = liveStart;
+                RenderTeam();
+                RenderMine();
+                // Both refreshes land around the same moment -- Activity
+                // Log's own message (entry count or its warning) is the
+                // more informative default, so only override it here if
+                // Time Tracker specifically has something to report.
+                if (!string.IsNullOrEmpty(w)) StatusLeft.Text = w;
+            });
 
             S.SetLanguage(SettingsStore.Language ?? "en");
             InitWindow(S._("activitylog.title"), 620);
             Build();
 
-            _all = entries ?? new List<ActivityLogEntry>();
+            _all   = entries   ?? new List<ActivityLogEntry>();
+            _ttAll = ttEntries ?? new List<METools.TimeTracker.TimeSessionEntry>();
 
             if (string.IsNullOrWhiteSpace(METools.Comments.CommentsStorage.GetSharedFolder()))
-            {
                 _warningBox = InfoBox(S._("activitylog.no_folder_warning"));
-            }
 
             PopulateUserFilter();
             RenderList();
-            StatusLeft.Text = string.IsNullOrEmpty(warning) ? string.Format(S._("activitylog.entries_count"), _all.Count) : warning;
+            RenderTeam();
+            RenderMine();
+
+            StatusLeft.Text = !string.IsNullOrEmpty(warning)   ? warning
+                             : !string.IsNullOrEmpty(ttWarning) ? ttWarning
+                             : string.Format(S._("activitylog.entries_count"), _all.Count);
         }
 
+        // ── Build ────────────────────────────────────────────────────────────
         private void Build()
         {
             BuildStatusBar(S._("activitylog.loading"));
@@ -85,11 +135,18 @@ namespace METools.ActivityLog
             };
             DockPanel.SetDock(footer, Dock.Bottom);
             var footerRow = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
-            var exportBtn = FooterBtn(S._("activitylog.export_csv"), primary: false, onClick: ExportCsv);
+            var exportBtn = FooterBtn(S._("activitylog.export_csv"), primary: false, onClick: () =>
+            {
+                // Export whichever tab is actually showing -- Activity's own
+                // list, or the Time Tracker sessions log.
+                if (_activePanel == _body) ExportCsv();
+                else ExportTimeTrackerCsv();
+            });
             var refreshBtn = FooterBtn(S._("activitylog.refresh"), primary: true, onClick: () =>
             {
                 StatusLeft.Text = S._("activitylog.refreshing");
                 _evt.Raise();
+                _ttEvt.Raise();
             });
             exportBtn.Margin = new Thickness(0, 0, 8, 0);
             footerRow.Children.Add(exportBtn);
@@ -97,14 +154,32 @@ namespace METools.ActivityLog
             footer.Child = footerRow;
             RootDock.Children.Add(footer);
 
-            // Filters bar (also docked, above the footer, below the fill area's top).
-            var filterBar = new Border
+            // Tab bar (Dock.Top).
+            _tabActivity = MakeTab(S._("activitylog.tab_activity"), MeToolsTheme.COrange, () => ShowTab(_tabActivity, _body));
+            _tabTeam     = MakeTab(S._("timetracker.tab_team"),     MeToolsTheme.CPetrol,  () => ShowTab(_tabTeam, _panTeam));
+            _tabMine     = MakeTab(S._("timetracker.tab_mine"),     MeToolsTheme.CGreen,   () => ShowTab(_tabMine, _panMine));
+            var tabSp = new StackPanel { Orientation = Orientation.Horizontal };
+            tabSp.Children.Add(_tabActivity);
+            tabSp.Children.Add(_tabTeam);
+            tabSp.Children.Add(_tabMine);
+            var tabBar = new Border
+            {
+                Background = MeToolsTheme.BrHeader, BorderBrush = MeToolsTheme.BrBorder,
+                BorderThickness = new Thickness(0, 0, 0, 1), Padding = new Thickness(4, 0, 0, 0),
+                Child = tabSp,
+            };
+            DockPanel.SetDock(tabBar, Dock.Top);
+            RootDock.Children.Add(tabBar);
+
+            // Filters bar -- only relevant to the Activity tab; ShowTab()
+            // toggles its visibility alongside the active panel.
+            _filterBar = new Border
             {
                 Background = MeToolsTheme.BrSurface,
                 BorderBrush = MeToolsTheme.BrBorder, BorderThickness = new Thickness(0, 0, 0, 1),
                 Padding = new Thickness(14, 10, 14, 10),
             };
-            DockPanel.SetDock(filterBar, Dock.Top);
+            DockPanel.SetDock(_filterBar, Dock.Top);
             var filterSp = new StackPanel();
 
             var actionRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 8) };
@@ -152,20 +227,88 @@ namespace METools.ActivityLog
             searchRow.Children.Add(_searchBox);
             filterSp.Children.Add(searchRow);
 
-            filterBar.Child = filterSp;
-            RootDock.Children.Add(filterBar);
+            _filterBar.Child = filterSp;
+            RootDock.Children.Add(_filterBar);
 
+            // Fill area: one scroller shared by all three tab panels,
+            // toggled via Visibility -- a multi-tab window built this way
+            // (zero layout space for inactive tabs) doesn't need
+            // ResizeToFitContent().
             _scroll = new ScrollViewer
             {
                 VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
                 MaxHeight  = 560,
                 Background = MeToolsTheme.BrBg,
             };
-            _body = new StackPanel { Margin = new Thickness(14, 12, 14, 12) };
-            _scroll.Content = _body;
+            _body    = new StackPanel();
+            _panTeam = new StackPanel { Visibility = Visibility.Collapsed };
+            _panMine = new StackPanel { Visibility = Visibility.Collapsed };
+            var outer = new StackPanel { Margin = new Thickness(14, 12, 14, 12) };
+            outer.Children.Add(_body);
+            outer.Children.Add(_panTeam);
+            outer.Children.Add(_panMine);
+            _scroll.Content = outer;
             RootDock.Children.Add(_scroll);
+
+            ShowTab(_tabActivity, _body);
         }
 
+        // ── Tab pill helpers ─────────────────────────────────────────────────
+        private Border MakeTab(string label, Color tc, Action onClick)
+        {
+            var pill = new Border
+            {
+                CornerRadius = new CornerRadius(10), Padding = new Thickness(10, 2, 10, 2),
+                Background = new SolidColorBrush(Color.FromArgb(35, tc.R, tc.G, tc.B)),
+                Child = new TextBlock
+                {
+                    Text = label, FontSize = 11, FontWeight = FontWeights.SemiBold,
+                    Foreground = MeToolsTheme.BrMuted, VerticalAlignment = VerticalAlignment.Center,
+                },
+            };
+            var tab = new Border
+            {
+                Padding = new Thickness(8, 6, 8, 6), Cursor = System.Windows.Input.Cursors.Hand,
+                Background = MeToolsTheme.BrHeader, BorderThickness = new Thickness(0, 0, 0, 2),
+                BorderBrush = Brushes.Transparent, Child = pill, Tag = tc,
+            };
+            tab.MouseEnter += (s, e) => { if (tab != _activeTab) tab.Background = MeToolsTheme.BrBg; };
+            tab.MouseLeave += (s, e) => { if (tab != _activeTab) tab.Background = MeToolsTheme.BrHeader; };
+            tab.MouseLeftButtonDown += (s, e) => onClick();
+            return tab;
+        }
+
+        private void ShowTab(Border tab, StackPanel panel)
+        {
+            foreach (var t in new[] { _tabActivity, _tabTeam, _tabMine })
+            {
+                if (t == null) continue;
+                t.BorderBrush = Brushes.Transparent; t.Background = MeToolsTheme.BrHeader;
+                if (t.Child is Border p)
+                {
+                    var tc2 = (Color)t.Tag;
+                    p.Background = new SolidColorBrush(Color.FromArgb(30, tc2.R, tc2.G, tc2.B));
+                    if (p.Child is TextBlock tb2) { tb2.Foreground = MeToolsTheme.BrMuted; tb2.FontWeight = FontWeights.SemiBold; }
+                }
+            }
+            foreach (var p in new[] { _body, _panTeam, _panMine })
+                if (p != null) p.Visibility = Visibility.Collapsed;
+
+            _activeTab = tab; _activePanel = panel;
+            var ac = (Color)tab.Tag;
+            tab.BorderBrush = new SolidColorBrush(ac); tab.Background = MeToolsTheme.BrSurface;
+            if (tab.Child is Border apill)
+            {
+                apill.Background = new SolidColorBrush(ac);
+                if (apill.Child is TextBlock atb) { atb.Foreground = new SolidColorBrush(Color.FromRgb(230, 245, 245)); atb.FontWeight = FontWeights.Bold; }
+            }
+            if (panel != null) panel.Visibility = Visibility.Visible;
+
+            // Filters only apply to the Activity tab.
+            if (_filterBar != null) _filterBar.Visibility = (panel == _body) ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        // ── Activity tab ─────────────────────────────────────────────────────
         private void SetActionFilter(ActivityAction? action)
         {
             _actionFilter = action;
@@ -360,6 +503,323 @@ namespace METools.ActivityLog
             catch (Exception ex)
             {
                 StatusLeft.Text = string.Format(S._("activitylog.export_failed"), ex.Message);
+            }
+        }
+
+        // ── Team Totals / My Sessions tabs (ported from the standalone Time
+        // Tracker window; logic unchanged, just living here now) ────────────
+
+        private bool FolderNotConfigured() =>
+            string.IsNullOrWhiteSpace(METools.Comments.CommentsStorage.GetSharedFolder());
+
+        private void RenderTeam()
+        {
+            if (_panTeam == null) return;
+            _panTeam.Children.Clear();
+            if (FolderNotConfigured()) _panTeam.Children.Add(InfoBox(S._("timetracker.no_folder_warning")));
+
+            if (_ttAll.Count == 0)
+            {
+                _panTeam.Children.Add(NoTimeDataText());
+                return;
+            }
+
+            var totals = _ttAll
+                .GroupBy(x => string.IsNullOrWhiteSpace(x.User) ? S._("timetracker.unknown_user") : x.User,
+                          StringComparer.OrdinalIgnoreCase)
+                .Select(g => new
+                {
+                    User          = g.Key,
+                    TotalSeconds  = g.Sum(x => x.DurationSeconds),
+                    SessionCount  = g.Count(),
+                    LastActiveUtc = g.Max(x => x.EndUtc),
+                })
+                .OrderByDescending(x => x.TotalSeconds)
+                .ToList();
+
+            _panTeam.Children.Add(TeamHeaderRow());
+            foreach (var row in totals)
+            {
+                bool isMe = string.Equals(row.User, _currentUser, StringComparison.OrdinalIgnoreCase);
+                _panTeam.Children.Add(TeamRow(row.User, row.TotalSeconds, row.SessionCount, row.LastActiveUtc.ToLocalTime(), isMe));
+            }
+        }
+
+        private Border TeamHeaderRow()
+        {
+            var g = TeamRowGrid();
+            g.Children.Add(HeaderCell(S._("timetracker.col_user"), 0));
+            g.Children.Add(HeaderCell(S._("timetracker.col_total"), 1));
+            g.Children.Add(HeaderCell(S._("timetracker.col_sessions"), 2));
+            g.Children.Add(HeaderCell(S._("timetracker.col_last_active"), 3));
+            return new Border
+            {
+                BorderBrush = MeToolsTheme.BrBorder, BorderThickness = new Thickness(0, 0, 0, 1),
+                Padding = new Thickness(2, 0, 2, 6), Margin = new Thickness(0, 0, 0, 4),
+                Child = g,
+            };
+        }
+
+        private static TextBlock HeaderCell(string text, int col)
+        {
+            var tb = new TextBlock
+            {
+                Text = text, FontSize = 11, FontWeight = FontWeights.SemiBold,
+                Foreground = MeToolsTheme.BrSecText, VerticalAlignment = VerticalAlignment.Center,
+            };
+            Grid.SetColumn(tb, col);
+            return tb;
+        }
+
+        private static Grid TeamRowGrid()
+        {
+            var g = new Grid();
+            g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(90) });
+            g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(70) });
+            g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(120) });
+            return g;
+        }
+
+        private Border TeamRow(string user, double totalSeconds, int sessionCount, DateTime lastActiveLocal, bool isMe)
+        {
+            var g = TeamRowGrid();
+            g.Margin = new Thickness(0, 6, 0, 6);
+
+            var userText = new TextBlock
+            {
+                Text = user, FontSize = 12,
+                FontWeight = isMe ? FontWeights.Bold : FontWeights.Normal,
+                Foreground = isMe ? MeToolsTheme.BrPetrol : MeToolsTheme.BrText,
+                VerticalAlignment = VerticalAlignment.Center,
+            };
+            Grid.SetColumn(userText, 0);
+
+            var totalText = new TextBlock
+            {
+                Text = FormatDuration(totalSeconds), FontSize = 12, FontWeight = FontWeights.Bold,
+                Foreground = MeToolsTheme.BrText, VerticalAlignment = VerticalAlignment.Center,
+            };
+            Grid.SetColumn(totalText, 1);
+
+            var countText = new TextBlock
+            {
+                Text = sessionCount.ToString(), FontSize = 12, Foreground = MeToolsTheme.BrMuted,
+                VerticalAlignment = VerticalAlignment.Center,
+            };
+            Grid.SetColumn(countText, 2);
+
+            var lastText = new TextBlock
+            {
+                Text = lastActiveLocal.ToString("yyyy-MM-dd HH:mm"), FontSize = 11, Foreground = MeToolsTheme.BrMuted,
+                VerticalAlignment = VerticalAlignment.Center,
+            };
+            Grid.SetColumn(lastText, 3);
+
+            g.Children.Add(userText); g.Children.Add(totalText); g.Children.Add(countText); g.Children.Add(lastText);
+
+            return new Border
+            {
+                BorderBrush = MeToolsTheme.BrBorder, BorderThickness = new Thickness(0, 0, 0, 1),
+                Padding = new Thickness(2, 0, 2, 0), Child = g,
+            };
+        }
+
+        private void RenderMine()
+        {
+            if (_panMine == null) return;
+            _panMine.Children.Clear();
+            if (FolderNotConfigured()) _panMine.Children.Add(InfoBox(S._("timetracker.no_folder_warning")));
+
+            // Answers "how do I even start it" directly -- confirms tracking
+            // is already running for the document that's open right now,
+            // without waiting for it to close first.
+            if (_liveSessionStartUtc.HasValue)
+                _panMine.Children.Add(LiveSessionBanner(_liveSessionStartUtc.Value));
+
+            var mine = _ttAll
+                .Where(x => string.Equals(x.User, _currentUser, StringComparison.OrdinalIgnoreCase))
+                .OrderByDescending(x => x.StartUtc)
+                .ToList();
+
+            if (mine.Count == 0)
+            {
+                _panMine.Children.Add(NoTimeDataText());
+                return;
+            }
+
+            var days = mine
+                .GroupBy(x => x.StartLocal.Date)
+                .OrderByDescending(g => g.Key)
+                .ToList();
+
+            bool first = true;
+            foreach (var day in days)
+            {
+                _panMine.Children.Add(DayGroup(day.Key, day.ToList(), expandedByDefault: first));
+                first = false;
+            }
+        }
+
+        private Border LiveSessionBanner(DateTime startUtc)
+        {
+            var elapsed = DateTime.UtcNow - startUtc;
+            var c = MeToolsTheme.CGreen;
+            return new Border
+            {
+                Background = new SolidColorBrush(Color.FromArgb(30, c.R, c.G, c.B)),
+                BorderBrush = new SolidColorBrush(c), BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(4), Padding = new Thickness(10, 7, 10, 7),
+                Margin = new Thickness(0, 0, 0, 10),
+                Child = new TextBlock
+                {
+                    Text = string.Format(S._("timetracker.live_session"), FormatDuration(Math.Max(0, elapsed.TotalSeconds))),
+                    FontSize = 11.5, FontWeight = FontWeights.SemiBold, Foreground = new SolidColorBrush(c),
+                    TextWrapping = TextWrapping.Wrap,
+                },
+            };
+        }
+
+        private Border DayGroup(DateTime date, List<METools.TimeTracker.TimeSessionEntry> sessions, bool expandedByDefault)
+        {
+            double dayTotal = sessions.Sum(s => s.DurationSeconds);
+
+            var sessionList = new StackPanel
+            {
+                Margin = new Thickness(0, 6, 0, 4),
+                Visibility = expandedByDefault ? Visibility.Visible : Visibility.Collapsed,
+            };
+            foreach (var s in sessions)
+                sessionList.Children.Add(SessionRow(s));
+
+            var chevron = new TextBlock
+            {
+                Text = expandedByDefault ? "\u25BE" : "\u25B8", FontSize = 11,
+                Foreground = MeToolsTheme.BrMuted, Width = 16, VerticalAlignment = VerticalAlignment.Center,
+            };
+
+            var dateText = new TextBlock
+            {
+                Text = date.ToString("dddd, d MMMM yyyy"), FontSize = 12, FontWeight = FontWeights.SemiBold,
+                Foreground = MeToolsTheme.BrText, VerticalAlignment = VerticalAlignment.Center,
+            };
+
+            var totalText = new TextBlock
+            {
+                Text = string.Format(S._("timetracker.daily_total"), FormatDuration(dayTotal)),
+                FontSize = 11, FontWeight = FontWeights.Bold, Foreground = MeToolsTheme.BrPetrol,
+                VerticalAlignment = VerticalAlignment.Center,
+            };
+
+            var headerGrid = new Grid { Margin = new Thickness(4, 6, 4, 6) };
+            headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            var left = new StackPanel { Orientation = Orientation.Horizontal };
+            left.Children.Add(chevron);
+            left.Children.Add(dateText);
+            Grid.SetColumn(left, 0);
+            Grid.SetColumn(totalText, 2);
+            headerGrid.Children.Add(left);
+            headerGrid.Children.Add(totalText);
+
+            var header = new Border
+            {
+                Background = MeToolsTheme.BrHeader, CornerRadius = new CornerRadius(4),
+                Cursor = System.Windows.Input.Cursors.Hand, Child = headerGrid,
+            };
+            header.MouseLeftButtonDown += (s, e) =>
+            {
+                bool nowVisible = sessionList.Visibility != Visibility.Visible;
+                sessionList.Visibility = nowVisible ? Visibility.Visible : Visibility.Collapsed;
+                chevron.Text = nowVisible ? "\u25BE" : "\u25B8";
+            };
+
+            var outer = new StackPanel { Margin = new Thickness(0, 0, 0, 8) };
+            outer.Children.Add(header);
+            outer.Children.Add(sessionList);
+            return new Border { Child = outer };
+        }
+
+        private Grid SessionRow(METools.TimeTracker.TimeSessionEntry s)
+        {
+            var g = new Grid { Margin = new Thickness(20, 2, 4, 2) };
+            g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            string range = $"{s.StartLocal:HH:mm} \u2013 {s.EndLocal:HH:mm}";
+            if (s.Recovered) range += "  " + S._("timetracker.recovered_tag");
+
+            var rangeText = new TextBlock
+            {
+                Text = range, FontSize = 11.5,
+                Foreground = s.Recovered ? MeToolsTheme.BrMuted : MeToolsTheme.BrText,
+                FontStyle  = s.Recovered ? FontStyles.Italic : FontStyles.Normal,
+                VerticalAlignment = VerticalAlignment.Center,
+            };
+            Grid.SetColumn(rangeText, 0);
+
+            var durText = new TextBlock
+            {
+                Text = FormatDuration(s.DurationSeconds), FontSize = 11.5, FontWeight = FontWeights.SemiBold,
+                Foreground = MeToolsTheme.BrMuted, VerticalAlignment = VerticalAlignment.Center,
+            };
+            Grid.SetColumn(durText, 1);
+
+            g.Children.Add(rangeText); g.Children.Add(durText);
+            return g;
+        }
+
+        private TextBlock NoTimeDataText() => new TextBlock
+        {
+            Text = S._("timetracker.no_data"), FontSize = 12, Foreground = MeToolsTheme.BrMuted,
+            HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 30, 0, 0),
+        };
+
+        // Rounds to the nearest minute for display -- sessions are only ever
+        // logged at 30s or longer (see TimeTrackerWatcher.MIN_SESSION_SECONDS),
+        // so Math.Max(1, ...) guarantees a 30-45s session still reads "1m"
+        // rather than rounding down to "0m" via banker's rounding.
+        private static string FormatDuration(double totalSeconds)
+        {
+            int totalMinutes = totalSeconds > 0
+                ? Math.Max(1, (int)Math.Round(totalSeconds / 60.0, MidpointRounding.AwayFromZero))
+                : 0;
+            int h = totalMinutes / 60;
+            int m = totalMinutes % 60;
+            return h > 0
+                ? string.Format(S._("timetracker.duration_hm"), h, m)
+                : string.Format(S._("timetracker.duration_m"), m);
+        }
+
+        private void ExportTimeTrackerCsv()
+        {
+            try
+            {
+                var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "METools");
+                Directory.CreateDirectory(dir);
+                var path = Path.Combine(dir, "time_tracker_" + DateTime.Now.ToString("yyyyMMdd_HHmmss") + ".csv");
+
+                var sb = new StringBuilder();
+                sb.AppendLine("StartLocal,EndLocal,DurationMinutes,User,Recovered");
+                foreach (var e in _ttAll.OrderByDescending(x => x.StartUtc))
+                {
+                    sb.AppendLine(string.Join(",", new[]
+                    {
+                        Csv(e.StartLocal.ToString("yyyy-MM-dd HH:mm:ss")),
+                        Csv(e.EndLocal.ToString("yyyy-MM-dd HH:mm:ss")),
+                        Csv(Math.Round(e.DurationSeconds / 60.0, 1).ToString(System.Globalization.CultureInfo.InvariantCulture)),
+                        Csv(e.User),
+                        Csv(e.Recovered ? "yes" : "no"),
+                    }));
+                }
+
+                File.WriteAllText(path, sb.ToString(), new UTF8Encoding(true));
+                StatusLeft.Text = string.Format(S._("timetracker.exported"), Path.GetFileName(path));
+            }
+            catch (Exception ex)
+            {
+                StatusLeft.Text = string.Format(S._("timetracker.export_failed"), ex.Message);
             }
         }
 

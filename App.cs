@@ -226,44 +226,29 @@ namespace METools
             var cmtButton = panelTeam.AddItem(cmtBtn) as PushButton;
             RibbonThemeWatcher.Register(cmtButton, "icon_comments");
 
-            // -- Activity Log --------------------------------------------------
+            panelTeam.AddSeparator();
+
+            // -- Activity Log & Time Tracker ------------------------------------
+            // Time Tracker used to be its own button here; merged into this one
+            // as two extra tabs ("Team Totals" / "My Sessions") since it's the
+            // same underlying idea as Activity Log -- per-user, per-project
+            // history read from the same shared folder. Background tracking is
+            // unaffected; only the entry point moved.
             var alBtn = new PushButtonData(
-                "ActivityLog", "Activity\nLog", dll,
+                "ActivityLog", "Activity\n& Time", dll,
                 "METools.ActivityLog.ActivityLogCommand")
             {
-                ToolTip         = "See who added, modified, or deleted which electrical/MEP elements, and when.",
-                LongDescription = $"Activity Log -- {VENDOR}\n\nTracks Added/Modified/Deleted elements across the electrical/MEP categories ElecTriX works with, per user, per session.\n\n" +
-                                  "* Uses the same shared folder as Comments -- nothing extra to configure if that's already set up\n" +
-                                  "* Filter by user, action, or a text search (category/family/type/element id)\n" +
-                                  "* Export to CSV\n\n" +
-                                  "Deleted elements show what they WERE (category, family, type, level) even though the element itself is already gone by the time it's logged.",
+                ToolTip         = "See who added, modified, or deleted which elements and when -- plus time spent per user, per project.",
+                LongDescription = $"Activity Log & Time Tracker -- {VENDOR}\n\nThree tabs, one shared folder:\n\n" +
+                                  "* Activity: Added/Modified/Deleted elements across the electrical/MEP categories ElecTriX works with, per user, per session. Filter by user, action, or a text search; export to CSV.\n" +
+                                  "* Team Totals: total time, session count, and last activity for every teammate on this project.\n" +
+                                  "* My Sessions: your own daily totals with an expandable per-session breakdown. A session that never closed cleanly (e.g. a crash) is recovered from its last heartbeat and marked accordingly, rather than lost.\n\n" +
+                                  "Uses the same shared folder as Comments -- nothing extra to configure if that's already set up.",
                 Image           = LoadIcon("icon_activitylog_light_16.png") ?? LoadIcon("icon_comments_light_16.png"),
                 LargeImage      = LoadIcon("icon_activitylog_light_32.png") ?? LoadIcon("icon_comments_light_32.png"),
             };
             var alButton = panelTeam.AddItem(alBtn) as PushButton;
             RibbonThemeWatcher.Register(alButton, "icon_activitylog");
-
-            // -- Time Tracker --------------------------------------------------
-            // NOTE: reuses the Activity Log icon set as a placeholder (no
-            // dedicated icon_timetracker_* asset exists yet) -- add one in the
-            // same two-tone style (white/light-grey outline, one mint-teal
-            // accent, e.g. a clock's hands) and swap the LoadIcon calls below.
-            var ttBtn = new PushButtonData(
-                "TimeTracker", "Time\nTracker", dll,
-                "METools.TimeTracker.TimeTrackerCommand")
-            {
-                ToolTip         = "See how much time you and your team have spent on this project.",
-                LongDescription = $"Time Tracker -- {VENDOR}\n\nTracks time spent per user, per project, from opening a model to closing it.\n\n" +
-                                  "* Uses the same shared folder as Comments -- nothing extra to configure if that's already set up\n" +
-                                  "* Team Totals: total time, session count, and last activity for every teammate on this project\n" +
-                                  "* My Sessions: your own daily totals with an expandable per-session breakdown\n" +
-                                  "* Export to CSV\n\n" +
-                                  "A session that never closed cleanly (e.g. a crash) is recovered from its last heartbeat and marked accordingly, rather than lost.",
-                Image           = LoadIcon("icon_activitylog_light_16.png"),
-                LargeImage      = LoadIcon("icon_activitylog_light_32.png"),
-            };
-            var ttButton = panelTeam.AddItem(ttBtn) as PushButton;
-            RibbonThemeWatcher.Register(ttButton, "icon_activitylog");
 
             // Apply the correct light/dark icon set right now based on Revit's
             // current theme, and subscribe so it stays in sync if the user

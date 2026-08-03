@@ -51,6 +51,17 @@ namespace METools.TimeTracker
         private static readonly Dictionary<Document, SessionState> _sessions
             = new Dictionary<Document, SessionState>();
 
+        // Read-only lookup, safe to call directly from UI code (no
+        // ExternalEvent needed -- this only touches the in-memory
+        // dictionary above, never the Revit API). Lets the window show a
+        // "currently tracking" indicator for the open document instead of
+        // looking inert until the first session actually finishes.
+        public static DateTime? GetCurrentSessionStart(Document doc)
+        {
+            if (doc != null && _sessions.TryGetValue(doc, out var state)) return state.StartUtc;
+            return null;
+        }
+
         public static void Register(UIControlledApplication app)
         {
             app.ControlledApplication.DocumentOpened  += OnDocumentOpened;

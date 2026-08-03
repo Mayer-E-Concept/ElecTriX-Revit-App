@@ -470,7 +470,7 @@ namespace METools
             ["transfer.nothing_copied"] = "Nothing copied.",
 
             // ── Activity Log window ─────────────────────────────────────────
-            ["activitylog.title"]      = "ElectriX -- Activity Log",
+            ["activitylog.title"]      = "ElectriX -- Activity & Time",
             ["activitylog.loading"]    = "Loading...",
             ["activitylog.export_csv"] = "Export CSV",
             ["activitylog.refresh"]    = "Refresh",
@@ -494,6 +494,7 @@ namespace METools
             ["activitylog.switched_level"]  = "Switched to that level's floor plan.",
             ["activitylog.couldnt_go"] = "Couldn't go there: {0}",
             ["activitylog.entries_count"] = "{0} entries.",
+            ["activitylog.tab_activity"] = "Activity",
             ["activitylog.no_folder_warning"] = "No shared folder configured yet -- Activity Log uses the same shared folder as Comments. Set it once from the Comments tool's own Settings, and both features start working from then on.",
             ["activitylog.exported"]  = "Exported: Documents\\METools\\{0}",
             ["activitylog.export_failed"] = "Export failed: {0}",
@@ -517,6 +518,7 @@ namespace METools
             ["timetracker.no_folder_warning"] = "No shared folder configured yet -- Time Tracker uses the same shared folder as Comments. Set it once from the Comments tool's own Settings, and all three features start working from then on.",
             ["timetracker.entries_count"] = "{0} sessions logged.",
             ["timetracker.daily_total"]   = "Total: {0}",
+            ["timetracker.live_session"]  = "Currently tracking this document -- {0} so far.",
             ["timetracker.recovered_tag"] = "(recovered)",
             ["timetracker.duration_hm"]   = "{0}h {1}m",
             ["timetracker.duration_m"]    = "{0}m",
@@ -1254,7 +1256,7 @@ namespace METools
             ["transfer.nothing_copied"] = "Nichts kopiert.",
 
             // ── Activity Log window ─────────────────────────────────────────
-            ["activitylog.title"]      = "ElectriX -- Aktivitätsprotokoll",
+            ["activitylog.title"]      = "ElectriX -- Aktivität & Zeit",
             ["activitylog.loading"]    = "Wird geladen...",
             ["activitylog.export_csv"] = "CSV exportieren",
             ["activitylog.refresh"]    = "Aktualisieren",
@@ -1278,6 +1280,7 @@ namespace METools
             ["activitylog.switched_level"]  = "Zum Grundriss dieser Ebene gewechselt.",
             ["activitylog.couldnt_go"] = "Konnte nicht dorthin wechseln: {0}",
             ["activitylog.entries_count"] = "{0} Einträge.",
+            ["activitylog.tab_activity"] = "Aktivität",
             ["activitylog.no_folder_warning"] = "Noch kein gemeinsamer Ordner konfiguriert -- Activity Log verwendet denselben gemeinsamen Ordner wie Comments. Einmal in den Comments-Einstellungen festlegen, dann funktionieren beide Funktionen ab sofort.",
             ["activitylog.exported"]  = "Exportiert: Documents\\METools\\{0}",
             ["activitylog.export_failed"] = "Export fehlgeschlagen: {0}",
@@ -1301,6 +1304,7 @@ namespace METools
             ["timetracker.no_folder_warning"] = "Noch kein gemeinsamer Ordner konfiguriert -- Zeiterfassung verwendet denselben gemeinsamen Ordner wie Comments. Einmal in den Comments-Einstellungen festlegen, dann funktionieren alle drei Funktionen ab sofort.",
             ["timetracker.entries_count"] = "{0} Sitzungen erfasst.",
             ["timetracker.daily_total"]   = "Gesamt: {0}",
+            ["timetracker.live_session"]  = "Gerade erfasst -- {0} bisher in diesem Dokument.",
             ["timetracker.recovered_tag"] = "(wiederhergestellt)",
             ["timetracker.duration_hm"]   = "{0} Std {1} Min",
             ["timetracker.duration_m"]    = "{0} Min",
@@ -2035,7 +2039,7 @@ namespace METools
             ["transfer.nothing_copied"] = "Nimic copiat.",
 
             // ── Activity Log window ─────────────────────────────────────────
-            ["activitylog.title"]      = "ElectriX -- Jurnal de activitate",
+            ["activitylog.title"]      = "ElectriX -- Activitate si timp",
             ["activitylog.loading"]    = "Se incarca...",
             ["activitylog.export_csv"] = "Export CSV",
             ["activitylog.refresh"]    = "Reimprospatare",
@@ -2059,6 +2063,7 @@ namespace METools
             ["activitylog.switched_level"]  = "S-a comutat la planul acelui nivel.",
             ["activitylog.couldnt_go"] = "Nu s-a putut ajunge acolo: {0}",
             ["activitylog.entries_count"] = "{0} intrari.",
+            ["activitylog.tab_activity"] = "Activitate",
             ["activitylog.no_folder_warning"] = "Niciun folder partajat configurat inca -- Activity Log foloseste acelasi folder partajat ca Comments. Setati-l o data in setarile Comments, iar ambele functii vor incepe sa functioneze de atunci.",
             ["activitylog.exported"]  = "Exportat: Documents\\METools\\{0}",
             ["activitylog.export_failed"] = "Export esuat: {0}",
@@ -2082,6 +2087,7 @@ namespace METools
             ["timetracker.no_folder_warning"] = "Niciun folder partajat configurat inca -- Cronometru timp foloseste acelasi folder partajat ca Comments. Setati-l o data in setarile Comments, iar toate cele trei functii vor incepe sa functioneze de atunci.",
             ["timetracker.entries_count"] = "{0} sesiuni inregistrate.",
             ["timetracker.daily_total"]   = "Total: {0}",
+            ["timetracker.live_session"]  = "Se inregistreaza -- {0} pana acum in acest document.",
             ["timetracker.recovered_tag"] = "(recuperat)",
             ["timetracker.duration_hm"]   = "{0}h {1}m",
             ["timetracker.duration_m"]    = "{0}m",
