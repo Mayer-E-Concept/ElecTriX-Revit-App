@@ -34,6 +34,8 @@ namespace METools
                     METools.Comments.CommentsCommand.Open(app);
                 else if (Target == "ActivityLog")
                     METools.ActivityLog.ActivityLogCommand.Open(app);
+                else if (Target == "TimeTracker")
+                    METools.TimeTracker.TimeTrackerCommand.Open(app);
             }
             catch { }
         }
@@ -81,6 +83,7 @@ namespace METools
                 ("Statistics",    "Statistics"),
                 ("Comments",      "Comments"),
                 ("ActivityLog",   "Activity Log"),
+                ("TimeTracker",   "Time Tracker"),
             };
 
         private static AppSwitchHandler _handler;

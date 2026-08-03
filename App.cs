@@ -34,6 +34,10 @@ namespace METools
             // user, shared folder same as Comments) -------------------------
             METools.ActivityLog.ActivityLogWatcher.Register(app);
 
+            // -- Time Tracker background tracker (per-project, per-user time
+            // open->close, shared folder same as Comments) -------------------
+            METools.TimeTracker.TimeTrackerWatcher.Register(app);
+
             // -- Circuit Tagger: detects a previously-tagged apartment being
             // duplicated (Copy/Paste, Mirror, Array, Group placement) and
             // prompts for a new House/Apartment so it doesn't merge into the
@@ -238,6 +242,28 @@ namespace METools
             };
             var alButton = panelTeam.AddItem(alBtn) as PushButton;
             RibbonThemeWatcher.Register(alButton, "icon_activitylog");
+
+            // -- Time Tracker --------------------------------------------------
+            // NOTE: reuses the Activity Log icon set as a placeholder (no
+            // dedicated icon_timetracker_* asset exists yet) -- add one in the
+            // same two-tone style (white/light-grey outline, one mint-teal
+            // accent, e.g. a clock's hands) and swap the LoadIcon calls below.
+            var ttBtn = new PushButtonData(
+                "TimeTracker", "Time\nTracker", dll,
+                "METools.TimeTracker.TimeTrackerCommand")
+            {
+                ToolTip         = "See how much time you and your team have spent on this project.",
+                LongDescription = $"Time Tracker -- {VENDOR}\n\nTracks time spent per user, per project, from opening a model to closing it.\n\n" +
+                                  "* Uses the same shared folder as Comments -- nothing extra to configure if that's already set up\n" +
+                                  "* Team Totals: total time, session count, and last activity for every teammate on this project\n" +
+                                  "* My Sessions: your own daily totals with an expandable per-session breakdown\n" +
+                                  "* Export to CSV\n\n" +
+                                  "A session that never closed cleanly (e.g. a crash) is recovered from its last heartbeat and marked accordingly, rather than lost.",
+                Image           = LoadIcon("icon_activitylog_light_16.png"),
+                LargeImage      = LoadIcon("icon_activitylog_light_32.png"),
+            };
+            var ttButton = panelTeam.AddItem(ttBtn) as PushButton;
+            RibbonThemeWatcher.Register(ttButton, "icon_activitylog");
 
             // Apply the correct light/dark icon set right now based on Revit's
             // current theme, and subscribe so it stays in sync if the user
