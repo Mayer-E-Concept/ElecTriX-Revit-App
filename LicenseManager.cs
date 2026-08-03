@@ -247,7 +247,7 @@ namespace METools
         // cannot create one. Codes are minted by the KeyGenerator tool, which
         // holds the matching private key (kept off all distributed binaries).
         // Paste the public key printed by the KeyGenerator on first run here:
-        private const string PublicKeyB64 = "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEfBHkyEUG5YanO0U5o9HAPbQhFwGWi1zwx8Yo83Xny4hErUrSDipnNTcorMaYQUh/18ptEJffYJadMZmullQjMA==";
+        private const string PublicKeyB64 = "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEuvrvG2ZCle+aqGFvfttq/q0dCVJHFgvY/JwzolT2KCHGrE0fFPnJFLUQaQACrbwBsHdyaTJ2KFuvO7EP+kOwhA==";
 
         // Payload signed by the generator: "MACHINEID|TYPE|EXPIRY"
         //   TYPE   : P = permanent, Y = 1 year, E = 30-day extension

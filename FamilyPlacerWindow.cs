@@ -144,6 +144,7 @@ namespace METools.FamilyPlacer
             tplRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             tplRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             tplRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            tplRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
             _tplCombo = StyledCombo(30, 12);
             RefreshTemplateCombo();
@@ -154,12 +155,17 @@ namespace METools.FamilyPlacer
             btnSave.Margin = new Thickness(5, 0, 0, 0);
             Grid.SetColumn(btnSave, 1);
 
+            var btnRename = MakeIconBtn("\uE8AC", S._("placer.rename_tpl_tip"), RenameTemplate);
+            btnRename.Margin = new Thickness(4, 0, 0, 0);
+            Grid.SetColumn(btnRename, 2);
+
             var btnDel = MakeIconBtn("\uE74D", S._("placer.delete_tpl"), DeleteTemplate);
             btnDel.Margin = new Thickness(4, 0, 0, 0);
-            Grid.SetColumn(btnDel, 2);
+            Grid.SetColumn(btnDel, 3);
 
             tplRow.Children.Add(_tplCombo);
             tplRow.Children.Add(btnSave);
+            tplRow.Children.Add(btnRename);
             tplRow.Children.Add(btnDel);
             body.Children.Add(tplRow);
 
@@ -623,6 +629,37 @@ namespace METools.FamilyPlacer
 
             // Re-select the saved template
             var idx = _templates.FindIndex(t => t.Name == name);
+            if (idx >= 0) _tplCombo.SelectedIndex = idx + 1;
+        }
+
+        // Renames the currently-selected template in place -- same identity
+        // (Slots/Orientation untouched), just a new Name, then re-saved and
+        // re-selected under its new name so the combo doesn't lose the
+        // selection out from under the user.
+        private void RenameTemplate()
+        {
+            if (_tplCombo.SelectedIndex <= 0) return; // nothing selected -- same guard as Delete
+            var tpl = _templates[_tplCombo.SelectedIndex - 1];
+
+            var dlg = new SaveTemplateDialog(
+                S._("placer.rename_tpl_title"), S._("placer.tpl_name"), S._("placer.rename_tpl"), tpl.Name);
+            if (dlg.ShowDialog() != true) return;
+
+            var newName = (dlg.TemplateName ?? "").Trim();
+            if (newName.Length == 0 || newName == tpl.Name) return;
+
+            if (_templates.Any(t => t != tpl && string.Equals(t.Name, newName, StringComparison.OrdinalIgnoreCase)))
+            {
+                MessageBox.Show(string.Format(S._("placer.rename_tpl_conflict"), newName),
+                    "ME-Tools", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            tpl.Name = newName;
+            TemplateManager.Save(_templates);
+            RefreshTemplateCombo();
+
+            var idx = _templates.FindIndex(t => t == tpl);
             if (idx >= 0) _tplCombo.SelectedIndex = idx + 1;
         }
 
@@ -1525,9 +1562,9 @@ namespace METools.FamilyPlacer
     {
         public string TemplateName { get; private set; }
 
-        public SaveTemplateDialog()
+        public SaveTemplateDialog(string title = null, string label = null, string okText = null, string initialValue = null)
         {
-            Title  = S._("placer.save_tpl_title");
+            Title  = title ?? S._("placer.save_tpl_title");
             Width  = 320;
             SizeToContent = SizeToContent.Height;
             ResizeMode = ResizeMode.NoResize;
@@ -1536,10 +1573,10 @@ namespace METools.FamilyPlacer
             var sp = new StackPanel { Margin = new Thickness(14) };
             sp.Children.Add(new TextBlock
             {
-                Text = S._("placer.tpl_name"), FontSize = 12,
+                Text = label ?? S._("placer.tpl_name"), FontSize = 12,
                 Margin = new Thickness(0, 0, 0, 6)
             });
-            var tb = new TextBox { Height = 28, FontSize = 12 };
+            var tb = new TextBox { Height = 28, FontSize = 12, Text = initialValue ?? "" };
             sp.Children.Add(tb);
 
             var btnRow = new StackPanel
@@ -1553,7 +1590,7 @@ namespace METools.FamilyPlacer
                 Background = MeToolsTheme.BrBtnBg, Foreground = MeToolsTheme.BrText,
                 BorderBrush = MeToolsTheme.BrBtnBorder, BorderThickness = new Thickness(1),
                 Cursor = Cursors.Hand, Template = METools.MeToolsWindowBase.RoundedBtnTemplate() };
-            var ok = new Button { Content = S._("placer.save_tpl"), Height = 28, MinWidth = 80,
+            var ok = new Button { Content = okText ?? S._("placer.save_tpl"), Height = 28, MinWidth = 80,
                 IsDefault = true,
                 Background = MeToolsTheme.BrPetrol,
                 Foreground = Brushes.White,
@@ -1566,7 +1603,9 @@ namespace METools.FamilyPlacer
             sp.Children.Add(btnRow);
             Content = sp;
 
-            Loaded += (s, e) => tb.Focus();
+            // Pre-filled (rename case): focus and select-all so typing a new
+            // name overwrites immediately, rather than appending to the old one.
+            Loaded += (s, e) => { tb.Focus(); tb.SelectAll(); };
         }
     }
 }

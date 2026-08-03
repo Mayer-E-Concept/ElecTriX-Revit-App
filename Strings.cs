@@ -292,6 +292,10 @@ namespace METools
             ["placer.delete_tpl"]       = "Delete selected template",
             ["placer.save_tpl_tip"]     = "Save current config as template",
             ["placer.save_tpl_title"]   = "Save Template",
+            ["placer.rename_tpl_tip"]     = "Rename selected template",
+            ["placer.rename_tpl_title"]   = "Rename Template",
+            ["placer.rename_tpl"]         = "Rename",
+            ["placer.rename_tpl_conflict"] = "A template named \"{0}\" already exists.",
             ["placer.multi_place_hint"] = "Click each position - SPACEBAR rotates - ESC to finish.",
 
             // ── Project Health Check ────────────────────────────────────────
@@ -1072,6 +1076,10 @@ namespace METools
             ["placer.delete_tpl"]       = "Ausgewählte Vorlage löschen",
             ["placer.save_tpl_tip"]     = "Aktuelle Konfiguration als Vorlage speichern",
             ["placer.save_tpl_title"]   = "Vorlage speichern",
+            ["placer.rename_tpl_tip"]     = "Ausgewählte Vorlage umbenennen",
+            ["placer.rename_tpl_title"]   = "Vorlage umbenennen",
+            ["placer.rename_tpl"]         = "Umbenennen",
+            ["placer.rename_tpl_conflict"] = "Eine Vorlage mit dem Namen \"{0}\" existiert bereits.",
             ["placer.multi_place_hint"] = "Jede Position anklicken - LEERTASTE dreht - ESC zum Beenden.",
 
             // ── Project Health Check ────────────────────────────────────────
@@ -1849,6 +1857,10 @@ namespace METools
             ["placer.delete_tpl"]       = "Stergere sablon selectat",
             ["placer.save_tpl_tip"]     = "Salveaza configuratia curenta ca sablon",
             ["placer.save_tpl_title"]   = "Salvare sablon",
+            ["placer.rename_tpl_tip"]     = "Redenumire sablon selectat",
+            ["placer.rename_tpl_title"]   = "Redenumire sablon",
+            ["placer.rename_tpl"]         = "Redenumire",
+            ["placer.rename_tpl_conflict"] = "Exista deja un sablon numit \"{0}\".",
             ["placer.multi_place_hint"] = "Click pe fiecare pozitie - SPATIU roteste - ESC pentru finalizare.",
 
             // ── Project Health Check ────────────────────────────────────────
