@@ -120,61 +120,22 @@ namespace METools.FamilyPlacer
                 // once here and searched in-memory per point instead.
                 var allWalls = new FilteredElementCollector(doc).OfClass(typeof(Wall)).Cast<Wall>().ToList();
 
-                foreach (var firstInst in captured)
+                foreach (var nativeInst in captured)
                 {
-                    XYZ pt = GetPt(firstInst);
+                    XYZ pt = GetPt(nativeInst);
                     if (pt == null) continue;
 
-                    double angle = GetAngle(firstInst);
+                    double angle = GetAngle(nativeInst);
 
-                    // BUG FIXED HERE: this used to trust whatever level
-                    // Revit itself assigned to firstInst, only falling back
-                    // to the level selected in the app if that came back
-                    // empty. But firstInst is placed via Revit's own native
-                    // PromptForFamilyInstancePlacement, which takes no level
-                    // parameter at all -- for a family that isn't
-                    // geometrically level-hosted (wall-hosted here), Revit
-                    // assigns Schedule Level from its own internal default,
-                    // which in practice tracks whatever was last active in
-                    // the session, NOT the level selected in this app.
-                    // That's exactly "the first item gets the level of the
-                    // last placed item in the plan": every slot placed
-                    // AFTER the first one already used Request.LevelId
-                    // correctly, because they're placed with an explicit
-                    // level parameter (see below) -- only this first,
-                    // natively-placed instance was ever left uncorrected.
+                    // The level selected in the app wins, same as every
+                    // slot placed after this one -- see the recreation
+                    // below for why this one needs it explicitly too.
                     Level level = ResolveLevel(doc, Request.LevelId);
                     if (level == null)
                     {
-                        try { level = doc.GetElement(firstInst.LevelId) as Level; } catch { }
+                        try { level = doc.GetElement(nativeInst.LevelId) as Level; } catch { }
                     }
                     level = level ?? GetNearestLevel(allLevels, pt);
-
-                    // Correct the first instance's own Schedule Level too --
-                    // not just what subsequent slots use -- since nothing
-                    // else in this method ever touches firstInst itself.
-                    // By string name (matches this "Schedule Level" family's
-                    // English-UI label exactly, same technique already used
-                    // for "Niveau" below) rather than a guessed
-                    // BuiltInParameter -- if Revit's own UI language isn't
-                    // English on some other machine, this simply no-ops
-                    // rather than risk touching the wrong parameter; same
-                    // fallback-safe shape as the CatShort bug this codebase
-                    // already hit once before for the same reason.
-                    if (level != null)
-                    {
-                        try
-                        {
-                            var curLevelId = firstInst.LevelId;
-                            if (curLevelId == null || curLevelId == ElementId.InvalidElementId || curLevelId != level.Id)
-                            {
-                                var schedParam = firstInst.LookupParameter("Schedule Level");
-                                if (schedParam != null && !schedParam.IsReadOnly && schedParam.StorageType == StorageType.ElementId)
-                                    schedParam.Set(level.Id);
-                            }
-                        }
-                        catch { }
-                    }
 
                     var wall    = GetNearestWall(allWalls, pt);
                     var walkDir = WallDir(wall);
@@ -185,10 +146,10 @@ namespace METools.FamilyPlacer
                     XYZ       faceNormal = XYZ.BasisZ;
                     try
                     {
-                        isHosted = firstInst.Host != null;
+                        isHosted = nativeInst.Host != null;
                         if (isHosted)
                         {
-                            hostFace = firstInst.HostFace;
+                            hostFace = nativeInst.HostFace;
                             if (hostFace != null)
                             {
                                 var go = doc.GetElement(hostFace.ElementId)
@@ -208,6 +169,70 @@ namespace METools.FamilyPlacer
 
                     // Direction along wall or default
                     XYZ placeDir = walkDir.IsZeroLength() ? XYZ.BasisX : walkDir;
+
+                    // BUG FIXED HERE: nativeInst comes straight out of
+                    // Revit's own interactive PromptForFamilyInstancePlacement,
+                    // which takes no level parameter at all. For a family
+                    // that isn't geometrically level-hosted (wall-hosted
+                    // here), Revit assigns its level from its own internal
+                    // default, which in practice tracks whatever was last
+                    // active in the session -- NOT the level selected in
+                    // this app. That's exactly "the first item gets the
+                    // level of the last hand-placed item": every slot placed
+                    // AFTER this one already used the selected level
+                    // correctly, because they're created through an
+                    // overload that takes Level as an explicit constructor
+                    // argument (see the fallback chain a few lines below --
+                    // it's the same one used here). A first attempt at
+                    // fixing this tried to correct nativeInst's own level
+                    // parameter in place after the fact; that didn't survive
+                    // real testing, most likely because at least one
+                    // level-designating parameter on a freshly-created
+                    // family instance is read-only immediately after
+                    // creation via the API, full stop, regardless of how
+                    // soon or late it's touched -- a real, previously
+                    // reported Revit API limitation, not a timing issue.
+                    // Deleting and recreating at the exact same point/angle,
+                    // hosted the exact same way, sidesteps that entirely:
+                    // it's the exact mechanism already proven correct for
+                    // every slot after this one, just applied to this one too.
+                    FamilyInstance firstInst = null;
+                    if (isHosted && hostFace != null)
+                        try { firstInst = doc.Create.NewFamilyInstance(hostFace, pt, faceNormal, firstSym); } catch { }
+                    else if (levelPlaneRef != null)
+                        try { firstInst = doc.Create.NewFamilyInstance(levelPlaneRef, pt, placeDir, firstSym); } catch { }
+                    if (firstInst == null && wall != null)
+                        try { firstInst = doc.Create.NewFamilyInstance(pt, firstSym, wall, level, StructuralType.NonStructural); } catch { }
+                    if (firstInst == null && level != null)
+                        try { firstInst = doc.Create.NewFamilyInstance(pt, firstSym, level, StructuralType.NonStructural); } catch { }
+                    if (firstInst == null)
+                        try { firstInst = doc.Create.NewFamilyInstance(pt, firstSym, StructuralType.NonStructural); } catch { }
+
+                    if (firstInst == null)
+                    {
+                        // Recreation failed for some reason -- keep the
+                        // originally, natively-placed instance rather than
+                        // losing the placement entirely. Its level may still
+                        // be wrong in this fallback case.
+                        firstInst = nativeInst;
+                    }
+                    else
+                    {
+                        try { doc.Delete(nativeInst.Id); } catch { }
+                        doc.Regenerate();
+                        // Match the rotation the user actually picked
+                        // interactively -- same rotation-matching step
+                        // already used for every slot after this one.
+                        if (Math.Abs(angle) > 0.001)
+                        {
+                            try
+                            {
+                                var axis = Line.CreateBound(pt, pt + XYZ.BasisZ);
+                                ElementTransformUtils.RotateElement(doc, firstInst.Id, axis, angle);
+                            }
+                            catch { }
+                        }
+                    }
 
                     // Set params on first instance
                     SetNiveau(firstInst, slots[0].Height);
