@@ -980,6 +980,7 @@ namespace METools.FamilyPlacer
             BuildFamilyPicker(famType);
 
             _typeCmb = new ComboBox { Height = 22, FontSize = 10, Margin = new Thickness(0, 2, 0, 0), Background = METools.MeToolsTheme.BrInput, Foreground = METools.MeToolsTheme.BrText, BorderBrush = METools.MeToolsTheme.BrBorder, BorderThickness = new Thickness(1) };
+            _typeCmb.SelectionChanged += TypeChanged;
             RefreshTypes();
             if (!string.IsNullOrEmpty(Slot.TypeName))
             {
@@ -988,7 +989,6 @@ namespace METools.FamilyPlacer
             }
             _typeCmb.Template = METools.MeToolsWindowBase.MakeComboBoxTemplate();
             METools.MeToolsWindowBase.ApplyComboStyle(_typeCmb);
-            _typeCmb.SelectionChanged += TypeChanged;
             famType.Children.Add(_typeCmb);
 
             Grid.SetColumn(famType, 2); g.Children.Add(famType);
@@ -1341,7 +1341,17 @@ namespace METools.FamilyPlacer
 
             foreach (var t in FamilyLoader.GetTypeNames(_all, family))
                 _typeCmb.Items.Add(t);
-            if (_typeCmb.Items.Count > 0) _typeCmb.SelectedIndex = 0;
+            if (_typeCmb.Items.Count > 0)
+            {
+                _typeCmb.SelectedIndex = 0;
+                // Set directly rather than relying solely on SelectionChanged
+                // firing -- WPF doesn't reliably raise it for every
+                // programmatic SelectedIndex assignment (a family with a
+                // single type is the case that exposed this: nothing to
+                // click, so this was the *only* code path that could ever
+                // set Slot.TypeName, and it silently didn't).
+                Slot.TypeName = _typeCmb.Items[0] as string ?? "";
+            }
         }
 
         // Pre-fill the Niveau/height field from the selected family's own default.

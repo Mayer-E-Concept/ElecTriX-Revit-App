@@ -1366,7 +1366,33 @@ namespace METools.LampPlacer
         }
 
         // ── Host a lamp on the ceiling/floor face above the point ──────────
-        private FamilyInstance TryPlaceOnFace(Document doc, FamilySymbol sym, XYZ pt, View3D v3d)
+        //
+        // BUG FIXED HERE: this used to accept whatever ceiling/floor face
+        // the upward ray hit *nearest*, full stop -- with no check on how
+        // far away that face actually was, and no check on which level it
+        // belonged to. If the model has no ceiling modeled at the intended
+        // level directly above the point (a common, normal situation),
+        // the ray just kept travelling upward and locked onto the next
+        // floor slab it found -- often a completely different storey,
+        // several metres away. That's exactly "placed it on UKD and it
+        // got placed on top of FFB": the selected level was resolved
+        // correctly upstream, then silently discarded here in favour of
+        // "nearest face along a ray with no ceiling". It also explains the
+        // reported "no work plane or level, couldn't change anything" --
+        // that's standard, expected Revit behaviour for a face-hosted
+        // instance (its position is governed by the host face, so Revit
+        // makes Level/Elevation read-only for it), which only becomes a
+        // real problem once the host face is the wrong one.
+        //
+        // Now: (1) reject any hit farther than a realistic single-storey
+        // height, and (2) explicitly compare the hit element's own Level
+        // against the level being placed on, allowing only a small
+        // elevation slack (a ceiling modeled a bit above its own level is
+        // normal; a different storey's slab is metres away, not
+        // centimetres). Either check failing falls through to the
+        // Level-based placement path below instead of hosting on a
+        // clearly-wrong face.
+        private FamilyInstance TryPlaceOnFace(Document doc, FamilySymbol sym, XYZ pt, View3D v3d, Level expectedLevel)
         {
             try
             {
@@ -1377,8 +1403,26 @@ namespace METools.LampPlacer
                 var ri = new ReferenceIntersector(filter, FindReferenceTarget.Face, v3d);
                 var origin = new XYZ(pt.X, pt.Y, pt.Z - ToFeet(50));  // start just below the ceiling
                 var hit = ri.FindNearest(origin, XYZ.BasisZ);          // ray straight up
-                var faceRef = hit?.GetReference();
+
+                double maxSearch = ToFeet(6000); // 6 m -- comfortably covers any real ceiling height; excludes "a different storey"
+                if (hit == null || hit.Proximity > maxSearch) return null;
+
+                var faceRef = hit.GetReference();
                 if (faceRef == null) return null;
+
+                if (expectedLevel != null)
+                {
+                    var hostElem = doc.GetElement(faceRef.ElementId);
+                    var hostLevelId = hostElem?.LevelId;
+                    if (hostLevelId != null && hostLevelId != ElementId.InvalidElementId && hostLevelId != expectedLevel.Id)
+                    {
+                        var hostLevel = doc.GetElement(hostLevelId) as Level;
+                        double hostElev = hostLevel?.Elevation ?? double.MaxValue;
+                        if (Math.Abs(hostElev - expectedLevel.Elevation) > ToFeet(1500)) // > 1.5 m elevation gap => different storey, not this ceiling
+                            return null;
+                    }
+                }
+
                 var hitPt = origin + XYZ.BasisZ * hit.Proximity;
                 return doc.Create.NewFamilyInstance(faceRef, hitPt, XYZ.BasisX, sym);
             }
@@ -1392,9 +1436,9 @@ namespace METools.LampPlacer
             // Place on Face (opt-in): host on the ceiling/floor face above the point
             if (Request.Config.Surface == PlacementSurface.Face)
             {
-                var onFace = TryPlaceOnFace(doc, sym, pt, v3dForFacePlacement);
+                var onFace = TryPlaceOnFace(doc, sym, pt, v3dForFacePlacement, level);
                 if (onFace != null) { doc.Regenerate(); return onFace; }
-                // no face found -> fall through to work-plane placement below
+                // no valid face for this level found -> fall through to work-plane placement below
             }
 
             // pt.Z ist bereits auf ukdZ gesetzt — direkt platzieren
