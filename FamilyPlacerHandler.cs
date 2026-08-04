@@ -140,29 +140,23 @@ namespace METools.FamilyPlacer
                     var wall    = GetNearestWall(allWalls, pt);
                     var walkDir = WallDir(wall);
 
-                    // ★ Detect HOW the first family was placed (face vs workplane)
-                    bool isHosted = false;
-                    Reference hostFace   = null;
-                    XYZ       faceNormal = XYZ.BasisZ;
-                    try
-                    {
-                        isHosted = nativeInst.Host != null;
-                        if (isHosted)
-                        {
-                            hostFace = nativeInst.HostFace;
-                            if (hostFace != null)
-                            {
-                                var go = doc.GetElement(hostFace.ElementId)
-                                            ?.GetGeometryObjectFromReference(hostFace);
-                                if (go is Face f) faceNormal = f.ComputeNormal(UV.Zero);
-                            }
-                        }
-                    }
-                    catch { isHosted = false; }
-
-                    // ★ Get level plane reference for proper workplane-based placement
+                    // Face-hosting detection removed on purpose: it used to
+                    // detect however the native interactive click happened
+                    // to land (on/near any face -- wall, floor, ceiling) and
+                    // then apply that SAME hosting mode to every other slot
+                    // in the template, plus (after the level fix above) to
+                    // the recreated first instance too. That's exactly what
+                    // read as "it remembers face mode and applies it to the
+                    // whole template" -- it wasn't persisted state between
+                    // separate placements, just this same detected mode
+                    // consistently governing one whole placement action.
+                    // Family Placer now always goes work-plane-based first,
+                    // falling back to an explicit wall+level host (still
+                    // properly wall-attached, just via the overload that
+                    // takes Level directly rather than Revit's own
+                    // face-hosting default) and finally to a bare level.
                     Reference levelPlaneRef = null;
-                    if (!isHosted && level != null)
+                    if (level != null)
                     {
                         try { levelPlaneRef = level.GetPlaneReference(); } catch { }
                     }
@@ -192,14 +186,12 @@ namespace METools.FamilyPlacer
                     // creation via the API, full stop, regardless of how
                     // soon or late it's touched -- a real, previously
                     // reported Revit API limitation, not a timing issue.
-                    // Deleting and recreating at the exact same point/angle,
-                    // hosted the exact same way, sidesteps that entirely:
-                    // it's the exact mechanism already proven correct for
-                    // every slot after this one, just applied to this one too.
+                    // Deleting and recreating at the exact same point/angle
+                    // sidesteps that entirely: it's the exact mechanism
+                    // already proven correct for every slot after this one,
+                    // just applied to this one too.
                     FamilyInstance firstInst = null;
-                    if (isHosted && hostFace != null)
-                        try { firstInst = doc.Create.NewFamilyInstance(hostFace, pt, faceNormal, firstSym); } catch { }
-                    else if (levelPlaneRef != null)
+                    if (levelPlaneRef != null)
                         try { firstInst = doc.Create.NewFamilyInstance(levelPlaneRef, pt, placeDir, firstSym); } catch { }
                     if (firstInst == null && wall != null)
                         try { firstInst = doc.Create.NewFamilyInstance(pt, firstSym, wall, level, StructuralType.NonStructural); } catch { }
@@ -271,14 +263,9 @@ namespace METools.FamilyPlacer
 
                         FamilyInstance inst = null;
 
-                        if (isHosted && hostFace != null)
+                        if (levelPlaneRef != null)
                         {
-                            // Face-based: same host face as first instance
-                            try { inst = doc.Create.NewFamilyInstance(hostFace, placePt, faceNormal, sym); } catch { }
-                        }
-                        else if (levelPlaneRef != null)
-                        {
-                            // ★ Workplane-based: place ON the level plane → proper Arbeitsebene
+                            // Workplane-based: place ON the level plane → proper Arbeitsebene
                             try { inst = doc.Create.NewFamilyInstance(levelPlaneRef, placePt, placeDir, sym); } catch { }
                         }
 
