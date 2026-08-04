@@ -127,10 +127,54 @@ namespace METools.FamilyPlacer
 
                     double angle = GetAngle(firstInst);
 
-                    // Use actual level of placed instance
-                    Level level = null;
-                    try { level = doc.GetElement(firstInst.LevelId) as Level; } catch { }
-                    level = level ?? ResolveLevel(doc, Request.LevelId) ?? GetNearestLevel(allLevels, pt);
+                    // BUG FIXED HERE: this used to trust whatever level
+                    // Revit itself assigned to firstInst, only falling back
+                    // to the level selected in the app if that came back
+                    // empty. But firstInst is placed via Revit's own native
+                    // PromptForFamilyInstancePlacement, which takes no level
+                    // parameter at all -- for a family that isn't
+                    // geometrically level-hosted (wall-hosted here), Revit
+                    // assigns Schedule Level from its own internal default,
+                    // which in practice tracks whatever was last active in
+                    // the session, NOT the level selected in this app.
+                    // That's exactly "the first item gets the level of the
+                    // last placed item in the plan": every slot placed
+                    // AFTER the first one already used Request.LevelId
+                    // correctly, because they're placed with an explicit
+                    // level parameter (see below) -- only this first,
+                    // natively-placed instance was ever left uncorrected.
+                    Level level = ResolveLevel(doc, Request.LevelId);
+                    if (level == null)
+                    {
+                        try { level = doc.GetElement(firstInst.LevelId) as Level; } catch { }
+                    }
+                    level = level ?? GetNearestLevel(allLevels, pt);
+
+                    // Correct the first instance's own Schedule Level too --
+                    // not just what subsequent slots use -- since nothing
+                    // else in this method ever touches firstInst itself.
+                    // By string name (matches this "Schedule Level" family's
+                    // English-UI label exactly, same technique already used
+                    // for "Niveau" below) rather than a guessed
+                    // BuiltInParameter -- if Revit's own UI language isn't
+                    // English on some other machine, this simply no-ops
+                    // rather than risk touching the wrong parameter; same
+                    // fallback-safe shape as the CatShort bug this codebase
+                    // already hit once before for the same reason.
+                    if (level != null)
+                    {
+                        try
+                        {
+                            var curLevelId = firstInst.LevelId;
+                            if (curLevelId == null || curLevelId == ElementId.InvalidElementId || curLevelId != level.Id)
+                            {
+                                var schedParam = firstInst.LookupParameter("Schedule Level");
+                                if (schedParam != null && !schedParam.IsReadOnly && schedParam.StorageType == StorageType.ElementId)
+                                    schedParam.Set(level.Id);
+                            }
+                        }
+                        catch { }
+                    }
 
                     var wall    = GetNearestWall(allWalls, pt);
                     var walkDir = WallDir(wall);

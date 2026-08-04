@@ -1,17 +1,20 @@
 // ProjectTransferHandler.cs — ME-Tools | Project Transfer
 // Mayer E-Concept SRL
 //
-// Copies Filters, Views (Drafting/Legend only), Sheets and Schedules from the
-// active (source) project into another project that is either already open
-// in this Revit session, or opened from disk on demand.
+// Copies Filters, Views (Drafting/Legend only), View Templates, Sheets and
+// Schedules from the active (source) project into another project that is
+// either already open in this Revit session, or opened from disk on demand.
 //
 // Scope note: only Drafting Views and Legends are offered under "Views" —
 // Plan/Section/Elevation/3D views are tied to THIS project's own Levels and
 // Grids, so copying them into an unrelated project rarely produces a usable
 // result (this mirrors Revit's own native "Insert Views from File", which has
-// the same limitation). Sheets are copied together with whatever views/
-// schedules are placed on them (Revit brings those along automatically), but
-// a sheet holding plan/section/3D views inherits that same limitation.
+// the same limitation). View Templates don't have that problem at all —
+// they're just a bundle of override/visibility/filter settings, not tied to
+// any Level or Grid, so they're safe to copy regardless of which view TYPES
+// they apply to. Sheets are copied together with whatever views/schedules
+// are placed on them (Revit brings those along automatically), but a sheet
+// holding plan/section/3D views inherits that same limitation.
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -82,6 +85,21 @@ namespace METools.ProjectTransfer
                     {
                         Id = v.Id, Name = v.Name, Category = TransferCategory.Views,
                         SubInfo = v.ViewType == ViewType.DraftingView ? "Drafting View" : "Legend",
+                    }));
+            }
+            catch { }
+
+            try
+            {
+                items.AddRange(new FilteredElementCollector(doc)
+                    .OfClass(typeof(View))
+                    .Cast<View>()
+                    .Where(v => v.IsTemplate)
+                    .OrderBy(v => v.Name)
+                    .Select(v => new TransferItem
+                    {
+                        Id = v.Id, Name = v.Name, Category = TransferCategory.ViewTemplates,
+                        SubInfo = ViewTemplateViewTypeLabel(v),
                     }));
             }
             catch { }
@@ -180,6 +198,14 @@ namespace METools.ProjectTransfer
         private static string Plural(int n, string singular, string plural)
             => $"{n} {(n == 1 ? singular : plural)}";
 
+        // Friendly label for a view template's own view type -- "Floor Plan
+        // Template", "Section Template", etc. -- mirroring how regular Views
+        // show "Drafting View"/"Legend" as SubInfo.
+        private static string ViewTemplateViewTypeLabel(View v)
+        {
+            try { return $"{v.ViewType} Template"; } catch { return "Template"; }
+        }
+
         // ── Target document discovery ───────────────────────────────────────
         private void ListTargets(UIApplication app)
         {
@@ -265,18 +291,20 @@ namespace METools.ProjectTransfer
             // rest down with it — each gets its own SubTransaction.
             var buckets = new (string Label, List<ElementId> Ids)[]
             {
-                ("Filters",   new List<ElementId>()),
-                ("Views",     new List<ElementId>()),
-                ("Sheets",    new List<ElementId>()),
-                ("Schedules", new List<ElementId>()),
+                ("Filters",        new List<ElementId>()),
+                ("Views",          new List<ElementId>()),
+                ("View Templates", new List<ElementId>()),
+                ("Sheets",         new List<ElementId>()),
+                ("Schedules",      new List<ElementId>()),
             };
             foreach (var id in ids)
             {
                 var el = sourceDoc.GetElement(id);
-                if (el is ParameterFilterElement) buckets[0].Ids.Add(id);
-                else if (el is ViewSheet)          buckets[2].Ids.Add(id);
-                else if (el is ViewSchedule)        buckets[3].Ids.Add(id);
-                else if (el is View)                buckets[1].Ids.Add(id);
+                if (el is ParameterFilterElement)             buckets[0].Ids.Add(id);
+                else if (el is ViewSheet)                      buckets[3].Ids.Add(id);
+                else if (el is ViewSchedule)                    buckets[4].Ids.Add(id);
+                else if (el is View v && v.IsTemplate)          buckets[2].Ids.Add(id); // check before the generic View bucket below
+                else if (el is View)                            buckets[1].Ids.Add(id);
             }
 
             // Name-collision check, BEFORE copying anything: Revit's
@@ -305,9 +333,15 @@ namespace METools.ProjectTransfer
                 id => sourceDoc.GetElement(id).Name);
             var conflictViews     = FilterOutConflicts(buckets[1].Ids, id => targetViewNames.Contains(sourceDoc.GetElement(id).Name),
                 id => sourceDoc.GetElement(id).Name);
-            var conflictSheets    = FilterOutConflicts(buckets[2].Ids, id => targetSheetNumbers.Contains((sourceDoc.GetElement(id) as ViewSheet)?.SheetNumber ?? ""),
+            // View Templates share the same name-uniqueness namespace as
+            // regular Views in Revit (a template's name can't collide with
+            // a normal view's either), so targetViewNames already covers
+            // this -- no separate collector needed.
+            var conflictViewTemplates = FilterOutConflicts(buckets[2].Ids, id => targetViewNames.Contains(sourceDoc.GetElement(id).Name),
+                id => sourceDoc.GetElement(id).Name);
+            var conflictSheets    = FilterOutConflicts(buckets[3].Ids, id => targetSheetNumbers.Contains((sourceDoc.GetElement(id) as ViewSheet)?.SheetNumber ?? ""),
                 id => { var v = sourceDoc.GetElement(id) as ViewSheet; return v == null ? "" : $"{v.SheetNumber} - {v.Name}"; });
-            var conflictSchedules = FilterOutConflicts(buckets[3].Ids, id => targetScheduleNames.Contains(sourceDoc.GetElement(id).Name),
+            var conflictSchedules = FilterOutConflicts(buckets[4].Ids, id => targetScheduleNames.Contains(sourceDoc.GetElement(id).Name),
                 id => sourceDoc.GetElement(id).Name);
 
             // Pre-flight: if this transfer would skip anything and the window
@@ -318,7 +352,7 @@ namespace METools.ProjectTransfer
             // this same request with ConfirmedSkipConflicts = true, which
             // re-runs this same filtering (buckets are rebuilt fresh from
             // Request.ItemIds each call) and proceeds straight to copying.
-            var allConflictNames = conflictFilters.Concat(conflictViews).Concat(conflictSheets).Concat(conflictSchedules).ToList();
+            var allConflictNames = conflictFilters.Concat(conflictViews).Concat(conflictViewTemplates).Concat(conflictSheets).Concat(conflictSchedules).ToList();
             if (allConflictNames.Count > 0 && !Request.ConfirmedSkipConflicts)
             {
                 OnConflictsFound?.Invoke(allConflictNames, ids.Count - allConflictNames.Count);
@@ -329,6 +363,7 @@ namespace METools.ProjectTransfer
             void ReportSkip(string label, int n) { if (n > 0) result.Lines.Add($"{label}: {Plural(n, "item", "items")} skipped -- already exist in target by name"); }
             ReportSkip("Filters", conflictFilters.Count);
             ReportSkip("Views", conflictViews.Count);
+            ReportSkip("View Templates", conflictViewTemplates.Count);
             ReportSkip("Sheets", conflictSheets.Count);
             ReportSkip("Schedules", conflictSchedules.Count);
 

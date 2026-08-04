@@ -253,10 +253,11 @@ namespace METools.ProjectTransfer
 
             var defs = new (TransferCategory Cat, string Label)[]
             {
-                (TransferCategory.Filters,   S._("transfer.cat_filters")),
-                (TransferCategory.Views,     S._("transfer.cat_views")),
-                (TransferCategory.Sheets,    S._("transfer.cat_sheets")),
-                (TransferCategory.Schedules, S._("transfer.cat_schedules")),
+                (TransferCategory.Filters,       S._("transfer.cat_filters")),
+                (TransferCategory.Views,         S._("transfer.cat_views")),
+                (TransferCategory.ViewTemplates, S._("transfer.cat_view_templates")),
+                (TransferCategory.Sheets,        S._("transfer.cat_sheets")),
+                (TransferCategory.Schedules,     S._("transfer.cat_schedules")),
             };
             foreach (var (cat, label) in defs)
             {
