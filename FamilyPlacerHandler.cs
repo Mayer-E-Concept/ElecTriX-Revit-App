@@ -79,7 +79,31 @@ namespace METools.FamilyPlacer
                 OnStatus?.Invoke(single
                     ? "SPACEBAR rotates - click a face/point to place one"
                     : "Click positions - SPACEBAR rotates - ESC when done");
-                uidoc.PromptForFamilyInstancePlacement(firstSym);
+
+                // BUG FIXED HERE: the parameterless overload leaves Revit
+                // free to reuse whatever Face/Work Plane mode its OWN
+                // native "Modify | Place Component" ribbon last remembered
+                // -- not persisted anywhere in this app's own code (there
+                // was nothing left to find there; confirmed by removing
+                // every trace of face-hosting detection from this file and
+                // seeing the exact same symptom persist), but in Revit's
+                // own UI state, which carries across completely separate
+                // placement actions and even across different tools/
+                // add-ins that call this same native API. Documented,
+                // reported behavior, not specific to this app --
+                // see PromptForFamilyInstancePlacementOptions.
+                // FaceBasedPlacementType, added in the Revit API
+                // specifically to override it: forcing PlaceOnWorkPlane
+                // here means every Family Placer placement goes through
+                // Work Plane mode regardless of what Face/Work Plane
+                // choice was made anywhere else beforehand.
+                using (var placementOptions = new PromptForFamilyInstancePlacementOptions
+                {
+                    FaceBasedPlacementType = FaceBasedPlacementType.PlaceOnWorkPlane,
+                })
+                {
+                    uidoc.PromptForFamilyInstancePlacement(firstSym, placementOptions);
+                }
             }
             catch (OperationCanceledException) { }
             catch (Exception ex) { OnStatus?.Invoke("Error: " + ex.Message); }
