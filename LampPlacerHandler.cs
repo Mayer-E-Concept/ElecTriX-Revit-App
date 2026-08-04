@@ -1441,40 +1441,97 @@ namespace METools.LampPlacer
                 // no valid face for this level found -> fall through to work-plane placement below
             }
 
-            // pt.Z ist bereits auf ukdZ gesetzt — direkt platzieren
-            // Für face-based Familien: Elevation-Parameter nach Platzierung korrigieren
-            FamilyInstance inst = level != null
-                ? doc.Create.NewFamilyInstance(pt, sym, level, StructuralType.NonStructural)
-                : doc.Create.NewFamilyInstance(pt, sym, StructuralType.NonStructural);
+            // BUG FIXED HERE: this used to always place via the generic
+            // Level overload (NewFamilyInstance(pt, sym, level, ...)),
+            // which for a WorkPlaneBased family (like this one -- see the
+            // "Detected: WorkPlaneBased" message in the UI) never actually
+            // creates a real host relationship. Revit leaves "Level" as a
+            // freely-editable, non-hosted parameter, sets no Work Plane at
+            // all, and the height correction below then had nowhere clean
+            // to go -- it landed in "Offset from Host" as a raw number
+            // (which is why that value matched the level's own elevation
+            // almost exactly: the instance's real base ended up at
+            // elevation 0, not at the selected level, and the offset was
+            // just compensating for the gap). A hand-placed instance of
+            // the same family shows Offset from Host = 0, a real Work
+            // Plane, and a locked Level -- because Revit hosted it
+            // properly on the level's own reference plane.
+            //
+            // Now: host on level.GetPlaneReference() first for
+            // WorkPlaneBased families, matching hand-placement exactly.
+            // Falls back to the old generic overload only if that's not
+            // possible (not WorkPlaneBased, or no level available).
+            bool workPlaneBased = sym.Family?.FamilyPlacementType == FamilyPlacementType.WorkPlaneBased;
+            bool hostedOnPlane = false;
+            FamilyInstance inst = null;
+
+            if (workPlaneBased && level != null)
+            {
+                try
+                {
+                    var planeRef = level.GetPlaneReference();
+                    if (planeRef != null)
+                    {
+                        inst = doc.Create.NewFamilyInstance(planeRef, pt, XYZ.BasisX, sym);
+                        hostedOnPlane = inst != null;
+                    }
+                }
+                catch { inst = null; hostedOnPlane = false; }
+            }
+
+            if (inst == null)
+            {
+                inst = level != null
+                    ? doc.Create.NewFamilyInstance(pt, sym, level, StructuralType.NonStructural)
+                    : doc.Create.NewFamilyInstance(pt, sym, StructuralType.NonStructural);
+            }
             if (inst == null) return null;
 
             doc.Regenerate();
 
-            // Force the lamp to the target height (ukdZ). NewFamilyInstance ignores the
-            // point's Z for level-/work-plane-based families, so drive the geometry via
-            // "Elevation from Level" and then snap the instance to ukdZ as a safety net.
             try
             {
                 double levelElev = level?.Elevation ?? 0;
-                double target    = ukdZ - levelElev;   // Elevation from Level for Z = ukdZ
+                double target    = ukdZ - levelElev;   // desired height above the level, in feet
 
-                var pe = inst.get_Parameter(BuiltInParameter.INSTANCE_ELEVATION_PARAM);
-                if (pe != null && !pe.IsReadOnly && pe.StorageType == StorageType.Double)
-                    pe.Set(target);
+                // Properly plane-hosted (Offset from Host = 0, exactly like
+                // hand placement): height comes from the family's own
+                // "Niveau" parameter, same as Family Placer already does
+                // (see FamilyPlacerHandler.SetNiveau) -- NOT from nudging
+                // the insertion point, which would just pull it back off
+                // the plane and undo the clean host relationship this
+                // branch exists to create.
+                var niveauParam = hostedOnPlane ? inst.LookupParameter("Niveau") : null;
+                if (niveauParam != null && !niveauParam.IsReadOnly && niveauParam.StorageType == StorageType.Double)
+                {
+                    double heightMm = UnitUtils.ConvertFromInternalUnits(target, UnitTypeId.Millimeters);
+                    var uid = niveauParam.GetUnitTypeId();
+                    bool isLen = uid != null && !string.IsNullOrEmpty(uid.TypeId) && uid.TypeId != "autodesk.unit.unit:none-1.0.0";
+                    niveauParam.Set(isLen ? UnitUtils.ConvertToInternalUnits(heightMm, UnitTypeId.Millimeters) : heightMm);
+                    doc.Regenerate();
+                }
                 else
                 {
-                    var ph = inst.get_Parameter(BuiltInParameter.INSTANCE_FREE_HOST_OFFSET_PARAM);
-                    if (ph != null && !ph.IsReadOnly && ph.StorageType == StorageType.Double)
-                        ph.Set(target);
-                }
-                doc.Regenerate();
+                    // Not plane-hosted (older/simpler family, or no level
+                    // available) -- fall back to the previous approach.
+                    var pe = inst.get_Parameter(BuiltInParameter.INSTANCE_ELEVATION_PARAM);
+                    if (pe != null && !pe.IsReadOnly && pe.StorageType == StorageType.Double)
+                        pe.Set(target);
+                    else
+                    {
+                        var ph = inst.get_Parameter(BuiltInParameter.INSTANCE_FREE_HOST_OFFSET_PARAM);
+                        if (ph != null && !ph.IsReadOnly && ph.StorageType == StorageType.Double)
+                            ph.Set(target);
+                    }
+                    doc.Regenerate();
 
-                // Guaranteed snap: move whatever residual Z remains so geometry sits at ukdZ.
-                if (inst.Location is LocationPoint lp)
-                {
-                    double dz = ukdZ - lp.Point.Z;
-                    if (Math.Abs(dz) > 1e-6)
-                        ElementTransformUtils.MoveElement(doc, inst.Id, new XYZ(0, 0, dz));
+                    // Guaranteed snap: move whatever residual Z remains so geometry sits at ukdZ.
+                    if (inst.Location is LocationPoint lp)
+                    {
+                        double dz = ukdZ - lp.Point.Z;
+                        if (Math.Abs(dz) > 1e-6)
+                            ElementTransformUtils.MoveElement(doc, inst.Id, new XYZ(0, 0, dz));
+                    }
                 }
             }
             catch { }

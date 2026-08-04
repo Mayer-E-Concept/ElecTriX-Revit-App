@@ -980,7 +980,6 @@ namespace METools.FamilyPlacer
             BuildFamilyPicker(famType);
 
             _typeCmb = new ComboBox { Height = 22, FontSize = 10, Margin = new Thickness(0, 2, 0, 0), Background = METools.MeToolsTheme.BrInput, Foreground = METools.MeToolsTheme.BrText, BorderBrush = METools.MeToolsTheme.BrBorder, BorderThickness = new Thickness(1) };
-            _typeCmb.SelectionChanged += TypeChanged;
             RefreshTypes();
             if (!string.IsNullOrEmpty(Slot.TypeName))
             {
@@ -989,6 +988,17 @@ namespace METools.FamilyPlacer
             }
             _typeCmb.Template = METools.MeToolsWindowBase.MakeComboBoxTemplate();
             METools.MeToolsWindowBase.ApplyComboStyle(_typeCmb);
+            // Attached AFTER the initial RefreshTypes()/restore above, on
+            // purpose: RefreshTypes() already sets Slot.TypeName directly
+            // (see there) rather than relying on this event, specifically so
+            // construction-time auto-selection doesn't ALSO fire
+            // TypeChanged's side effects (AutoFillHeight, OnChanged) on top
+            // of PickFamily's own explicit calls right after -- two
+            // concurrent AutoFillHeight() calls through the shared
+            // _inspectHandler is exactly what silently broke height
+            // auto-fill (Raise() calls got coalesced, so only one callback
+            // ever actually ran, and not reliably the right one).
+            _typeCmb.SelectionChanged += TypeChanged;
             famType.Children.Add(_typeCmb);
 
             Grid.SetColumn(famType, 2); g.Children.Add(famType);
