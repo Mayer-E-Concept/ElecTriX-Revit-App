@@ -504,11 +504,6 @@ namespace METools
             ["activitylog.action_deleted"]  = "Deleted",
 
             // -- Time Tracker --------------------------------------------
-            ["timetracker.title"]       = "ElectriX -- Time Tracker",
-            ["timetracker.loading"]     = "Loading...",
-            ["timetracker.export_csv"]  = "Export CSV",
-            ["timetracker.refresh"]     = "Refresh",
-            ["timetracker.refreshing"]  = "Refreshing...",
             ["timetracker.tab_team"]    = "Team Totals",
             ["timetracker.tab_mine"]    = "My Sessions",
             ["timetracker.col_user"]         = "User",
@@ -1291,11 +1286,6 @@ namespace METools
             ["activitylog.action_deleted"]  = "Gelöscht",
 
             // -- Time Tracker --------------------------------------------
-            ["timetracker.title"]       = "ElectriX -- Zeiterfassung",
-            ["timetracker.loading"]     = "Wird geladen...",
-            ["timetracker.export_csv"]  = "CSV exportieren",
-            ["timetracker.refresh"]     = "Aktualisieren",
-            ["timetracker.refreshing"]  = "Wird aktualisiert...",
             ["timetracker.tab_team"]    = "Team-Gesamt",
             ["timetracker.tab_mine"]    = "Meine Sitzungen",
             ["timetracker.col_user"]         = "Benutzer",
@@ -2075,11 +2065,6 @@ namespace METools
             ["activitylog.action_deleted"]  = "Sterse",
 
             // -- Time Tracker --------------------------------------------
-            ["timetracker.title"]       = "ElectriX -- Cronometru timp",
-            ["timetracker.loading"]     = "Se incarca...",
-            ["timetracker.export_csv"]  = "Export CSV",
-            ["timetracker.refresh"]     = "Reimprospatare",
-            ["timetracker.refreshing"]  = "Se reimprospateaza...",
             ["timetracker.tab_team"]    = "Total echipa",
             ["timetracker.tab_mine"]    = "Sesiunile mele",
             ["timetracker.col_user"]         = "Utilizator",

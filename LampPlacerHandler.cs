@@ -516,6 +516,9 @@ namespace METools.LampPlacer
             // when that mode is actually active, to avoid the collector call entirely
             // for the (more common) work-plane placement path.
             View3D v3dForFace = Request.Config.Surface == PlacementSurface.Face ? GetAny3DView(doc) : null;
+            // Same fix for the ReferenceIntersector itself: built once per batch,
+            // not once per lamp -- only the ray origin actually changes per lamp.
+            var faceIntersector = BuildFaceIntersector(v3dForFace);
             using (var tx = new Transaction(doc, "ME-Tools: Refresh Room Lamps"))
             {
                 tx.Start();
@@ -529,7 +532,7 @@ namespace METools.LampPlacer
                 {
                     if (!IsInRoom(room, new XYZ(pt.X, pt.Y, floorZ + 0.5))) continue;
                     FamilyInstance inst = null;
-                    try { inst = PlaceLampInstance(doc, sym, pt, level, room, ukdZ, v3dForFace); }
+                    try { inst = PlaceLampInstance(doc, sym, pt, level, room, ukdZ, faceIntersector); }
                     catch { continue; }
                     if (inst == null) continue;
                     doc.Regenerate();
@@ -631,6 +634,8 @@ namespace METools.LampPlacer
             // Same fix as RefreshRoom above: fetched once for this whole batch,
             // not once per lamp, and only when face placement is actually selected.
             View3D v3dForFace = Request.Config.Surface == PlacementSurface.Face ? GetAny3DView(doc) : null;
+            // Same fix for the ReferenceIntersector itself -- see BuildFaceIntersector.
+            var faceIntersector = BuildFaceIntersector(v3dForFace);
             using (var tg = new TransactionGroup(doc, "ME-Tools: " + op))
             {
                 tg.Start();
@@ -645,7 +650,7 @@ namespace METools.LampPlacer
                         if (s == null) continue;
                         if (!s.IsActive) { s.Activate(); doc.Regenerate(); }
                         FamilyInstance inst = null;
-                        try { inst = PlaceLampInstance(doc, s, pl.Pt, pl.Lvl, pl.Rm, pl.Ukd, v3dForFace); }
+                        try { inst = PlaceLampInstance(doc, s, pl.Pt, pl.Lvl, pl.Rm, pl.Ukd, faceIntersector); }
                         catch { continue; }
                         if (inst == null) continue;
                         doc.Regenerate();
@@ -1365,6 +1370,26 @@ namespace METools.LampPlacer
                 .Cast<View3D>().FirstOrDefault(v => v != null && !v.IsTemplate);
         }
 
+        // Builds the ReferenceIntersector used by TryPlaceOnFace ONCE per
+        // batch instead of once per lamp -- see the two call sites below
+        // (same fix already applied to v3dForFace right next to each one).
+        // Only the ray origin actually changes between lamps; the category
+        // filter and view are the same for the whole batch, so there's no
+        // reason to rebuild the underlying spatial query structure for
+        // every single lamp in a room.
+        private ReferenceIntersector BuildFaceIntersector(View3D v3d)
+        {
+            if (v3d == null) return null;
+            try
+            {
+                var filter = new LogicalOrFilter(
+                    new ElementCategoryFilter(BuiltInCategory.OST_Ceilings),
+                    new ElementCategoryFilter(BuiltInCategory.OST_Floors));
+                return new ReferenceIntersector(filter, FindReferenceTarget.Face, v3d);
+            }
+            catch { return null; }
+        }
+
         // ── Host a lamp on the ceiling/floor face above the point ──────────
         //
         // BUG FIXED HERE: this used to accept whatever ceiling/floor face
@@ -1392,15 +1417,11 @@ namespace METools.LampPlacer
         // centimetres). Either check failing falls through to the
         // Level-based placement path below instead of hosting on a
         // clearly-wrong face.
-        private FamilyInstance TryPlaceOnFace(Document doc, FamilySymbol sym, XYZ pt, View3D v3d, Level expectedLevel)
+        private FamilyInstance TryPlaceOnFace(Document doc, FamilySymbol sym, XYZ pt, ReferenceIntersector ri, Level expectedLevel)
         {
             try
             {
-                if (v3d == null) return null;
-                var filter = new LogicalOrFilter(
-                    new ElementCategoryFilter(BuiltInCategory.OST_Ceilings),
-                    new ElementCategoryFilter(BuiltInCategory.OST_Floors));
-                var ri = new ReferenceIntersector(filter, FindReferenceTarget.Face, v3d);
+                if (ri == null) return null;
                 var origin = new XYZ(pt.X, pt.Y, pt.Z - ToFeet(50));  // start just below the ceiling
                 var hit = ri.FindNearest(origin, XYZ.BasisZ);          // ray straight up
 
@@ -1431,12 +1452,12 @@ namespace METools.LampPlacer
 
         // ── Lamp placement: pt.Z = ukdZ, kein zusätzlicher Parameter ────────
         private FamilyInstance PlaceLampInstance(Document doc, FamilySymbol sym,
-            XYZ pt, Level level, Room room, double ukdZ, View3D v3dForFacePlacement)
+            XYZ pt, Level level, Room room, double ukdZ, ReferenceIntersector faceIntersector)
         {
             // Place on Face (opt-in): host on the ceiling/floor face above the point
             if (Request.Config.Surface == PlacementSurface.Face)
             {
-                var onFace = TryPlaceOnFace(doc, sym, pt, v3dForFacePlacement, level);
+                var onFace = TryPlaceOnFace(doc, sym, pt, faceIntersector, level);
                 if (onFace != null) { doc.Regenerate(); return onFace; }
                 // no valid face for this level found -> fall through to work-plane placement below
             }

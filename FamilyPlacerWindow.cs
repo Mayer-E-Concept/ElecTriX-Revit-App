@@ -41,6 +41,19 @@ namespace METools.FamilyPlacer
         private readonly FamilyParamInspectorHandler  _inspectHandler;
         private readonly Dictionary<string, List<FamilyParamInfo>> _paramCache
             = new Dictionary<string, List<FamilyParamInfo>>();
+        // _inspectHandler/_inspectEvent are ONE shared instance for the whole
+        // window, used by every row. Revit coalesces rapid successive
+        // Raise() calls into a single Execute() -- so firing several
+        // requests back to back (e.g. picking a different family for each
+        // row while building a new multi-slot template) used to silently
+        // drop every callback except whichever one last set
+        // FamilyName/OnResult/OnNiveau before Execute() actually ran. This
+        // queue makes sure only one request is ever "in flight" through the
+        // shared handler at a time; everything else waits its turn instead
+        // of overwriting a request that hasn't fired yet. See
+        // EnqueueInspect/ProcessInspectQueue/InspectRequestDone.
+        private readonly Queue<Action> _inspectQueue = new Queue<Action>();
+        private bool _inspectBusy = false;
         private readonly List<FamilyTypeInfo>  _allFamilies;
         private          List<PlacerTemplate>  _templates;
         private          string                _orientation = "Vertical";
@@ -479,6 +492,26 @@ namespace METools.FamilyPlacer
             }
         }
 
+        // Runs the next queued request only if nothing is currently in
+        // flight through the shared _inspectHandler/_inspectEvent.
+        private void ProcessInspectQueue()
+        {
+            if (_inspectBusy || _inspectQueue.Count == 0) return;
+            _inspectBusy = true;
+            var startNext = _inspectQueue.Dequeue();
+            startNext();
+        }
+
+        // Called from inside each request's own completion callback (both
+        // RequestFamilyParams and RequestNiveauSample) once it's actually
+        // received its Execute() result -- only then is it safe to let the
+        // next queued request set its own fields and Raise().
+        private void InspectRequestDone()
+        {
+            _inspectBusy = false;
+            ProcessInspectQueue();
+        }
+
         private void RequestFamilyParams(string fam, string type, Action<List<FamilyParamInfo>> cb)
         {
             if (cb == null) return;
@@ -487,16 +520,21 @@ namespace METools.FamilyPlacer
             if (_paramCache.TryGetValue(key, out var cached)) { cb(cached); return; }
             if (_inspectEvent == null || _inspectHandler == null) { cb(new List<FamilyParamInfo>()); return; }
 
-            _inspectHandler.SampleNiveauOnly = false;
-            _inspectHandler.FamilyName = fam;
-            _inspectHandler.TypeName   = type ?? "";
-            _inspectHandler.OnResult   = list => Dispatcher.Invoke(() =>
+            _inspectQueue.Enqueue(() =>
             {
-                var safe = list ?? new List<FamilyParamInfo>();
-                _paramCache[key] = safe;
-                cb(safe);
+                _inspectHandler.SampleNiveauOnly = false;
+                _inspectHandler.FamilyName = fam;
+                _inspectHandler.TypeName   = type ?? "";
+                _inspectHandler.OnResult   = list => Dispatcher.Invoke(() =>
+                {
+                    var safe = list ?? new List<FamilyParamInfo>();
+                    _paramCache[key] = safe;
+                    InspectRequestDone();
+                    cb(safe);
+                });
+                _inspectEvent.Raise();
             });
-            _inspectEvent.Raise();
+            ProcessInspectQueue();
         }
 
         // Samples the most-common Niveau (mm) from placed instances of the family -- no EditFamily,
@@ -509,14 +547,19 @@ namespace METools.FamilyPlacer
             if (_niveauCache.TryGetValue(fam, out var cached)) { cb(cached); return; }
             if (_inspectEvent == null || _inspectHandler == null) { cb(null); return; }
 
-            _inspectHandler.SampleNiveauOnly = true;
-            _inspectHandler.FamilyName       = fam;
-            _inspectHandler.OnNiveau         = v => Dispatcher.Invoke(() =>
+            _inspectQueue.Enqueue(() =>
             {
-                _niveauCache[fam] = v;
-                cb(v);
+                _inspectHandler.SampleNiveauOnly = true;
+                _inspectHandler.FamilyName       = fam;
+                _inspectHandler.OnNiveau         = v => Dispatcher.Invoke(() =>
+                {
+                    _niveauCache[fam] = v;
+                    InspectRequestDone();
+                    cb(v);
+                });
+                _inspectEvent.Raise();
             });
-            _inspectEvent.Raise();
+            ProcessInspectQueue();
         }
 
         private void SetStatus(string msg) => _statusTxt.Text = msg;
