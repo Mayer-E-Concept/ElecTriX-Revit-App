@@ -1322,34 +1322,83 @@ namespace METools.FamilyPlacer
         private void OnSelectClicked()
         {
             Hide();
+            var uiDoc = _uiApp?.ActiveUIDocument;
+            if (uiDoc == null) { Show(); return; }
+            var doc   = uiDoc.Document;
+            var phase = new FilteredElementCollector(doc).OfClass(typeof(Phase)).Cast<Phase>().LastOrDefault();
+            var filter = new ElectricalElementFilter();
+
+            // BUG FIXED HERE: this used to call PickObjects (plural) once
+            // and only ever add anything to _selected after the WHOLE pick
+            // loop finished. PickObjects is all-or-nothing -- a stray click
+            // on empty space mid-loop (missing an intended element, or just
+            // clicking the plan by mistake) can silently clear everything
+            // picked so far IN THAT SAME LOOP, a real and well-known Revit
+            // quirk, not something this app was doing. With a large
+            // selection, that meant one bad click near the end could wipe
+            // the entire batch, which read as "there's a limit" -- there
+            // isn't one, it just needed a more robust picking loop.
+            //
+            // Now: pick ONE element at a time and commit it to _selected
+            // immediately, so a later stray click can only ever cost that
+            // one attempt, never anything already committed. Also
+            // highlights already-selected elements (Revit's own native
+            // selection highlight) before the first pick and after every
+            // new one, so it's visually obvious what's already queued when
+            // coming back to add more after a previous round.
+            HighlightSelected(uiDoc);
             try
             {
-                var uiDoc = _uiApp.ActiveUIDocument;
-                if (uiDoc == null) { Show(); return; }
-                var filter = new ElectricalElementFilter();
-                var picked = uiDoc.Selection.PickObjects(
-                    Autodesk.Revit.UI.Selection.ObjectType.Element, filter,
-                    S._("circuittagger.select_prompt"));
-                var doc   = uiDoc.Document;
-                var phase = new FilteredElementCollector(doc).OfClass(typeof(Phase)).Cast<Phase>().LastOrDefault();
-                foreach (var ref_ in picked)
+                while (true)
                 {
-                    if (_selected.Any(x => x.ElementId == ref_.ElementId)) continue;
-                    var el = doc.GetElement(ref_.ElementId);
+                    Reference picked;
+                    try
+                    {
+                        picked = uiDoc.Selection.PickObject(
+                            Autodesk.Revit.UI.Selection.ObjectType.Element, filter,
+                            S._("circuittagger.select_prompt"));
+                    }
+                    catch (Autodesk.Revit.Exceptions.OperationCanceledException) { break; }
+
+                    if (picked == null) continue;
+                    if (_selected.Any(x => x.ElementId == picked.ElementId)) continue; // already queued -- ignore, don't duplicate
+                    var el = doc.GetElement(picked.ElementId);
                     if (el == null) continue;
+
                     _selected.Add(new TaggedElementInfo
                     {
-                        ElementId    = ref_.ElementId,
+                        ElementId    = picked.ElementId,
                         CategoryName = el.Category?.Name ?? "Element",
                         CategoryId   = el.Category?.Id?.IntegerValue ?? 0,
                         FamilyName   = (el as FamilyInstance)?.Symbol?.Family?.Name ?? el.Name ?? "",
                         RoomName     = GetRoomNameForEl(doc, el as FamilyInstance, phase),
                     });
+                    HighlightSelected(uiDoc); // include the just-added element in the highlight right away
                 }
             }
-            catch (Autodesk.Revit.Exceptions.OperationCanceledException) { }
             catch (Exception ex) { MessageBox.Show(ex.Message, S._("circuittagger.select_elements_title")); }
-            finally { Show(); RefreshSelectionList(); }
+            finally
+            {
+                ClearHighlight(uiDoc);
+                Show();
+                RefreshSelectionList();
+            }
+        }
+
+        // Revit's own native selection highlight, reused here purely as a
+        // visual "these are already queued" indicator -- doesn't interfere
+        // with the PickObject calls above, which prompt for a new pick
+        // regardless of whatever's currently highlighted.
+        private void HighlightSelected(UIDocument uiDoc)
+        {
+            try { uiDoc.Selection.SetElementIds(_selected.Select(x => x.ElementId).ToList()); }
+            catch { }
+        }
+
+        private void ClearHighlight(UIDocument uiDoc)
+        {
+            try { uiDoc?.Selection.SetElementIds(new List<ElementId>()); }
+            catch { }
         }
 
         private void OnClearClicked() { _selected.Clear(); RefreshSelectionList(); }
