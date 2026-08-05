@@ -1347,7 +1347,19 @@ namespace METools.FamilyPlacer
             // SetPendingMark) before the first pick and after every new
             // one, so it's visually obvious what's already queued when
             // coming back to add more after a previous round.
+            // BUG FIXED HERE (again): the mark itself was applying correctly
+            // (confirmed -- this isn't the same "wiped by PickObject" issue
+            // as the old ambient-selection approach), but it was never
+            // actually PAINTED before the next blocking PickObject call
+            // seized the interactive loop. Committing a transaction queues a
+            // repaint; it doesn't force one to happen immediately, and
+            // jumping straight into a modal pick call can mean that queued
+            // repaint never gets flushed. RefreshActiveView() forces it
+            // synchronously right now, before Revit's own pick-mode cursor
+            // takes over -- the same fix Autodesk's own forum recommends for
+            // this exact "highlight during PickObjects" scenario.
             SetPendingMark(doc, view, _selected.Select(x => x.ElementId), true);
+            try { uiDoc.RefreshActiveView(); } catch { }
             try
             {
                 while (true)
@@ -1375,6 +1387,7 @@ namespace METools.FamilyPlacer
                         RoomName     = GetRoomNameForEl(doc, el as FamilyInstance, phase),
                     });
                     SetPendingMark(doc, view, new[] { picked.ElementId }, true); // mark the just-added element right away
+                    try { uiDoc.RefreshActiveView(); } catch { }
                 }
             }
             catch (Exception ex) { MessageBox.Show(ex.Message, S._("circuittagger.select_elements_title")); }
@@ -1440,6 +1453,7 @@ namespace METools.FamilyPlacer
         {
             var uiDoc = _uiApp?.ActiveUIDocument;
             SetPendingMark(uiDoc?.Document, uiDoc?.ActiveView, _selected.Select(x => x.ElementId), false);
+            try { uiDoc?.RefreshActiveView(); } catch { }
             _selected.Clear();
             RefreshSelectionList();
         }
@@ -1575,6 +1589,7 @@ namespace METools.FamilyPlacer
                     {
                         var uiDoc = _uiApp?.ActiveUIDocument;
                         SetPendingMark(uiDoc?.Document, uiDoc?.ActiveView, new[] { captured.ElementId }, false);
+                        try { uiDoc?.RefreshActiveView(); } catch { }
                         _selected.Remove(captured);
                         RefreshSelectionList();
                     };

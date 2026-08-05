@@ -48,6 +48,7 @@ namespace METools
 
             // ── Settings window ───────────────────────────────────────────
             ["settings.title"]          = "Settings",
+            ["settings.back"]           = "Back",
             ["settings.tab.appearance"] = "Appearance",
             ["settings.tab.language"]   = "Language",
             ["settings.tab.license"]    = "License",
@@ -861,6 +862,7 @@ namespace METools
             ["revit_ver"]       = "Revit 2025",
 
             ["settings.title"]          = "Einstellungen",
+            ["settings.back"]           = "Zurück",
             ["settings.tab.appearance"] = "Darstellung",
             ["settings.tab.language"]   = "Sprache",
             ["settings.tab.license"]    = "Lizenz",
@@ -1663,6 +1665,7 @@ namespace METools
             ["revit_ver"]       = "Revit 2025",
 
             ["settings.title"]          = "Setari",
+            ["settings.back"]           = "Inapoi",
             ["settings.tab.appearance"] = "Aspect",
             ["settings.tab.language"]   = "Limba",
             ["settings.tab.license"]    = "Licenta",

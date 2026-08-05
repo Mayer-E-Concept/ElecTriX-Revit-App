@@ -27,7 +27,7 @@ namespace METools
         // Update #define AppVersion in setup.iss → rebuild → shown here.
         private static string AppVersion => $"v{SplashGate.GetVersion()}";
 
-        // ── Tab panels ────────────────────────────────────────────────────
+        // ── Panels ────────────────────────────────────────────────────────
         private StackPanel _panAppearance;
         private StackPanel _panLanguage;
         private StackPanel _panLicense;
@@ -35,9 +35,16 @@ namespace METools
         private StackPanel _panHeights;
         private StackPanel _panImports;
 
-        // ── Tab buttons ───────────────────────────────────────────────────
-        private Button _tabAppearance, _tabLanguage, _tabLicense, _tabWorksets, _tabHeights, _tabImports;
-        private int    _activeTab = 0;
+        // ── Home-grid launcher ──────────────────────────────────────────────
+        // Replaces the old horizontal tab strip (6 labels didn't fit the
+        // window width without truncating -- "Imported Objects" was cut down
+        // to "Imported (" in practice). This is a small grid of tiles instead,
+        // one per section, with a Back button on whichever section is open.
+        // -1 = home grid; 0-5 = which panel is open.
+        private Grid       _homeGrid;
+        private Border     _backBar;
+        private TextBlock  _backBarTitle;
+        private int        _activeTab = -1;
 
         // ── License controls ──────────────────────────────────────────────
         private TextBox   _tbKey;
@@ -87,7 +94,12 @@ namespace METools
         private void PopulateContent()
         {
             _contentRoot.Children.Clear();
-            _contentRoot.Children.Add(BuildTabBar());
+
+            _homeGrid = BuildHomeGrid();
+            _contentRoot.Children.Add(_homeGrid);
+
+            _backBar = BuildBackBar();
+            _contentRoot.Children.Add(_backBar);
 
             var contentBorder = new Border
             {
@@ -113,73 +125,134 @@ namespace METools
             contentBorder.Child = contentStack;
             _contentRoot.Children.Add(contentBorder);
 
-            ShowTab(_activeTab);
+            if (_activeTab < 0) ShowHome(); else ShowPanel(_activeTab);
         }
 
-        // ── Tab bar ───────────────────────────────────────────────────────
-        private UIElement BuildTabBar()
+        // ── Home grid ("phone home screen" of section tiles) ────────────────
+        private static readonly (string Key, string Glyph)[] _homeTiles =
         {
-            var bar = new Grid { Height = 42, Background = MeToolsTheme.BrPetrolDark };
-            for (int i = 0; i < 6; i++)
-                bar.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            ("settings.tab.appearance", "\uE790"), // Color
+            ("settings.tab.language",   "\uE774"), // Globe
+            ("settings.tab.license",    "\uE72E"), // Lock
+            ("settings.tab.worksets",   "\uE8B7"), // Page2 (stacked pages)
+            ("settings.tab.heights",    "\uE762"), // Line/ruler-ish
+            ("settings.tab.imports",    "\uE8B5"), // Import
+        };
 
-            _tabAppearance = MakeTabBtn(S._("settings.tab.appearance"), 0);
-            _tabLanguage   = MakeTabBtn(S._("settings.tab.language"),   1);
-            _tabLicense    = MakeTabBtn(S._("settings.tab.license"),    2);
-            _tabWorksets   = MakeTabBtn(S._("settings.tab.worksets"),   3);
-            _tabHeights    = MakeTabBtn(S._("settings.tab.heights"),    4);
-            _tabImports    = MakeTabBtn(S._("settings.tab.imports"),    5);
-
-            Grid.SetColumn(_tabAppearance, 0);
-            Grid.SetColumn(_tabLanguage,   1);
-            Grid.SetColumn(_tabLicense,    2);
-            Grid.SetColumn(_tabWorksets,   3);
-            Grid.SetColumn(_tabHeights,    4);
-            Grid.SetColumn(_tabImports,    5);
-
-            bar.Children.Add(_tabAppearance);
-            bar.Children.Add(_tabLanguage);
-            bar.Children.Add(_tabLicense);
-            bar.Children.Add(_tabWorksets);
-            bar.Children.Add(_tabHeights);
-            bar.Children.Add(_tabImports);
-            return bar;
-        }
-
-        private Button MakeTabBtn(string label, int idx)
+        private Grid BuildHomeGrid()
         {
-            var b = new Button
+            var grid = new Grid { Margin = new Thickness(0, 4, 0, 8) };
+            for (int c = 0; c < 3; c++)
+                grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            for (int r = 0; r < 2; r++)
+                grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+            for (int i = 0; i < _homeTiles.Length; i++)
             {
-                Content         = label,
-                FontSize        = 12,
-                Padding         = new Thickness(14, 0, 14, 0),
-                BorderThickness = new Thickness(0),
-                Background      = Brushes.Transparent,
-                Foreground      = new SolidColorBrush(Color.FromArgb(160, 255, 255, 255)),
-                Cursor          = Cursors.Hand,
-                Height          = 42,
-            };
-            b.Template = RoundedBtnTemplate();
-            b.Click += (s, e) => ShowTab(idx);
-            return b;
+                var tile = BuildHomeTile(S._(_homeTiles[i].Key), _homeTiles[i].Glyph, i);
+                Grid.SetRow(tile, i / 3);
+                Grid.SetColumn(tile, i % 3);
+                grid.Children.Add(tile);
+            }
+            return grid;
         }
 
-        private void ShowTab(int idx)
+        private Border BuildHomeTile(string label, string glyph, int idx)
+        {
+            var iconTb = new TextBlock
+            {
+                Text = glyph, FontFamily = new FontFamily("Segoe MDL2 Assets"), FontSize = 26,
+                Foreground = MeToolsTheme.BrPetrol, HorizontalAlignment = HorizontalAlignment.Center,
+                Margin = new Thickness(0, 2, 0, 8),
+            };
+            var labelTb = new TextBlock
+            {
+                Text = label, FontSize = 12, FontWeight = FontWeights.SemiBold, Foreground = MeToolsTheme.BrText,
+                HorizontalAlignment = HorizontalAlignment.Center, TextAlignment = TextAlignment.Center,
+                TextWrapping = TextWrapping.Wrap,
+            };
+            var inner = new StackPanel { HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+            inner.Children.Add(iconTb);
+            inner.Children.Add(labelTb);
+
+            var tile = new Border
+            {
+                Background      = MeToolsTheme.BrSurface,
+                BorderBrush      = MeToolsTheme.BrBorder,
+                BorderThickness  = new Thickness(1),
+                CornerRadius     = new CornerRadius(10),
+                Margin           = new Thickness(6),
+                Padding          = new Thickness(8, 14, 8, 14),
+                Height           = 92,
+                Cursor           = Cursors.Hand,
+                Child            = inner,
+            };
+            tile.MouseEnter += (s, e) => tile.Background = MeToolsTheme.BrActiveBg;
+            tile.MouseLeave += (s, e) => tile.Background = MeToolsTheme.BrSurface;
+            tile.MouseLeftButtonDown += (s, e) => ShowPanel(idx);
+            return tile;
+        }
+
+        // ── Back bar (shown above whichever section is open) ────────────────
+        private Border BuildBackBar()
+        {
+            var grid = new Grid { Margin = new Thickness(0, 0, 0, 14) };
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+            var backBtn = new Button
+            {
+                Content = "\u2190  " + S._("settings.back"), FontSize = 12, Height = 30,
+                Padding = new Thickness(10, 0, 10, 0), Cursor = Cursors.Hand,
+                Background = MeToolsTheme.BrBtnBg, Foreground = MeToolsTheme.BrText,
+                BorderBrush = MeToolsTheme.BrBtnBorder, BorderThickness = new Thickness(1),
+            };
+            backBtn.Template = RoundedBtnTemplate();
+            backBtn.Click += (s, e) => ShowHome();
+            Grid.SetColumn(backBtn, 0);
+
+            _backBarTitle = new TextBlock
+            {
+                FontSize = 13, FontWeight = FontWeights.SemiBold, Foreground = MeToolsTheme.BrPetrol,
+                VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(12, 0, 0, 0),
+            };
+            Grid.SetColumn(_backBarTitle, 1);
+
+            grid.Children.Add(backBtn);
+            grid.Children.Add(_backBarTitle);
+
+            return new Border { Child = grid, Visibility = Visibility.Collapsed, Margin = new Thickness(0, 4, 0, 0) };
+        }
+
+        private string TabTitle(int idx) => idx >= 0 && idx < _homeTiles.Length ? S._(_homeTiles[idx].Key) : "";
+
+        private void ShowHome()
+        {
+            _activeTab = -1;
+            _homeGrid.Visibility = Visibility.Visible;
+            _backBar.Visibility  = Visibility.Collapsed;
+            _panAppearance.Visibility = Visibility.Collapsed;
+            _panLanguage.Visibility   = Visibility.Collapsed;
+            _panLicense.Visibility    = Visibility.Collapsed;
+            _panWorksets.Visibility   = Visibility.Collapsed;
+            _panHeights.Visibility    = Visibility.Collapsed;
+            _panImports.Visibility    = Visibility.Collapsed;
+            ResizeToFitContent();
+        }
+
+        private void ShowPanel(int idx)
         {
             _activeTab = idx;
+            _homeGrid.Visibility = Visibility.Collapsed;
+            _backBar.Visibility  = Visibility.Visible;
+            _backBarTitle.Text   = TabTitle(idx);
+
             _panAppearance.Visibility = idx == 0 ? Visibility.Visible : Visibility.Collapsed;
             _panLanguage.Visibility   = idx == 1 ? Visibility.Visible : Visibility.Collapsed;
             _panLicense.Visibility    = idx == 2 ? Visibility.Visible : Visibility.Collapsed;
             _panWorksets.Visibility   = idx == 3 ? Visibility.Visible : Visibility.Collapsed;
             _panHeights.Visibility    = idx == 4 ? Visibility.Visible : Visibility.Collapsed;
             _panImports.Visibility    = idx == 5 ? Visibility.Visible : Visibility.Collapsed;
-
-            StyleTabBtn(_tabAppearance, idx == 0);
-            StyleTabBtn(_tabLanguage,   idx == 1);
-            StyleTabBtn(_tabLicense,    idx == 2);
-            StyleTabBtn(_tabWorksets,   idx == 3);
-            StyleTabBtn(_tabHeights,    idx == 4);
-            StyleTabBtn(_tabImports,    idx == 5);
 
             if (idx == 3) { LoadWorksetsIntoList(); LoadCurrentProjectWorksets(); }
             if (idx == 4) LoadHeightsIntoList();
@@ -192,18 +265,10 @@ namespace METools
         // window once via SizeToContent, then freezes it to a fixed Height so
         // the resize grip doesn't fight WPF's auto-sizing (that fix is what
         // solved the earlier resize-glitch/snap-to-right-edge bug). The
-        // tradeoff: that freeze happens while whichever tab is shown FIRST is
-        // visible -- so a later tab with more content (License, Worksets)
+        // tradeoff: that freeze happens while whichever view is shown FIRST is
+        // visible -- so a later section with more content (License, Worksets)
         // never gets to grow the window, and looks cut off until the user
-        // manually drags it bigger. This re-measures on every tab switch:
-
-        private void StyleTabBtn(Button b, bool active)
-        {
-            if (b == null) return;
-            b.Background = active ? new SolidColorBrush(MeToolsTheme.CBg) : Brushes.Transparent;
-            b.Foreground = active ? MeToolsTheme.BrPetrol : new SolidColorBrush(Color.FromArgb(180, 255, 255, 255));
-            b.FontWeight = active ? FontWeights.SemiBold : FontWeights.Normal;
-        }
+        // manually drags it bigger. This re-measures on every navigation:
 
         // ── TAB 0: Appearance ─────────────────────────────────────────────
         private StackPanel BuildAppearancePanel()
@@ -1074,17 +1139,41 @@ namespace METools
 
                     // Delete live instances FIRST -- a category still
                     // actively referenced by one can't be deleted directly.
+                    //
+                    // BUG FIXED HERE: allImportInstances is collected once,
+                    // but re-iterated once per selected category below --
+                    // an instance already deleted while processing an
+                    // earlier category was still being touched again on a
+                    // later category's pass. Accessing ii.Category on that
+                    // now-stale reference throws "the referenced object is
+                    // not valid... deleted from the database", and since
+                    // that property access sat OUTSIDE any try/catch (only
+                    // the Delete call itself was protected), it escaped all
+                    // the way to the outer catch and aborted the entire
+                    // operation -- exactly the error dialog reported.
+                    // Tracking already-deleted ids (and wrapping the whole
+                    // per-instance check, not just the delete, in try/catch
+                    // as a safety net) fixes both the cause and the symptom.
                     var allImportInstances = new Autodesk.Revit.DB.FilteredElementCollector(doc)
                         .OfClass(typeof(Autodesk.Revit.DB.ImportInstance))
                         .Cast<Autodesk.Revit.DB.ImportInstance>()
                         .ToList();
+                    var deletedInstanceIds = new HashSet<long>();
 
                     foreach (var row in selected)
                     {
                         foreach (var ii in allImportInstances)
                         {
-                            if (ii.Category?.Id?.IntegerValue == row.CategoryId.IntegerValue)
-                                try { doc.Delete(ii.Id); } catch { }
+                            try
+                            {
+                                if (deletedInstanceIds.Contains(ii.Id.IntegerValue)) continue;
+                                if (ii.Category?.Id?.IntegerValue == row.CategoryId.IntegerValue)
+                                {
+                                    doc.Delete(ii.Id);
+                                    deletedInstanceIds.Add(ii.Id.IntegerValue);
+                                }
+                            }
+                            catch { }
                         }
                     }
 
