@@ -1325,6 +1325,7 @@ namespace METools.FamilyPlacer
             var uiDoc = _uiApp?.ActiveUIDocument;
             if (uiDoc == null) { Show(); return; }
             var doc   = uiDoc.Document;
+            var view  = uiDoc.ActiveView;
             var phase = new FilteredElementCollector(doc).OfClass(typeof(Phase)).Cast<Phase>().LastOrDefault();
             var filter = new ElectricalElementFilter();
 
@@ -1341,12 +1342,12 @@ namespace METools.FamilyPlacer
             //
             // Now: pick ONE element at a time and commit it to _selected
             // immediately, so a later stray click can only ever cost that
-            // one attempt, never anything already committed. Also
-            // highlights already-selected elements (Revit's own native
-            // selection highlight) before the first pick and after every
-            // new one, so it's visually obvious what's already queued when
+            // one attempt, never anything already committed. Also marks
+            // already-queued elements with a graphic override (see
+            // SetPendingMark) before the first pick and after every new
+            // one, so it's visually obvious what's already queued when
             // coming back to add more after a previous round.
-            HighlightSelected(uiDoc);
+            SetPendingMark(doc, view, _selected.Select(x => x.ElementId), true);
             try
             {
                 while (true)
@@ -1373,35 +1374,75 @@ namespace METools.FamilyPlacer
                         FamilyName   = (el as FamilyInstance)?.Symbol?.Family?.Name ?? el.Name ?? "",
                         RoomName     = GetRoomNameForEl(doc, el as FamilyInstance, phase),
                     });
-                    HighlightSelected(uiDoc); // include the just-added element in the highlight right away
+                    SetPendingMark(doc, view, new[] { picked.ElementId }, true); // mark the just-added element right away
                 }
             }
             catch (Exception ex) { MessageBox.Show(ex.Message, S._("circuittagger.select_elements_title")); }
             finally
             {
-                ClearHighlight(uiDoc);
                 Show();
                 RefreshSelectionList();
+                // Deliberately NOT cleared here -- the whole point is that
+                // the mark stays visible after this picking session ends,
+                // so coming back later to add more still shows what's
+                // already queued. See OnClearClicked and the per-row
+                // remove button for where it actually gets cleared.
             }
         }
 
-        // Revit's own native selection highlight, reused here purely as a
-        // visual "these are already queued" indicator -- doesn't interfere
-        // with the PickObject calls above, which prompt for a new pick
-        // regardless of whatever's currently highlighted.
-        private void HighlightSelected(UIDocument uiDoc)
+        // BUG FIXED HERE: this used to call Selection.SetElementIds() to
+        // highlight already-queued elements, refreshed before and during
+        // the pick loop. That never actually worked -- confirmed against
+        // Autodesk's own Revit API forum (a long-standing, documented
+        // behavior, not a bug specific to this app): calling PickObject or
+        // PickObjects clears whatever's in the active Selection set the
+        // instant the pick loop starts, so anything set via SetElementIds
+        // right before it is wiped before it can ever be seen.
+        //
+        // Graphic overrides on the view are a genuinely different
+        // mechanism -- they're a property of the view/element pair, not
+        // of "selection" at all, so entering or leaving a pick loop has no
+        // effect on them. Same technique already used elsewhere in this
+        // file for the sub-label color override.
+        private static readonly Autodesk.Revit.DB.Color PendingTagColor = new Autodesk.Revit.DB.Color(255, 60, 170); // bold magenta -- distinct from existing red linework and from Revit's own selection blue
+
+        private void SetPendingMark(Document doc, View view, IEnumerable<ElementId> ids, bool on)
         {
-            try { uiDoc.Selection.SetElementIds(_selected.Select(x => x.ElementId).ToList()); }
+            if (doc == null || view == null) return;
+            var idList = ids?.Where(id => id != null && id != ElementId.InvalidElementId).ToList();
+            if (idList == null || idList.Count == 0) return;
+            try
+            {
+                using (var tx = new Transaction(doc, on ? "ME-Tools: Mark Pending Tag" : "ME-Tools: Clear Pending Tag Mark"))
+                {
+                    tx.Start();
+                    foreach (var id in idList)
+                    {
+                        try
+                        {
+                            var ogs = new OverrideGraphicSettings();
+                            if (on)
+                            {
+                                ogs.SetProjectionLineColor(PendingTagColor);
+                                ogs.SetProjectionLineWeight(6);
+                            }
+                            view.SetElementOverrides(id, ogs); // no color/weight set = reset to default when on == false
+                        }
+                        catch { }
+                    }
+                    tx.Commit();
+                }
+            }
             catch { }
         }
 
-        private void ClearHighlight(UIDocument uiDoc)
+        private void OnClearClicked()
         {
-            try { uiDoc?.Selection.SetElementIds(new List<ElementId>()); }
-            catch { }
+            var uiDoc = _uiApp?.ActiveUIDocument;
+            SetPendingMark(uiDoc?.Document, uiDoc?.ActiveView, _selected.Select(x => x.ElementId), false);
+            _selected.Clear();
+            RefreshSelectionList();
         }
-
-        private void OnClearClicked() { _selected.Clear(); RefreshSelectionList(); }
 
         private void OnLoadFromSelectionClicked()
         {
@@ -1530,7 +1571,13 @@ namespace METools.FamilyPlacer
                         Foreground = MeToolsTheme.BrMuted, Cursor = Cursors.Hand,
                         VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 4, 0),
                     };
-                    removeBtn.Click += (s, e) => { _selected.Remove(captured); RefreshSelectionList(); };
+                    removeBtn.Click += (s, e) =>
+                    {
+                        var uiDoc = _uiApp?.ActiveUIDocument;
+                        SetPendingMark(uiDoc?.Document, uiDoc?.ActiveView, new[] { captured.ElementId }, false);
+                        _selected.Remove(captured);
+                        RefreshSelectionList();
+                    };
 
                     Grid.SetColumn(catBadge,  0); row.Children.Add(catBadge);
                     Grid.SetColumn(famTb,     1); row.Children.Add(famTb);

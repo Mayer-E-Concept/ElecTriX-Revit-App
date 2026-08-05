@@ -33,9 +33,10 @@ namespace METools
         private StackPanel _panLicense;
         private StackPanel _panWorksets;
         private StackPanel _panHeights;
+        private StackPanel _panImports;
 
         // ── Tab buttons ───────────────────────────────────────────────────
-        private Button _tabAppearance, _tabLanguage, _tabLicense, _tabWorksets, _tabHeights;
+        private Button _tabAppearance, _tabLanguage, _tabLicense, _tabWorksets, _tabHeights, _tabImports;
         private int    _activeTab = 0;
 
         // ── License controls ──────────────────────────────────────────────
@@ -53,6 +54,11 @@ namespace METools
         private ListBox _lbWorksets;
         private ListBox _lbCurrentWorksets;
         private TextBox _tbNewWorkset;
+
+        // ── Imported Objects controls ─────────────────────────────────────
+        private StackPanel _importsList;
+        private TextBlock  _importsStatus;
+        private readonly List<ImportedCategoryRow> _importRows = new List<ImportedCategoryRow>();
 
         private static string WorksetsConfigPath =>
             Path.Combine(
@@ -95,6 +101,7 @@ namespace METools
             _panLicense    = BuildLicensePanel();
             _panWorksets   = BuildWorksetsPanel();
             _panHeights    = BuildHeightsPanel();
+            _panImports    = BuildImportsPanel();
 
             var contentStack = new StackPanel();
             contentStack.Children.Add(_panAppearance);
@@ -102,6 +109,7 @@ namespace METools
             contentStack.Children.Add(_panLicense);
             contentStack.Children.Add(_panWorksets);
             contentStack.Children.Add(_panHeights);
+            contentStack.Children.Add(_panImports);
             contentBorder.Child = contentStack;
             _contentRoot.Children.Add(contentBorder);
 
@@ -112,7 +120,7 @@ namespace METools
         private UIElement BuildTabBar()
         {
             var bar = new Grid { Height = 42, Background = MeToolsTheme.BrPetrolDark };
-            for (int i = 0; i < 5; i++)
+            for (int i = 0; i < 6; i++)
                 bar.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
             _tabAppearance = MakeTabBtn(S._("settings.tab.appearance"), 0);
@@ -120,18 +128,21 @@ namespace METools
             _tabLicense    = MakeTabBtn(S._("settings.tab.license"),    2);
             _tabWorksets   = MakeTabBtn(S._("settings.tab.worksets"),   3);
             _tabHeights    = MakeTabBtn(S._("settings.tab.heights"),    4);
+            _tabImports    = MakeTabBtn(S._("settings.tab.imports"),    5);
 
             Grid.SetColumn(_tabAppearance, 0);
             Grid.SetColumn(_tabLanguage,   1);
             Grid.SetColumn(_tabLicense,    2);
             Grid.SetColumn(_tabWorksets,   3);
             Grid.SetColumn(_tabHeights,    4);
+            Grid.SetColumn(_tabImports,    5);
 
             bar.Children.Add(_tabAppearance);
             bar.Children.Add(_tabLanguage);
             bar.Children.Add(_tabLicense);
             bar.Children.Add(_tabWorksets);
             bar.Children.Add(_tabHeights);
+            bar.Children.Add(_tabImports);
             return bar;
         }
 
@@ -161,15 +172,18 @@ namespace METools
             _panLicense.Visibility    = idx == 2 ? Visibility.Visible : Visibility.Collapsed;
             _panWorksets.Visibility   = idx == 3 ? Visibility.Visible : Visibility.Collapsed;
             _panHeights.Visibility    = idx == 4 ? Visibility.Visible : Visibility.Collapsed;
+            _panImports.Visibility    = idx == 5 ? Visibility.Visible : Visibility.Collapsed;
 
             StyleTabBtn(_tabAppearance, idx == 0);
             StyleTabBtn(_tabLanguage,   idx == 1);
             StyleTabBtn(_tabLicense,    idx == 2);
             StyleTabBtn(_tabWorksets,   idx == 3);
             StyleTabBtn(_tabHeights,    idx == 4);
+            StyleTabBtn(_tabImports,    idx == 5);
 
             if (idx == 3) { LoadWorksetsIntoList(); LoadCurrentProjectWorksets(); }
             if (idx == 4) LoadHeightsIntoList();
+            if (idx == 5) LoadImportedCategories();
 
             ResizeToFitContent();
         }
@@ -820,6 +834,326 @@ namespace METools
                 _heightsLoaded = true;
                 ResizeToFitContent();
             }), System.Windows.Threading.DispatcherPriority.Background);
+        }
+
+        // -- TAB 5: Imported Objects ----------------------------------------
+        //
+        // Revit's own Object Styles dialog lets you delete a top-level
+        // imported category's SUBcategories, but not the top-level category
+        // itself -- confirmed as a real, long-standing Revit limitation
+        // (not specific to this app) against multiple independent Revit API
+        // forum threads reporting the exact same symptom. The reliable fix,
+        // per those same threads: a category still actively referenced by a
+        // live ImportInstance can't be deleted directly, but deleting that
+        // ImportInstance FIRST makes the category itself genuinely
+        // deletable afterward. A category with no live instance at all
+        // (the file was removed from the model at some point, but Revit
+        // left the category behind -- the common "orphaned .dwg category"
+        // case) should already be directly deletable.
+        //
+        // Deleting a category doesn't always throw when Revit refuses --
+        // it can silently do nothing -- so this re-scans afterward and
+        // reports exactly what actually got removed, rather than assuming
+        // success from the absence of an exception.
+        private class ImportedCategoryRow
+        {
+            public Autodesk.Revit.DB.ElementId CategoryId;
+            public string   Name;
+            public int      SubCategoryCount;
+            public int      LiveInstanceCount;
+            public CheckBox Checkbox;
+        }
+
+        private StackPanel BuildImportsPanel()
+        {
+            var p = new StackPanel { Visibility = Visibility.Collapsed };
+            p.Children.Add(Sec(S._("settings.imports.title")));
+            p.Children.Add(InfoBox(S._("settings.imports.hint")));
+
+            var btnRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 8, 0, 8) };
+            var btnAll  = FooterBtn(S._("settings.imports.select_all"),  primary: false, onClick: OnImportsSelectAll);
+            var btnNone = FooterBtn(S._("settings.imports.select_none"), primary: false, onClick: OnImportsSelectNone);
+            var btnRescan = FooterBtn(S._("settings.imports.rescan"), primary: false, onClick: LoadImportedCategories);
+            btnAll.Margin = new Thickness(0, 0, 8, 0);
+            btnNone.Margin = new Thickness(0, 0, 8, 0);
+            btnRow.Children.Add(btnAll);
+            btnRow.Children.Add(btnNone);
+            btnRow.Children.Add(btnRescan);
+            p.Children.Add(btnRow);
+
+            _importsList = new StackPanel { Margin = new Thickness(0, 0, 0, 8) };
+            var scroll = new ScrollViewer
+            {
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                MaxHeight = 320,
+                Content   = _importsList,
+            };
+            p.Children.Add(scroll);
+
+            _importsStatus = new TextBlock
+            {
+                FontSize = 11, Foreground = MeToolsTheme.BrMuted, Margin = new Thickness(2, 0, 0, 8),
+            };
+            p.Children.Add(_importsStatus);
+
+            var btnDelete = new Button
+            {
+                Content = S._("settings.imports.delete_selected"), Height = 36, FontSize = 13, FontWeight = FontWeights.SemiBold,
+                Padding = new Thickness(16, 0, 16, 0),
+                Background = new SolidColorBrush(MeToolsTheme.CRed), BorderBrush = new SolidColorBrush(MeToolsTheme.CRed),
+                BorderThickness = new Thickness(1.5), Foreground = Brushes.White, Cursor = Cursors.Hand,
+            };
+            btnDelete.Template = RoundedBtnTemplate();
+            btnDelete.Click += (s, e) => OnDeleteImportsClicked();
+            p.Children.Add(btnDelete);
+
+            return p;
+        }
+
+        private void LoadImportedCategories()
+        {
+            if (_importsList == null) return;
+            _importsList.Children.Clear();
+            _importRows.Clear();
+
+            var doc = SettingsCommand.CurrentDocument;
+            if (doc == null)
+            {
+                _importsList.Children.Add(InfoBox(S._("settings.imports.no_document")));
+                UpdateImportsStatus();
+                return;
+            }
+
+            List<Autodesk.Revit.DB.Category> topLevel;
+            var liveInstanceCounts = new Dictionary<long, int>();
+            try
+            {
+                topLevel = doc.Settings.Categories.Cast<Autodesk.Revit.DB.Category>()
+                    .Where(c => c != null && c.Parent == null && c.Id != null && c.Id.IntegerValue > 0)
+                    .OrderBy(c => c.Name, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+
+                foreach (var ii in new Autodesk.Revit.DB.FilteredElementCollector(doc)
+                    .OfClass(typeof(Autodesk.Revit.DB.ImportInstance))
+                    .Cast<Autodesk.Revit.DB.ImportInstance>())
+                {
+                    var cid = ii.Category?.Id;
+                    if (cid == null) continue;
+                    liveInstanceCounts[cid.IntegerValue] = liveInstanceCounts.TryGetValue(cid.IntegerValue, out var n) ? n + 1 : 1;
+                }
+            }
+            catch (Exception ex)
+            {
+                _importsList.Children.Add(InfoBox(string.Format(S._("settings.imports.scan_failed"), ex.Message)));
+                UpdateImportsStatus();
+                return;
+            }
+
+            if (topLevel.Count == 0)
+            {
+                _importsList.Children.Add(new TextBlock
+                {
+                    Text = S._("settings.imports.none_found"), FontSize = 12, Foreground = MeToolsTheme.BrMuted,
+                    Margin = new Thickness(2, 8, 0, 8),
+                });
+                UpdateImportsStatus();
+                return;
+            }
+
+            foreach (var cat in topLevel)
+            {
+                int subCount = 0;
+                try { subCount = cat.SubCategories?.Size ?? 0; } catch { }
+                liveInstanceCounts.TryGetValue(cat.Id.IntegerValue, out var liveCount);
+
+                var row = new ImportedCategoryRow
+                {
+                    CategoryId       = cat.Id,
+                    Name             = cat.Name,
+                    SubCategoryCount = subCount,
+                    LiveInstanceCount = liveCount,
+                };
+                _importRows.Add(row);
+                _importsList.Children.Add(BuildImportRow(row));
+            }
+            UpdateImportsStatus();
+            ResizeToFitContent();
+        }
+
+        private UIElement BuildImportRow(ImportedCategoryRow row)
+        {
+            var grid = new Grid { Margin = new Thickness(2, 4, 2, 4) };
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+            var cb = new CheckBox { VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 3, 8, 0) };
+            cb.Checked   += (s, e) => UpdateImportsStatus();
+            cb.Unchecked += (s, e) => UpdateImportsStatus();
+            row.Checkbox = cb;
+            Grid.SetColumn(cb, 0);
+
+            var textStack = new StackPanel();
+            textStack.Children.Add(new TextBlock
+            {
+                Text = row.Name, FontSize = 12, FontWeight = FontWeights.SemiBold, Foreground = MeToolsTheme.BrText,
+            });
+
+            string statusText = row.LiveInstanceCount > 0
+                ? string.Format(S._("settings.imports.row_in_use"), row.SubCategoryCount, row.LiveInstanceCount)
+                : string.Format(S._("settings.imports.row_orphaned"), row.SubCategoryCount);
+            textStack.Children.Add(new TextBlock
+            {
+                Text = statusText, FontSize = 10.5,
+                Foreground = row.LiveInstanceCount > 0 ? MeToolsTheme.BrOrange : MeToolsTheme.BrMuted,
+            });
+            Grid.SetColumn(textStack, 1);
+
+            grid.Children.Add(cb);
+            grid.Children.Add(textStack);
+
+            return new Border
+            {
+                BorderBrush = MeToolsTheme.BrBorder, BorderThickness = new Thickness(0, 0, 0, 1),
+                Padding = new Thickness(0, 4, 0, 4), Child = grid,
+            };
+        }
+
+        private void UpdateImportsStatus()
+        {
+            if (_importsStatus == null) return;
+            int selected = _importRows.Count(r => r.Checkbox?.IsChecked == true);
+            _importsStatus.Text = selected > 0
+                ? string.Format(S._("settings.imports.n_selected"), selected)
+                : S._("settings.imports.none_selected");
+        }
+
+        private void OnImportsSelectAll()
+        {
+            foreach (var r in _importRows) if (r.Checkbox != null) r.Checkbox.IsChecked = true;
+            UpdateImportsStatus();
+        }
+
+        private void OnImportsSelectNone()
+        {
+            foreach (var r in _importRows) if (r.Checkbox != null) r.Checkbox.IsChecked = false;
+            UpdateImportsStatus();
+        }
+
+        private void OnDeleteImportsClicked()
+        {
+            var selected = _importRows.Where(r => r.Checkbox?.IsChecked == true).ToList();
+            if (selected.Count == 0)
+            {
+                MessageBox.Show(S._("settings.imports.select_first"), S._("settings.imports.title"),
+                    MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            var doc = SettingsCommand.CurrentDocument;
+            if (doc == null)
+            {
+                MessageBox.Show(S._("settings.imports.no_document"), S._("settings.imports.title"),
+                    MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            int inUseCount = selected.Count(r => r.LiveInstanceCount > 0);
+            string confirmMsg = string.Format(S._("settings.imports.confirm_delete"), selected.Count);
+            if (inUseCount > 0)
+                confirmMsg += "\n\n" + string.Format(S._("settings.imports.confirm_delete_inuse_warning"), inUseCount);
+
+            var result = MessageBox.Show(confirmMsg, S._("settings.imports.confirm_title"),
+                MessageBoxButton.YesNo, MessageBoxImage.Warning);
+            if (result != MessageBoxResult.Yes) return;
+
+            try
+            {
+                using (var tx = new Autodesk.Revit.DB.Transaction(doc, "ME-Tools: Remove Imported Categories"))
+                {
+                    tx.Start();
+
+                    // Delete live instances FIRST -- a category still
+                    // actively referenced by one can't be deleted directly.
+                    var allImportInstances = new Autodesk.Revit.DB.FilteredElementCollector(doc)
+                        .OfClass(typeof(Autodesk.Revit.DB.ImportInstance))
+                        .Cast<Autodesk.Revit.DB.ImportInstance>()
+                        .ToList();
+
+                    foreach (var row in selected)
+                    {
+                        foreach (var ii in allImportInstances)
+                        {
+                            if (ii.Category?.Id?.IntegerValue == row.CategoryId.IntegerValue)
+                                try { doc.Delete(ii.Id); } catch { }
+                        }
+                    }
+
+                    doc.Regenerate();
+
+                    foreach (var row in selected)
+                    {
+                        try
+                        {
+                            var cat = doc.Settings.Categories.Cast<Autodesk.Revit.DB.Category>()
+                                .FirstOrDefault(c => c.Id.IntegerValue == row.CategoryId.IntegerValue);
+                            if (cat == null) continue;
+
+                            try
+                            {
+                                foreach (Autodesk.Revit.DB.Category sub in cat.SubCategories)
+                                    try { doc.Delete(sub.Id); } catch { }
+                            }
+                            catch { }
+
+                            try { doc.Delete(cat.Id); } catch { }
+                        }
+                        catch { }
+                    }
+
+                    tx.Commit();
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(string.Format(S._("settings.imports.delete_error"), ex.Message),
+                    S._("settings.imports.title"), MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            // Verify -- doc.Delete() on a still-protected category doesn't
+            // throw, it just silently does nothing, so trust a fresh scan,
+            // not the absence of an exception.
+            HashSet<long> stillExisting;
+            try
+            {
+                stillExisting = doc.Settings.Categories.Cast<Autodesk.Revit.DB.Category>()
+                    .Where(c => c.Parent == null)
+                    .Select(c => (long)c.Id.IntegerValue)
+                    .ToHashSet();
+            }
+            catch { stillExisting = new HashSet<long>(); }
+
+            int removed = 0, stillPresent = 0;
+            var stillPresentNames = new List<string>();
+            foreach (var row in selected)
+            {
+                if (stillExisting.Contains(row.CategoryId.IntegerValue))
+                { stillPresent++; stillPresentNames.Add(row.Name); }
+                else removed++;
+            }
+
+            var sb = new System.Text.StringBuilder();
+            sb.AppendLine(string.Format(S._("settings.imports.removed_line"), removed));
+            if (stillPresent > 0)
+            {
+                sb.AppendLine(string.Format(S._("settings.imports.still_present_line"), stillPresent));
+                sb.AppendLine(S._("settings.imports.still_present_hint"));
+                foreach (var n in stillPresentNames.Distinct().Take(10))
+                    sb.AppendLine("   • " + n);
+            }
+            MessageBox.Show(sb.ToString(), S._("settings.imports.done_title"), MessageBoxButton.OK, MessageBoxImage.None);
+
+            LoadImportedCategories();
         }
 
         private UIElement BuildHeightRow(METools.FamilyPlacer.FamilyHeightEntry en,

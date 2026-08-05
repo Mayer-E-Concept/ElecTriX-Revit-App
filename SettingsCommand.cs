@@ -28,7 +28,7 @@ namespace METools
             if (RibbonButton != null)
                 RibbonButton.LongDescription =
                     $"Settings — Mayer E-Concept SRL\n\n" +
-                    "Appearance · Language · License · Worksets\n\n" +
+                    "Appearance · Language · License · Worksets · Imported Objects\n\n" +
                     $"License status: {LicenseManager.StatusText}";
 
             return Result.Succeeded;

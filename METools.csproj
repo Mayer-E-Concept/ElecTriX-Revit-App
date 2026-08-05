@@ -50,15 +50,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Compile Remove="SymmetricDistributor_Revit2025\**" />
-    <EmbeddedResource Remove="SymmetricDistributor_Revit2025\**" />
-    <None Remove="SymmetricDistributor_Revit2025\**" />
-    <Page Remove="SymmetricDistributor_Revit2025\**" />
-    <Compile Remove="KonfigFenster.xaml.cs" />
-    <Page Remove="KonfigFenster.xaml" />
-  </ItemGroup>
-
-  <ItemGroup>
     <Folder Include="Icons\" />
   </ItemGroup>
 
