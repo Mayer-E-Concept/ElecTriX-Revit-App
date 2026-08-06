@@ -148,6 +148,7 @@ namespace METools
         {
             public bool Complete { get; set; }
             public bool IncludesNested { get; set; } // true only if the scan that built this ALSO checked families nested inside others
+            public List<long> VisitedFamilyIds { get; set; } = new List<long>();
             public Dictionary<string, List<CachedFamilyMatch>> Index { get; set; }
                 = new Dictionary<string, List<CachedFamilyMatch>>(StringComparer.OrdinalIgnoreCase);
         }
@@ -169,8 +170,17 @@ namespace METools
         // original scan. A "Force Full Rescan" option exists for when the
         // cache might be stale (a family was added, removed, or edited
         // since it was built).
+        //
+        // _visitedFamilyIds is tracked separately from "complete" -- a scan
+        // can stop early (see FindOwningFamilies) the moment every
+        // currently-wanted category has at least one match, without
+        // opening every remaining family. Every family actually opened
+        // still gets permanently remembered here, so a LATER attempt for
+        // different categories only opens families that are still unvisited,
+        // rather than re-scanning everything from the start each time.
         private readonly Dictionary<string, List<CachedFamilyMatch>> _familyCategoryIndex
             = new Dictionary<string, List<CachedFamilyMatch>>(StringComparer.OrdinalIgnoreCase);
+        private readonly HashSet<long> _visitedFamilyIds = new HashSet<long>();
         private bool _familyIndexComplete = false;
         private bool _familyIndexIncludesNested = false;
 
@@ -181,6 +191,7 @@ namespace METools
         private void LoadFamilyIndex(Autodesk.Revit.DB.Document doc)
         {
             _familyCategoryIndex.Clear();
+            _visitedFamilyIds.Clear();
             _familyIndexComplete = false;
             _familyIndexIncludesNested = false;
             try
@@ -195,6 +206,8 @@ namespace METools
                 {
                     _familyIndexComplete = file.Complete;
                     _familyIndexIncludesNested = file.IncludesNested;
+                    if (file.VisitedFamilyIds != null)
+                        foreach (var id in file.VisitedFamilyIds) _visitedFamilyIds.Add(id);
                     if (file.Index != null)
                         foreach (var kv in file.Index)
                             _familyCategoryIndex[kv.Key] = kv.Value ?? new List<CachedFamilyMatch>();
@@ -212,7 +225,13 @@ namespace METools
                 var path = FamilyIndexPath(projectId);
                 var dir = Path.GetDirectoryName(path);
                 if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
-                var file = new FamilyIndexFile { Complete = _familyIndexComplete, IncludesNested = _familyIndexIncludesNested, Index = _familyCategoryIndex };
+                var file = new FamilyIndexFile
+                {
+                    Complete         = _familyIndexComplete,
+                    IncludesNested   = _familyIndexIncludesNested,
+                    VisitedFamilyIds = _visitedFamilyIds.ToList(),
+                    Index            = _familyCategoryIndex,
+                };
                 var json = JsonSerializer.Serialize(file);
                 File.WriteAllText(path, json, System.Text.Encoding.UTF8);
             }
@@ -1615,37 +1634,47 @@ namespace METools
         // it) for a case that hasn't actually been confirmed to happen yet
         // on a real project. "Force Full Rescan" turns this on.
         //
-        // forceFullRescan skips the cache entirely and re-opens every
-        // family regardless -- for when the cache might be stale (a family
-        // was added, removed, or edited since it was built).
-        //
-        // onProgress(current, total, familyName) fires once per family
-        // opened, so the caller can show live status instead of a frozen
-        // "Scanning..." message for the entire multi-minute duration.
+        // forceFullRescan clears the cache AND the visited-families record
+        // entirely and starts completely fresh -- for when the cache might
+        // be stale (a family was added, removed, or edited since it was
+        // built). Without forceFullRescan, families already visited in an
+        // EARLIER attempt are skipped outright, and the scan stops the
+        // moment every currently-wanted category already has at least one
+        // match -- there's no reason to keep opening the rest of the
+        // project's families once the specific answer needed right now has
+        // already been found. _familyIndexComplete only becomes true once
+        // every family has actually been visited (possibly across several
+        // separate attempts, not necessarily all in one run), which is
+        // what makes it safe to trust the cache outright on a later call
+        // for different categories.
         private Dictionary<string, List<FamilyMatch>> FindOwningFamilies(
             Autodesk.Revit.DB.Document doc, IEnumerable<string> categoryNames,
-            bool forceFullRescan = false, bool includeNested = false, Action<int, int, string> onProgress = null)
+            bool forceFullRescan = false, bool includeNested = false)
         {
             var wanted = new HashSet<string>(categoryNames, StringComparer.OrdinalIgnoreCase);
             var result = wanted.ToDictionary(n => n, n => new List<FamilyMatch>(), StringComparer.OrdinalIgnoreCase);
 
-            if (!forceFullRescan)
-            {
-                LoadFamilyIndex(doc);
-                if (_familyIndexComplete)
-                {
-                    ResolveMatchesFromIndex(doc, wanted, result);
-                    return result;
-                }
-            }
+            LoadFamilyIndex(doc);
 
-            // Full scan (slow -- this is the expensive EditFamily-per-family
-            // cost) -- records EVERY category name seen along the way, not
-            // just the ones in `wanted`, since every family gets opened
-            // regardless. That's what lets a LATER click asking about
-            // completely different categories reuse this same cache
-            // instead of scanning again.
-            var freshIndex = new Dictionary<string, List<CachedFamilyMatch>>(StringComparer.OrdinalIgnoreCase);
+            if (forceFullRescan)
+            {
+                _familyCategoryIndex.Clear();
+                _visitedFamilyIds.Clear();
+                _familyIndexComplete = false;
+            }
+            else if (_familyIndexComplete)
+            {
+                ResolveMatchesFromIndex(doc, wanted, result);
+                return result;
+            }
+            else if (wanted.All(w => _familyCategoryIndex.TryGetValue(w, out var m) && m.Count > 0))
+            {
+                // Partial cache from an earlier attempt already has
+                // everything currently wanted -- no need to open even one
+                // more family to confirm that.
+                ResolveMatchesFromIndex(doc, wanted, result);
+                return result;
+            }
 
             List<Autodesk.Revit.DB.Family> families;
             try
@@ -1658,28 +1687,28 @@ namespace METools
             }
             catch { families = new List<Autodesk.Revit.DB.Family>(); }
 
-            var visitedFamilyIds = new HashSet<long>();
-            int done = 0;
+            var visitedThisPass = new HashSet<long>(); // separate from _visitedFamilyIds -- this one only guards against infinite loops on circular nesting WITHIN this single call
             foreach (var fam in families)
             {
-                done++;
-                try { onProgress?.Invoke(done, families.Count, fam.Name); } catch { }
+                if (_visitedFamilyIds.Contains(fam.Id.IntegerValue)) continue; // already checked in an earlier attempt -- never reopened
 
-                if (!visitedFamilyIds.Add(fam.Id.IntegerValue)) continue;
                 Autodesk.Revit.DB.Document famDoc = null;
                 try
                 {
                     famDoc = doc.EditFamily(fam);
-                    if (famDoc == null || !famDoc.IsFamilyDocument) continue;
-                    ScanFamilyDocForCategories(famDoc, fam, fam.Name, 0, freshIndex, visitedFamilyIds, includeNested);
+                    if (famDoc != null && famDoc.IsFamilyDocument)
+                        ScanFamilyDocForCategories(famDoc, fam, fam.Name, 0, _familyCategoryIndex, visitedThisPass, includeNested);
                 }
                 catch { }
                 finally { try { famDoc?.Close(false); } catch { } }
+
+                _visitedFamilyIds.Add(fam.Id.IntegerValue);
+
+                if (wanted.All(w => _familyCategoryIndex.TryGetValue(w, out var m) && m.Count > 0))
+                    break; // everything currently being asked about is already found -- stop here
             }
 
-            _familyCategoryIndex.Clear();
-            foreach (var kv in freshIndex) _familyCategoryIndex[kv.Key] = kv.Value;
-            _familyIndexComplete = true;
+            _familyIndexComplete       = _visitedFamilyIds.Count >= families.Count;
             _familyIndexIncludesNested = includeNested || _familyIndexIncludesNested; // once true from a fuller scan, a later shallow one shouldn't downgrade it
             SaveFamilyIndex(doc);
 
@@ -1867,23 +1896,7 @@ namespace METools
             finally { try { famDoc?.Close(false); } catch { } }
         }
 
-        private void PumpDispatcher()
-        {
-            try
-            {
-                // Synchronous, no new nested frame pushed -- the Settings
-                // window is already shown via ShowDialog(), which itself
-                // runs on its own nested dispatcher frame; pushing a SECOND
-                // one on top of that (the previous implementation) may not
-                // behave the same way it would in a plain, standalone WPF
-                // app. This relies on the existing message loop instead of
-                // introducing a new one.
-                Dispatcher.Invoke(new Action(() => { }), System.Windows.Threading.DispatcherPriority.Render);
-            }
-            catch { }
-        }
-
-        private void OnFindInFamiliesClicked(bool forceFullRescan = false)
+        private void OnFindInFamiliesClicked(bool forceFullRescan = false, bool skipConfirm = false)
         {
             var selected = _importRows.Where(r => r.Checkbox?.IsChecked == true).ToList();
             if (selected.Count == 0)
@@ -1901,9 +1914,12 @@ namespace METools
                 return;
             }
 
-            var confirmResult = MessageBox.Show(S._("settings.imports.fix_families_confirm"),
-                S._("settings.imports.confirm_title"), MessageBoxButton.YesNo, MessageBoxImage.Warning);
-            if (confirmResult != MessageBoxResult.Yes) return;
+            if (!skipConfirm)
+            {
+                var confirmResult = MessageBox.Show(S._("settings.imports.fix_families_confirm"),
+                    S._("settings.imports.confirm_title"), MessageBoxButton.YesNo, MessageBoxImage.Warning);
+                if (confirmResult != MessageBoxResult.Yes) return;
+            }
 
             StatusLeft.Text = S._("settings.imports.scanning_families");
             Dispatcher.BeginInvoke(new Action(() =>
@@ -1912,17 +1928,7 @@ namespace METools
                 Dictionary<string, List<FamilyMatch>> owners;
                 try
                 {
-                    owners = FindOwningFamilies(doc, names, forceFullRescan, includeNested: forceFullRescan,
-                        onProgress: (current, total, famName) =>
-                        {
-                            // Forces an actual repaint, not just a property
-                            // change -- otherwise this text would sit frozen
-                            // for the entire multi-minute scan, which is its
-                            // own real problem even if the scan itself can't
-                            // go faster.
-                            StatusLeft.Text = string.Format(S._("settings.imports.scanning_progress"), current, total, famName);
-                            PumpDispatcher();
-                        });
+                    owners = FindOwningFamilies(doc, names, forceFullRescan, includeNested: forceFullRescan);
                 }
                 catch (Exception ex)
                 {
@@ -2054,6 +2060,7 @@ namespace METools
                             sb.AppendLine(string.Format(S._("settings.imports.n_more_locations"), kv.Value.Count - 2));
                     }
                 }
+                bool offerNestedRescan = notFoundCount > 0 && !_familyIndexIncludesNested;
                 if (notFoundCount > 0)
                 {
                     sb.AppendLine(string.Format(S._("settings.imports.fix_families_notfound_line"), notFoundCount));
@@ -2063,6 +2070,20 @@ namespace METools
                     foreach (var n in notFoundNames.Distinct().Take(10))
                         sb.AppendLine("   • " + n);
                 }
+
+                if (offerNestedRescan)
+                {
+                    sb.AppendLine();
+                    sb.AppendLine(S._("settings.imports.offer_nested_now"));
+                    var goDeeper = MessageBox.Show(sb.ToString(), S._("settings.imports.done_title"),
+                        MessageBoxButton.YesNo, MessageBoxImage.None);
+                    StatusLeft.Text = string.Format(S._("settings.imports.rescan_done"), _importRows.Count);
+                    LoadImportedCategories();
+                    if (goDeeper == MessageBoxResult.Yes)
+                        OnFindInFamiliesClicked(forceFullRescan: true, skipConfirm: true);
+                    return;
+                }
+
                 MessageBox.Show(sb.ToString(), S._("settings.imports.done_title"), MessageBoxButton.OK, MessageBoxImage.None);
 
                 StatusLeft.Text = string.Format(S._("settings.imports.rescan_done"), _importRows.Count);
