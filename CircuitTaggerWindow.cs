@@ -38,6 +38,8 @@ namespace METools.FamilyPlacer
         // Input fields
         private TextBox   _tbVorsicherung, _tbFI, _tbStromkreis, _tbSubIndex, _tbBeleuchtungskreis, _tbSubLabel;
         private ComboBox  _cbApartment, _cbBuilding;
+        private ComboBox  _cbTagFamily;
+        private List<TagFamilyOption> _tagFamilyOptions = new List<TagFamilyOption>();
         private TextBox   _tbGapMm, _tbStackGapMm;
         // Settings tab controls
         private TextBox   _tbSetGapMm, _tbSetOffsetYMm, _tbSetStackGapMm;
@@ -75,7 +77,7 @@ namespace METools.FamilyPlacer
         {
             _uiApp = uiApp; _extEvent = extEvent; _handler = handler;
             S.SetLanguage(SettingsStore.Language ?? "en");
-            InitWindow(S._("circuittagger.title"), 760);
+            InitWindow(S._("circuittagger.title"), 660);
             MaxHeight = Math.Min(820, SystemParameters.WorkArea.Height - 60);
             _settingsData = CircuitTaggerSettings.Load();
             WireHandler();
@@ -159,7 +161,7 @@ namespace METools.FamilyPlacer
             _panStats    = BuildStatsPanel();
             _panSettings = BuildSettingsPanel();
 
-            _tabTag      = MakeTab(S._("circuittagger.tab_tag"),      MeToolsTheme.CPetrol, () => ShowTab(_tabTag,      _panTag));
+            _tabTag      = MakeTab(S._("circuittagger.tab_tag"),      MeToolsTheme.CPetrol, () => { ShowTab(_tabTag, _panTag); RefreshTagFamilyOptions(); });
             _tabStats    = MakeTab(S._("circuittagger.tab_stats"),    MeToolsTheme.COrange, () => { ShowTab(_tabStats, _panStats); RefreshStats(); });
             _tabSettings = MakeTab(S._("circuittagger.tab_settings"), MeToolsTheme.CGreen,  () => ShowTab(_tabSettings, _panSettings));
             var sp = new StackPanel { Orientation = Orientation.Horizontal };
@@ -248,7 +250,7 @@ namespace METools.FamilyPlacer
             var selBox = new Border
             {
                 BorderBrush = MeToolsTheme.BrBorder, BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(5), ClipToBounds = true, MinHeight = 80, MaxHeight = 200,
+                CornerRadius = new CornerRadius(5), ClipToBounds = true, MinHeight = 60, MaxHeight = 160,
             };
             var selScroll = new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
                 HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
@@ -256,53 +258,72 @@ namespace METools.FamilyPlacer
             selScroll.Content = _selectionList; selBox.Child = selScroll;
             sp.Children.Add(selBox);
 
-            sp.Children.Add(Div());
+            sp.Children.Add(Div(10));
 
-            // -- Circuit Parameters (2x2 grid + sub-index)
+            // -- Tag Family: one row -- inline label, fixed-width combo,
+            // Refresh button. No standalone section header, no visible hint
+            // paragraph (the hint is a tooltip on the combo now). Lets
+            // Stefan switch between e.g. a lamp/socket tag and a fire alarm
+            // tag without leaving this window.
+            var tfRow = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+            tfRow.Children.Add(new TextBlock
+            {
+                Text = S._("circuittagger.tag_family_label"), FontSize = 11, FontWeight = FontWeights.SemiBold,
+                Foreground = MeToolsTheme.BrMuted, VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(0, 0, 8, 0),
+            });
+            _cbTagFamily = CompactComboStrict(S._("circuittagger.tag_family_hint"), 210);
+            _cbTagFamily.Margin = new Thickness(0, 0, 8, 0);
+            tfRow.Children.Add(_cbTagFamily);
+            var btnTfRefresh = SmallBtn(S._("circuittagger.refresh"), false, RefreshTagFamilyOptions);
+            tfRow.Children.Add(btnTfRefresh);
+            sp.Children.Add(tfRow);
+            _allCombos.Add(_cbTagFamily);
+            _cbTagFamily.SelectionChanged += (s, e) =>
+            {
+                var chosen = _cbTagFamily.SelectedItem as TagFamilyOption;
+                if (chosen == null) return;
+                _settingsData = _settingsData ?? new CircuitTaggerSettingsData();
+                _settingsData.TagFamilyName = chosen.FamilyName;
+                _settingsData.TagTypeName   = chosen.TypeName;
+                CircuitTaggerSettings.Save(_settingsData);
+            };
+            RefreshTagFamilyOptions();
+
+            sp.Children.Add(Div(10));
+
+            // -- Circuit Parameters: narrow fields sized to what actually
+            // goes in them (a couple of digits or letters), flowing in one
+            // row instead of a tall 2-row grid. Per-field examples that used
+            // to sit visibly below each box are now tooltips; the formula
+            // itself stays as a compact caption since it's non-obvious.
             sp.Children.Add(SecH(S._("circuittagger.circuit_parameters")));
-            sp.Children.Add(InfoBox(S._("circuittagger.circuit_params_hint")));
+            sp.Children.Add(Caption(S._("circuittagger.circuit_params_hint")));
 
-            var p2 = new Grid { Margin = new Thickness(0, 4, 0, 0) };
-            p2.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            p2.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(12) });
-            p2.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            p2.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(12) });
-            p2.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(0.6, GridUnitType.Star) });
-            p2.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-            p2.RowDefinitions.Add(new RowDefinition { Height = new GridLength(8) });
-            p2.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            var pRow = new WrapPanel { Orientation = Orientation.Horizontal };
+            pRow.Children.Add(CompactField("Vorsicherung", S._("circuittagger.fuse_hint"), 58, out _tbVorsicherung));
+            pRow.Children.Add(CompactField("FI", S._("circuittagger.fi_hint"), 40, out _tbFI));
+            pRow.Children.Add(CompactField(S._("circuittagger.subindex_label"), S._("circuittagger.subindex_hint"), 40, out _tbSubIndex));
+            pRow.Children.Add(CompactField("Stromkreis", S._("circuittagger.circuit_hint"), 54, out _tbStromkreis));
+            pRow.Children.Add(CompactField("Beleuchtungskreis", S._("circuittagger.lighting_circuit_hint"), 54, out _tbBeleuchtungskreis));
 
-            var vsCard = InlineCard("Vorsicherung", S._("circuittagger.fuse_hint"), out _tbVorsicherung);
-            Grid.SetRow(vsCard, 0); Grid.SetColumn(vsCard, 0); p2.Children.Add(vsCard);
-
-            var fiCard = InlineCard("FI (RCD number)", S._("circuittagger.fi_hint"), out _tbFI);
-            Grid.SetRow(fiCard, 0); Grid.SetColumn(fiCard, 2); p2.Children.Add(fiCard);
-
-            var subCard = InlineCard(S._("circuittagger.subindex_label"), S._("circuittagger.subindex_hint"), out _tbSubIndex);
-            Grid.SetRow(subCard, 0); Grid.SetColumn(subCard, 4); p2.Children.Add(subCard);
-
-            var skCard = InlineCard("Stromkreis", S._("circuittagger.circuit_hint"), out _tbStromkreis);
-            Grid.SetRow(skCard, 2); Grid.SetColumn(skCard, 0); p2.Children.Add(skCard);
-
-            var bkCard = InlineCard("Beleuchtungskreis", S._("circuittagger.lighting_circuit_hint"), out _tbBeleuchtungskreis);
-            Grid.SetRow(bkCard, 2); Grid.SetColumn(bkCard, 2); p2.Children.Add(bkCard);
-
-            // Preview box in 5th column, row 2
+            // Preview chip -- flows in the same row as the fields it previews
             var prevBox = new Border
             {
                 Background = MeToolsTheme.BrSurface, BorderBrush = MeToolsTheme.BrBorder,
                 BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(4),
-                Padding = new Thickness(8, 6, 8, 6),
+                Padding = new Thickness(10, 3, 10, 3), Margin = new Thickness(0, 0, 0, 8),
+                VerticalAlignment = VerticalAlignment.Top,
             };
             var prevSp = new StackPanel();
             prevSp.Children.Add(new TextBlock { Text = S._("circuittagger.preview"), FontSize = 8, FontWeight = FontWeights.SemiBold,
-                Foreground = MeToolsTheme.BrMuted, Margin = new Thickness(0, 0, 0, 3) });
-            var prevLabel = new TextBlock { Text = "--", FontSize = 22, FontWeight = FontWeights.Bold,
+                Foreground = MeToolsTheme.BrMuted, Margin = new Thickness(0, 0, 0, 2) });
+            var prevLabel = new TextBlock { Text = "--", FontSize = 16, FontWeight = FontWeights.Bold,
                 FontFamily = new FontFamily("Consolas"), Foreground = MeToolsTheme.BrPetrol };
             prevSp.Children.Add(prevLabel); prevBox.Child = prevSp;
-            Grid.SetRow(prevBox, 2); Grid.SetColumn(prevBox, 4); p2.Children.Add(prevBox);
+            pRow.Children.Add(prevBox);
 
-            sp.Children.Add(p2);
+            sp.Children.Add(pRow);
             _allInputs.Add(_tbVorsicherung); _allInputs.Add(_tbFI); _allInputs.Add(_tbSubIndex);
             _allInputs.Add(_tbStromkreis); _allInputs.Add(_tbBeleuchtungskreis);
 
@@ -319,34 +340,36 @@ namespace METools.FamilyPlacer
             _tbStromkreis.TextChanged += (s, e) => updatePreview();
             _tbSubIndex.TextChanged   += (s, e) => updatePreview();
 
-            // Sub-label (secondary annotation tag: a, b, c...)
-            sp.Children.Add(Div());
-            sp.Children.Add(SecH(S._("circuittagger.secondary_tag")));
-            sp.Children.Add(InfoBox(S._("circuittagger.secondary_tag_hint")));
-            var subLabelCard = InlineCard(S._("circuittagger.secondary_label"), S._("circuittagger.secondary_label_hint"), out _tbSubLabel);
-            sp.Children.Add(subLabelCard);
-            _allInputs.Add(_tbSubLabel);
+            sp.Children.Add(Div(10));
 
-            sp.Children.Add(Div());
+            // -- Secondary Label + Group Tags share one row now -- each
+            // field already carries its own small caps label, so a second
+            // full section header per group would just be repeating that.
+            // Captions stay (they explain non-obvious behavior); the
+            // per-field hover tooltips are gone per request.
+            sp.Children.Add(Caption(S._("circuittagger.secondary_tag_hint")));
+            sp.Children.Add(Caption(S._("circuittagger.group_tags_hint")));
 
-            // -- Group Tags (Apartment + Building side by side)
-            sp.Children.Add(SecH(S._("circuittagger.group_tags")));
-            sp.Children.Add(InfoBox(S._("circuittagger.group_tags_hint")));
-
-            var gRow = new Grid { Margin = new Thickness(0, 4, 0, 0) };
+            var gRow = new Grid { Margin = new Thickness(0, 2, 0, 0) };
+            gRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            gRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(16) });
             gRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             gRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(12) });
             gRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
-            var aptCard = ComboCard("Apartment / Group", S._("circuittagger.pick_dropdown_hint"), out _cbApartment);
-            Grid.SetColumn(aptCard, 0); gRow.Children.Add(aptCard);
+            var secField = CompactField(S._("circuittagger.secondary_label"), null, 140, out _tbSubLabel);
+            Grid.SetColumn(secField, 0); gRow.Children.Add(secField);
 
-            var bldCard = ComboCard("Building / Haus", S._("circuittagger.pick_dropdown_hint"), out _cbBuilding);
-            Grid.SetColumn(bldCard, 2); gRow.Children.Add(bldCard);
+            var aptCard = ComboCard("Apartment / Group", null, out _cbApartment);
+            Grid.SetColumn(aptCard, 2); gRow.Children.Add(aptCard);
+
+            var bldCard = ComboCard("Building / Haus", null, out _cbBuilding);
+            Grid.SetColumn(bldCard, 4); gRow.Children.Add(bldCard);
             sp.Children.Add(gRow);
+            _allInputs.Add(_tbSubLabel);
             _allCombos.Add(_cbApartment); _allCombos.Add(_cbBuilding);
 
-            sp.Children.Add(Div());
+            sp.Children.Add(Div(10));
             _lblStatus = new TextBlock { Text = S._("circuittagger.ready"), FontSize = 11, Foreground = MeToolsTheme.BrMuted,
                 TextWrapping = TextWrapping.Wrap };
             sp.Children.Add(_lblStatus);
@@ -1480,6 +1503,7 @@ namespace METools.FamilyPlacer
                 StackGapMm = _settingsData?.StackGapMm ?? 8.0,
             };
             _handler.Settings = _settingsData ?? new CircuitTaggerSettingsData();
+            var chosenTagFamily = _cbTagFamily?.SelectedItem as TagFamilyOption;
             _handler.Request = new CircuitTaggerRequest
             {
                 Action            = CircuitTaggerAction.WriteParamsAndPlaceTags,
@@ -1492,6 +1516,8 @@ namespace METools.FamilyPlacer
                 Apartment         = _cbApartment?.Text?.Trim()         ?? "",
                 Building          = _cbBuilding?.Text?.Trim()          ?? "",
                 SubLabel          = _tbSubLabel?.Text?.Trim()          ?? "",
+                TagSymbolId          = chosenTagFamily?.SymbolId ?? ElementId.InvalidElementId,
+                TagFamilyDisplayName = chosenTagFamily?.DisplayName ?? "",
             };
             _extEvent.Raise();
             UpdateStatusBar(S._("circuittagger.writing_params"));
@@ -1635,6 +1661,63 @@ namespace METools.FamilyPlacer
             Height = 1, Background = MeToolsTheme.BrBorder, Margin = new Thickness(0, 16, 0, 16),
         };
 
+        // Slimmer divider for the reworked Tag tab -- same line, tighter
+        // vertical margin, so sections sit closer together.
+        private Border Div(double vmargin) => new Border
+        {
+            Height = 1, Background = MeToolsTheme.BrBorder, Margin = new Thickness(0, vmargin, 0, vmargin),
+        };
+
+        // A plain muted caption line -- like InfoBox's text, but without the
+        // colored background/padding, for hints worth keeping visible
+        // (explains non-obvious behavior) without eating a full card's worth
+        // of vertical space.
+        private TextBlock Caption(string text) => new TextBlock
+        {
+            Text = text, FontSize = 10, Foreground = MeToolsTheme.BrMuted,
+            TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 6),
+        };
+
+        // Compact label-above-narrow-input field for short circuit values
+        // (a couple of digits or letters, e.g. "F1", "B25A") -- replaces the
+        // old full-width InlineCard, which sized the box to the column
+        // rather than to what actually goes in it. The format-example hint
+        // that used to sit visibly below the box is now a tooltip instead.
+        private StackPanel CompactField(string label, string hint, double width, out TextBox tb)
+        {
+            var sp = new StackPanel { Margin = new Thickness(0, 0, 14, 8) };
+            sp.Children.Add(new TextBlock { Text = label.ToUpper(), FontSize = 8, FontWeight = FontWeights.SemiBold,
+                Foreground = MeToolsTheme.BrMuted, Margin = new Thickness(1, 0, 0, 3) });
+            var box = new TextBox
+            {
+                Width = width, Height = 26, FontSize = 12, FontFamily = new FontFamily("Consolas"), FontWeight = FontWeights.SemiBold,
+                Background = MeToolsTheme.BrInput, Foreground = MeToolsTheme.BrInputFg,
+                BorderBrush = MeToolsTheme.BrBorder, BorderThickness = new Thickness(1),
+                Padding = new Thickness(5, 0, 5, 0), VerticalContentAlignment = VerticalAlignment.Center,
+                HorizontalAlignment = HorizontalAlignment.Left,
+                ToolTip = hint,
+            };
+            sp.Children.Add(box);
+            tb = box;
+            return sp;
+        }
+
+        // Bare non-editable combo (no card, no label -- the Tag Family row
+        // supplies its own inline label to the left) sized to a sensible
+        // fixed width instead of stretching full-width for a one- or
+        // two-word family name.
+        private ComboBox CompactComboStrict(string hint, double width)
+        {
+            return new ComboBox
+            {
+                Width = width, Height = 26, FontSize = 12, IsEditable = false,
+                FontFamily = new FontFamily("Consolas"), FontWeight = FontWeights.SemiBold,
+                Background = MeToolsTheme.BrInput, Foreground = MeToolsTheme.BrInputFg,
+                BorderBrush = MeToolsTheme.BrBorder, ToolTip = hint,
+                DisplayMemberPath = "DisplayName",
+            };
+        }
+
         private Border InlineCard(string label, string hint, out TextBox tb)
         {
             var card = new Border
@@ -1668,14 +1751,14 @@ namespace METools.FamilyPlacer
             {
                 Background = MeToolsTheme.BrSurface, BorderBrush = MeToolsTheme.BrBorder,
                 BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(5),
-                Padding = new Thickness(12, 10, 12, 10),
+                Padding = new Thickness(12, 8, 12, 8), MaxWidth = 220, HorizontalAlignment = HorizontalAlignment.Left,
             };
             var sp = new StackPanel();
             sp.Children.Add(new TextBlock { Text = label.ToUpper(), FontSize = 9, FontWeight = FontWeights.SemiBold,
                 Foreground = MeToolsTheme.BrMuted, Margin = new Thickness(0, 0, 0, 5) });
             var combo = new ComboBox
             {
-                Height = 32, FontSize = 13, IsEditable = true,
+                Height = 28, FontSize = 12, IsEditable = true,
                 FontFamily = new FontFamily("Consolas"), FontWeight = FontWeights.SemiBold,
                 Background = MeToolsTheme.BrInput, Foreground = MeToolsTheme.BrInputFg,
                 BorderBrush = MeToolsTheme.BrBorder, ToolTip = hint,
@@ -1683,6 +1766,54 @@ namespace METools.FamilyPlacer
             sp.Children.Add(combo);
             card.Child = sp; cb = combo;
             return card;
+        }
+
+        // Re-scans the project for every loaded Multi-Category Tag family/
+        // type and repopulates the picker. Called on window construction, on
+        // explicit Refresh, and whenever the Tag tab is (re)shown, so a
+        // family loaded after the window was opened still shows up. This is
+        // a read-only FilteredElementCollector query -- like the Stats tab's
+        // direct doc reads elsewhere in this window, it doesn't need the
+        // ExternalEvent round trip that write operations use.
+        private void RefreshTagFamilyOptions()
+        {
+            if (_cbTagFamily == null) return;
+            var doc = _uiApp.ActiveUIDocument?.Document;
+            if (doc == null) return;
+
+            var prevSelection = _cbTagFamily.SelectedItem as TagFamilyOption;
+            _tagFamilyOptions = CircuitTaggerHandler.GetAvailableTagFamilies(doc);
+
+            _cbTagFamily.ItemsSource = null;
+            _cbTagFamily.ItemsSource = _tagFamilyOptions;
+
+            if (_tagFamilyOptions.Count == 0)
+            {
+                _cbTagFamily.SelectedItem = null;
+                UpdateStatusBar(S._("circuittagger.tag_family_none"));
+                return;
+            }
+
+            // Prefer: (1) whatever was already selected before this refresh,
+            // (2) the family/type remembered from a previous session,
+            // (3) the original hardcoded default family, (4) the first one.
+            TagFamilyOption pick = null;
+            if (prevSelection != null)
+                pick = _tagFamilyOptions.FirstOrDefault(o =>
+                    string.Equals(o.FamilyName, prevSelection.FamilyName, StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(o.TypeName,   prevSelection.TypeName,   StringComparison.OrdinalIgnoreCase));
+            if (pick == null && _settingsData != null && !string.IsNullOrEmpty(_settingsData.TagFamilyName))
+                pick = _tagFamilyOptions.FirstOrDefault(o =>
+                    string.Equals(o.FamilyName, _settingsData.TagFamilyName, StringComparison.OrdinalIgnoreCase) &&
+                    (string.IsNullOrEmpty(_settingsData.TagTypeName) ||
+                     string.Equals(o.TypeName, _settingsData.TagTypeName, StringComparison.OrdinalIgnoreCase)));
+            if (pick == null)
+                pick = _tagFamilyOptions.FirstOrDefault(o =>
+                    string.Equals(o.FamilyName, "ME-Tools_CircuitTag", StringComparison.OrdinalIgnoreCase));
+            if (pick == null)
+                pick = _tagFamilyOptions[0];
+
+            _cbTagFamily.SelectedItem = pick;
         }
 
         private UIElement CircuitBadge(string label, bool isSubRow)

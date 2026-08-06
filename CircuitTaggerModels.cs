@@ -1,9 +1,30 @@
 // CircuitTaggerModels.cs -- ME-Tools | Circuit Tagger
 // Mayer E-Concept SRL
+using System;
 using System.Collections.Generic;
 
 namespace METools.FamilyPlacer
 {
+    // One selectable entry in the Tag Family picker on the Tag tab -- one
+    // per FamilySymbol (family + type) currently loaded under the
+    // Multi-Category Tags category. Lets the user switch which tag gets
+    // placed (e.g. a lamp/socket tag vs. a fire alarm tag) without leaving
+    // Circuit Tagger.
+    public class TagFamilyOption
+    {
+        public Autodesk.Revit.DB.ElementId SymbolId   { get; set; }
+        public string                      FamilyName { get; set; } = "";
+        public string                      TypeName   { get; set; } = "";
+
+        // Most Multi-Category Tag families only have one type, in which
+        // case showing the type name too is just noise ("MyTag : MyTag").
+        public string DisplayName =>
+            string.IsNullOrEmpty(TypeName) ||
+            string.Equals(TypeName, FamilyName, StringComparison.OrdinalIgnoreCase)
+                ? FamilyName
+                : $"{FamilyName} : {TypeName}";
+    }
+
     public class TaggedElementInfo
     {
         public Autodesk.Revit.DB.ElementId ElementId { get; set; }
@@ -87,6 +108,11 @@ namespace METools.FamilyPlacer
         public string Apartment           { get; set; } = "";
         public string Building            { get; set; } = "";
         public string SubLabel            { get; set; } = "";
+        // Which tag family/type to place, from the Tag tab's live picker.
+        // InvalidElementId means "no explicit pick" -- ResolveTagSymbol then
+        // falls back to the original hardcoded default family by name.
+        public Autodesk.Revit.DB.ElementId TagSymbolId { get; set; } = Autodesk.Revit.DB.ElementId.InvalidElementId;
+        public string TagFamilyDisplayName { get; set; } = "";
         // Used by ClearCircuitData action -- a list (not a single label) so
         // multiple selected circuits can be cleared in one Revit-thread round
         // trip, one transaction, and one stats refresh, instead of the user

@@ -34,6 +34,8 @@ namespace METools
                     METools.Comments.CommentsCommand.Open(app);
                 else if (Target == "ActivityLog")
                     METools.ActivityLog.ActivityLogCommand.Open(app);
+                else if (Target == "BatchParams")
+                    METools.BatchParams.BatchParamsCommand.Open(app);
             }
             catch { }
         }
@@ -79,6 +81,7 @@ namespace METools
                 ("ProjectTransfer", "Project Transfer"),
                 ("CircuitTagger", "Circuit Tagger"),
                 ("Statistics",    "Statistics"),
+                ("BatchParams",   "Batch Params"),
                 ("Comments",      "Comments"),
                 ("ActivityLog",   "Activity Log & Time"),
             };

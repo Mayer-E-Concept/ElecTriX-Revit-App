@@ -208,6 +208,26 @@ namespace METools
             var statsButton = panelCircuits.AddItem(statsBtn) as PushButton;
             RibbonThemeWatcher.Register(statsButton, "icon_stats");
 
+            // -- Batch Params (Renumber + Bulk Edit) --------------------------
+            // Inspired by DiRoots' ReOrdering (renumber an instance parameter
+            // with a prefix/counter/suffix, manually or along a picked detail
+            // line) and OneParameter (bulk add-prefix/add-suffix/find-replace/
+            // clear across many elements) -- combined into one tool, generic
+            // across any category/parameter rather than scoped to electrical
+            // ones specifically. No custom icon yet -- text-only button until
+            // one gets made.
+            var bpBtn = new PushButtonData(
+                "BatchParams", "Batch\nParams", dll,
+                "METools.BatchParams.BatchParamsCommand")
+            {
+                ToolTip         = "Renumber a parameter across many elements (manually or along a line), or bulk add-prefix/suffix/find-replace/clear one parameter across a filtered set.",
+                LongDescription = $"Batch Params -- {VENDOR}\n\nFilter elements by scope (selection / active view / whole model) and category, then:\n\n" +
+                                  "* Renumber tab: prefix + counter + suffix into any text parameter, ordered manually (click one by one) or along a picked detail line\n" +
+                                  "* Bulk Edit tab: add prefix, add suffix, find & replace, set, or clear one parameter across every matched element in one click\n\n" +
+                                  "Works on any category and any writable text parameter -- not limited to electrical categories.",
+            };
+            var bpButton = panelCircuits.AddItem(bpBtn) as PushButton;
+
             // -- Comments ----------------------------------------------------
             var cmtBtn = new PushButtonData(
                 "Comments", "Comments", dll,

@@ -14,6 +14,15 @@ namespace METools.FamilyPlacer
         public double OffsetYMm  { get; set; } = 0.0;
         public double StackGapMm { get; set; } = 8.0;
 
+        // Last-picked Tag Family/Type (Tag tab picker) -- remembered only to
+        // pick a sensible default selection next time the picker is
+        // populated; empty means "use ME-Tools_CircuitTag if present, else
+        // whatever's first". Matched by name against whatever's actually
+        // loaded in the project that's open at the time, since the family
+        // itself isn't guaranteed to be loaded there.
+        public string TagFamilyName { get; set; } = "";
+        public string TagTypeName   { get; set; } = "";
+
 
         // Secondary label -- Graphics
         public string SubLabelFontName      { get; set; } = "Arial Narrow";
@@ -80,6 +89,8 @@ namespace METools.FamilyPlacer
             sb.AppendLine($"  \"GapMm\": {d.GapMm.ToString(ic)},");
             sb.AppendLine($"  \"OffsetYMm\": {d.OffsetYMm.ToString(ic)},");
             sb.AppendLine($"  \"StackGapMm\": {d.StackGapMm.ToString(ic)},");
+            sb.AppendLine($"  \"TagFamilyName\": \"{Esc(d.TagFamilyName)}\",");
+            sb.AppendLine($"  \"TagTypeName\": \"{Esc(d.TagTypeName)}\",");
             sb.AppendLine($"  \"SubLabelFontName\": \"{Esc(d.SubLabelFontName)}\",");
             sb.AppendLine($"  \"SubLabelFontSizeMm\": {d.SubLabelFontSizeMm.ToString(ic)},");
             sb.AppendLine($"  \"SubLabelColorHex\": \"{Esc(d.SubLabelColorHex)}\",");
@@ -112,6 +123,8 @@ namespace METools.FamilyPlacer
                 if (TryReadDouble(trim, "SubLabelLeaderOffsetMm",out var v5)) d.SubLabelLeaderOffsetMm = v5;
                 if (TryReadDouble(trim, "SubLabelTabSizeMm",    out var v6))  d.SubLabelTabSizeMm    = v6;
                 if (TryReadDouble(trim, "SubLabelWidthFactor",  out var v7))  d.SubLabelWidthFactor  = v7;
+                if (TryReadString(trim, "TagFamilyName",        out var tfn)) d.TagFamilyName        = tfn;
+                if (TryReadString(trim, "TagTypeName",          out var ttn)) d.TagTypeName          = ttn;
                 if (TryReadString(trim, "SubLabelFontName",     out var s))   d.SubLabelFontName     = s;
                 if (TryReadString(trim, "SubLabelColorHex",     out var s2))  d.SubLabelColorHex     = s2;
                 if (TryReadString(trim, "SubLabelHAlign",       out var s3))  d.SubLabelHAlign       = s3;

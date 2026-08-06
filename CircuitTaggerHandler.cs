@@ -142,10 +142,11 @@ namespace METools.FamilyPlacer
             var view = uiDoc.ActiveView;
             if (view == null) { Report("No active view."); return; }
 
-            FamilySymbol tagSymbol = FindTagSymbol(doc);
+            FamilySymbol tagSymbol = ResolveTagSymbol(doc, req.TagSymbolId);
             bool canTag = tagSymbol != null;
+            string attemptedTagLabel = !string.IsNullOrEmpty(req.TagFamilyDisplayName) ? req.TagFamilyDisplayName : TAG_FAMILY_NAME;
             if (!canTag)
-                Report("Tag family 'ME-Tools_CircuitTag' not loaded -- params written without tags. Run Project Health Check to fix this.");
+                Report($"Tag family '{attemptedTagLabel}' not loaded -- params written without tags. Run Project Health Check to fix this.");
 
             // Build full label: FI + Stromkreis [+ "_" + SubIndex]
             string baseLabel = BuildCircuitLabel(req.FI, req.Stromkreis);
@@ -390,7 +391,7 @@ namespace METools.FamilyPlacer
 
             var summary = $"Done. {written} elements updated";
             if (tagged > 0) summary += $", {tagged} tags placed";
-            if (!canTag)    summary += $" -- tag family '{TAG_FAMILY_NAME}' not loaded, no tags placed. Run Project Health Check to fix this.";
+            if (!canTag)    summary += $" -- tag family '{attemptedTagLabel}' not loaded, no tags placed. Run Project Health Check to fix this.";
             if (missingParams.Count > 0)
                 summary += $" -- NOT bound to this category, values not written: {string.Join(", ", missingParams)}. If tags are showing '?', run Project Health Check to fix this.";
             if (errors > 0) summary += $", {errors} errors: " + errorMsgs.FirstOrDefault();
@@ -472,6 +473,57 @@ namespace METools.FamilyPlacer
                             StringComparison.OrdinalIgnoreCase));
             }
             catch { return null; }
+        }
+
+        // Every FamilySymbol (family + type) currently loaded under the
+        // Multi-Category Tags category -- i.e. every candidate for the Tag
+        // tab's picker. Not filtered to ME-Tools_CircuitTag: any family the
+        // user loads into the project shows up, which is what lets them
+        // switch between e.g. a lamp/socket tag and a fire alarm tag.
+        public static List<TagFamilyOption> GetAvailableTagFamilies(Document doc)
+        {
+            try
+            {
+                return new FilteredElementCollector(doc)
+                    .OfClass(typeof(FamilySymbol))
+                    .OfCategory(BuiltInCategory.OST_MultiCategoryTags)
+                    .Cast<FamilySymbol>()
+                    .Select(fs => new TagFamilyOption
+                    {
+                        SymbolId   = fs.Id,
+                        FamilyName = fs.Family?.Name ?? "?",
+                        TypeName   = fs.Name,
+                    })
+                    .OrderBy(o => o.FamilyName, StringComparer.OrdinalIgnoreCase)
+                    .ThenBy(o => o.TypeName, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+            }
+            catch { return new List<TagFamilyOption>(); }
+        }
+
+        // Resolves which FamilySymbol to actually tag with. explicitSymbolId
+        // comes from the Tag tab's live picker, which is re-scanned against
+        // the project every time the window opens/tab is shown -- so by the
+        // time this runs it's normally the authoritative choice. Falls back
+        // to the original hardcoded-name lookup (FindTagSymbol) only when no
+        // explicit pick was made, or the previously-picked symbol no longer
+        // resolves (e.g. it was deleted/unloaded since the picker was last
+        // populated) -- this keeps existing single-family projects working
+        // with zero configuration, unchanged.
+        internal static FamilySymbol ResolveTagSymbol(Document doc, ElementId explicitSymbolId)
+        {
+            try
+            {
+                if (explicitSymbolId != null && explicitSymbolId != ElementId.InvalidElementId)
+                {
+                    var chosen = doc.GetElement(explicitSymbolId) as FamilySymbol;
+                    if (chosen != null && chosen.Category != null &&
+                        chosen.Category.Id == new ElementId(BuiltInCategory.OST_MultiCategoryTags))
+                        return chosen;
+                }
+            }
+            catch { }
+            return FindTagSymbol(doc);
         }
 
         private static Autodesk.Revit.DB.Color HexToRevitColor(string hex)
