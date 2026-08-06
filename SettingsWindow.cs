@@ -147,6 +147,7 @@ namespace METools
         private class FamilyIndexFile
         {
             public bool Complete { get; set; }
+            public bool IncludesNested { get; set; } // true only if the scan that built this ALSO checked families nested inside others
             public Dictionary<string, List<CachedFamilyMatch>> Index { get; set; }
                 = new Dictionary<string, List<CachedFamilyMatch>>(StringComparer.OrdinalIgnoreCase);
         }
@@ -171,6 +172,7 @@ namespace METools
         private readonly Dictionary<string, List<CachedFamilyMatch>> _familyCategoryIndex
             = new Dictionary<string, List<CachedFamilyMatch>>(StringComparer.OrdinalIgnoreCase);
         private bool _familyIndexComplete = false;
+        private bool _familyIndexIncludesNested = false;
 
         private static string FamilyIndexPath(string projectId) =>
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
@@ -180,6 +182,7 @@ namespace METools
         {
             _familyCategoryIndex.Clear();
             _familyIndexComplete = false;
+            _familyIndexIncludesNested = false;
             try
             {
                 var projectId = METools.Comments.CommentsStorage.GetOrCreateProjectId(doc);
@@ -191,6 +194,7 @@ namespace METools
                 if (file != null)
                 {
                     _familyIndexComplete = file.Complete;
+                    _familyIndexIncludesNested = file.IncludesNested;
                     if (file.Index != null)
                         foreach (var kv in file.Index)
                             _familyCategoryIndex[kv.Key] = kv.Value ?? new List<CachedFamilyMatch>();
@@ -208,7 +212,7 @@ namespace METools
                 var path = FamilyIndexPath(projectId);
                 var dir = Path.GetDirectoryName(path);
                 if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
-                var file = new FamilyIndexFile { Complete = _familyIndexComplete, Index = _familyCategoryIndex };
+                var file = new FamilyIndexFile { Complete = _familyIndexComplete, IncludesNested = _familyIndexIncludesNested, Index = _familyCategoryIndex };
                 var json = JsonSerializer.Serialize(file);
                 File.WriteAllText(path, json, System.Text.Encoding.UTF8);
             }
@@ -1592,6 +1596,7 @@ namespace METools
         private class FamilyMatch
         {
             public Autodesk.Revit.DB.Family TopLevelFamily;
+            public string FamilyName; // captured as a plain string while TopLevelFamily is known-fresh -- see RemoveImportFromFamily's caller for why this matters
             public string Path;       // e.g. "MyFamily" or "MyFamily > NestedSubFamily"
             public bool   IsEditable; // editability of the OUTER family -- that's what actually gates whether a fix is even possible
             public bool   IsNested;   // found inside a family nested within another family, not directly at the top level
@@ -1601,17 +1606,25 @@ namespace METools
         // editability only matters for whether a fix is possible, not for
         // whether we should even look -- and checks each one's own
         // top-level categories for a name match against the given set.
-        // Also recurses into families NESTED inside other families (up to
-        // a sane depth limit), since "1 removed, 4 not found anywhere"
-        // pointed at either a non-editable family (skipped by an earlier,
-        // narrower version of this scan) or a nested one (never checked at
-        // all before this).
+        //
+        // includeNested also recurses into families NESTED inside other
+        // families (up to a sane depth limit). Off by default: every real,
+        // verified fix so far has been a top-level family, and nested
+        // recursion roughly doubles or triples the EditFamily/Close cost
+        // per family (opening every family AND everything nested inside
+        // it) for a case that hasn't actually been confirmed to happen yet
+        // on a real project. "Force Full Rescan" turns this on.
         //
         // forceFullRescan skips the cache entirely and re-opens every
         // family regardless -- for when the cache might be stale (a family
         // was added, removed, or edited since it was built).
+        //
+        // onProgress(current, total, familyName) fires once per family
+        // opened, so the caller can show live status instead of a frozen
+        // "Scanning..." message for the entire multi-minute duration.
         private Dictionary<string, List<FamilyMatch>> FindOwningFamilies(
-            Autodesk.Revit.DB.Document doc, IEnumerable<string> categoryNames, bool forceFullRescan = false)
+            Autodesk.Revit.DB.Document doc, IEnumerable<string> categoryNames,
+            bool forceFullRescan = false, bool includeNested = false, Action<int, int, string> onProgress = null)
         {
             var wanted = new HashSet<string>(categoryNames, StringComparer.OrdinalIgnoreCase);
             var result = wanted.ToDictionary(n => n, n => new List<FamilyMatch>(), StringComparer.OrdinalIgnoreCase);
@@ -1646,15 +1659,19 @@ namespace METools
             catch { families = new List<Autodesk.Revit.DB.Family>(); }
 
             var visitedFamilyIds = new HashSet<long>();
+            int done = 0;
             foreach (var fam in families)
             {
+                done++;
+                try { onProgress?.Invoke(done, families.Count, fam.Name); } catch { }
+
                 if (!visitedFamilyIds.Add(fam.Id.IntegerValue)) continue;
                 Autodesk.Revit.DB.Document famDoc = null;
                 try
                 {
                     famDoc = doc.EditFamily(fam);
                     if (famDoc == null || !famDoc.IsFamilyDocument) continue;
-                    ScanFamilyDocForCategories(famDoc, fam, fam.Name, 0, freshIndex, visitedFamilyIds);
+                    ScanFamilyDocForCategories(famDoc, fam, fam.Name, 0, freshIndex, visitedFamilyIds, includeNested);
                 }
                 catch { }
                 finally { try { famDoc?.Close(false); } catch { } }
@@ -1663,6 +1680,7 @@ namespace METools
             _familyCategoryIndex.Clear();
             foreach (var kv in freshIndex) _familyCategoryIndex[kv.Key] = kv.Value;
             _familyIndexComplete = true;
+            _familyIndexIncludesNested = includeNested || _familyIndexIncludesNested; // once true from a fuller scan, a later shallow one shouldn't downgrade it
             SaveFamilyIndex(doc);
 
             ResolveMatchesFromIndex(doc, wanted, result);
@@ -1694,6 +1712,7 @@ namespace METools
                     result[name].Add(new FamilyMatch
                     {
                         TopLevelFamily = fam,
+                        FamilyName     = fam.Name,
                         Path           = c.Path,
                         IsEditable     = fam.IsEditable, // re-check live rather than trust a possibly-stale cached flag
                         IsNested       = c.Path.Contains(">"),
@@ -1709,9 +1728,13 @@ namespace METools
         // every category name it finds, unconditionally -- not filtered to
         // any particular wanted set, since the whole point is building a
         // reusable cache from a cost that's already being paid regardless.
+        // includeNested=false skips even collecting nested families at all
+        // (not just skipping the recursion into them) -- saves a collector
+        // call per family for the common case where nested checking isn't
+        // needed.
         private void ScanFamilyDocForCategories(
             Autodesk.Revit.DB.Document famDocToScan, Autodesk.Revit.DB.Family topLevelFamily, string pathSoFar, int depth,
-            Dictionary<string, List<CachedFamilyMatch>> index, HashSet<long> visitedFamilyIds)
+            Dictionary<string, List<CachedFamilyMatch>> index, HashSet<long> visitedFamilyIds, bool includeNested)
         {
             if (depth > 3) return;
             try
@@ -1736,6 +1759,8 @@ namespace METools
                     });
                 }
 
+                if (!includeNested) return;
+
                 var nested = new Autodesk.Revit.DB.FilteredElementCollector(famDocToScan)
                     .OfClass(typeof(Autodesk.Revit.DB.Family))
                     .Cast<Autodesk.Revit.DB.Family>()
@@ -1751,7 +1776,7 @@ namespace METools
                         nestedDoc = famDocToScan.EditFamily(nf);
                         if (nestedDoc != null && nestedDoc.IsFamilyDocument)
                             ScanFamilyDocForCategories(nestedDoc, topLevelFamily, pathSoFar + " > " + nf.Name,
-                                depth + 1, index, visitedFamilyIds);
+                                depth + 1, index, visitedFamilyIds, includeNested);
                     }
                     catch { }
                     finally { try { nestedDoc?.Close(false); } catch { } }
@@ -1766,68 +1791,96 @@ namespace METools
         // actually has a chance of working where project-level deletion and
         // Purge Unused both can't -- the category's real owner is the
         // family, not the project, so the fix has to happen there too.
-        private bool RemoveImportFromFamily(Autodesk.Revit.DB.Document doc, Autodesk.Revit.DB.Family fam, string categoryName)
+        private (bool Success, string Error) RemoveImportFromFamily(Autodesk.Revit.DB.Document doc, Autodesk.Revit.DB.Family fam, string categoryName)
         {
             Autodesk.Revit.DB.Document famDoc = null;
             try
             {
-                famDoc = doc.EditFamily(fam);
-                if (famDoc == null || !famDoc.IsFamilyDocument) return false;
+                try { famDoc = doc.EditFamily(fam); }
+                catch (Exception ex) { return (false, "EditFamily: " + ex.Message); }
+                if (famDoc == null) return (false, "EditFamily returned null");
+                if (!famDoc.IsFamilyDocument) return (false, "EditFamily result isn't a family document");
 
-                using (var tx = new Autodesk.Revit.DB.Transaction(famDoc, "ME-Tools: Remove Imported Category"))
+                try
                 {
-                    tx.Start();
-
-                    var failOpts = tx.GetFailureHandlingOptions();
-                    failOpts.SetFailuresPreprocessor(new SuppressWarningsPreprocessor());
-                    tx.SetFailureHandlingOptions(failOpts);
-
-                    foreach (var ii in new Autodesk.Revit.DB.FilteredElementCollector(famDoc)
-                        .OfClass(typeof(Autodesk.Revit.DB.ImportInstance))
-                        .Cast<Autodesk.Revit.DB.ImportInstance>()
-                        .ToList())
+                    using (var tx = new Autodesk.Revit.DB.Transaction(famDoc, "ME-Tools: Remove Imported Category"))
                     {
-                        try
-                        {
-                            if (string.Equals(ii.Category?.Name, categoryName, StringComparison.OrdinalIgnoreCase))
-                                famDoc.Delete(ii.Id);
-                        }
-                        catch { }
-                    }
+                        tx.Start();
 
-                    famDoc.Regenerate();
+                        var failOpts = tx.GetFailureHandlingOptions();
+                        failOpts.SetFailuresPreprocessor(new SuppressWarningsPreprocessor());
+                        tx.SetFailureHandlingOptions(failOpts);
 
-                    try
-                    {
-                        var cat = famDoc.Settings.Categories.Cast<Autodesk.Revit.DB.Category>()
-                            .FirstOrDefault(c => string.Equals(c.Name, categoryName, StringComparison.OrdinalIgnoreCase) && c.Parent == null);
-                        if (cat != null)
+                        foreach (var ii in new Autodesk.Revit.DB.FilteredElementCollector(famDoc)
+                            .OfClass(typeof(Autodesk.Revit.DB.ImportInstance))
+                            .Cast<Autodesk.Revit.DB.ImportInstance>()
+                            .ToList())
                         {
                             try
                             {
-                                foreach (Autodesk.Revit.DB.Category sub in cat.SubCategories)
-                                    try { famDoc.Delete(sub.Id); } catch { }
+                                if (string.Equals(ii.Category?.Name, categoryName, StringComparison.OrdinalIgnoreCase))
+                                    famDoc.Delete(ii.Id);
                             }
                             catch { }
-                            try { famDoc.Delete(cat.Id); } catch { }
                         }
-                    }
-                    catch { }
 
-                    famDoc.Regenerate();
-                    tx.Commit();
+                        famDoc.Regenerate();
+
+                        try
+                        {
+                            var cat = famDoc.Settings.Categories.Cast<Autodesk.Revit.DB.Category>()
+                                .FirstOrDefault(c => string.Equals(c.Name, categoryName, StringComparison.OrdinalIgnoreCase) && c.Parent == null);
+                            if (cat != null)
+                            {
+                                try
+                                {
+                                    foreach (Autodesk.Revit.DB.Category sub in cat.SubCategories)
+                                        try { famDoc.Delete(sub.Id); } catch { }
+                                }
+                                catch { }
+                                try { famDoc.Delete(cat.Id); } catch { }
+                            }
+                        }
+                        catch { }
+
+                        famDoc.Regenerate();
+                        tx.Commit();
+                    }
                 }
+                catch (Exception ex) { return (false, "Editing/committing inside the family: " + ex.Message); }
 
                 // LoadFamily must run with no active transaction on the
                 // family document -- confirmed via Autodesk's own docs and
                 // API reference examples for this exact "reload after
                 // editing" pattern. The transaction above is already
                 // committed by this point, so this is safe.
-                var loaded = famDoc.LoadFamily(doc, new OverwriteFamilyLoadOptions());
-                return loaded != null;
+                try
+                {
+                    var loaded = famDoc.LoadFamily(doc, new OverwriteFamilyLoadOptions());
+                    return loaded != null
+                        ? (true, (string)null)
+                        : (false, "LoadFamily returned null -- the edit inside the family likely succeeded, but reloading it into the project was silently refused");
+                }
+                catch (Exception ex) { return (false, "LoadFamily: " + ex.Message); }
             }
-            catch { return false; }
+            catch (Exception ex) { return (false, "Unexpected: " + ex.Message); }
             finally { try { famDoc?.Close(false); } catch { } }
+        }
+
+        private void PumpDispatcher()
+        {
+            try
+            {
+                // Synchronous, no new nested frame pushed -- the Settings
+                // window is already shown via ShowDialog(), which itself
+                // runs on its own nested dispatcher frame; pushing a SECOND
+                // one on top of that (the previous implementation) may not
+                // behave the same way it would in a plain, standalone WPF
+                // app. This relies on the existing message loop instead of
+                // introducing a new one.
+                Dispatcher.Invoke(new Action(() => { }), System.Windows.Threading.DispatcherPriority.Render);
+            }
+            catch { }
         }
 
         private void OnFindInFamiliesClicked(bool forceFullRescan = false)
@@ -1857,7 +1910,20 @@ namespace METools
             {
                 var names = selected.Select(r => r.Name).ToList();
                 Dictionary<string, List<FamilyMatch>> owners;
-                try { owners = FindOwningFamilies(doc, names, forceFullRescan); }
+                try
+                {
+                    owners = FindOwningFamilies(doc, names, forceFullRescan, includeNested: forceFullRescan,
+                        onProgress: (current, total, famName) =>
+                        {
+                            // Forces an actual repaint, not just a property
+                            // change -- otherwise this text would sit frozen
+                            // for the entire multi-minute scan, which is its
+                            // own real problem even if the scan itself can't
+                            // go faster.
+                            StatusLeft.Text = string.Format(S._("settings.imports.scanning_progress"), current, total, famName);
+                            PumpDispatcher();
+                        });
+                }
                 catch (Exception ex)
                 {
                     StatusLeft.Text = string.Format(S._("settings.imports.delete_error"), ex.Message);
@@ -1865,7 +1931,7 @@ namespace METools
                 }
 
                 int fixedCount = 0, needsAttentionCount = 0, notFoundCount = 0;
-                var needsAttentionLines = new List<string>();
+                var needsAttentionByCategory = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
                 var notFoundNames = new List<string>();
 
                 foreach (var name in names)
@@ -1884,10 +1950,38 @@ namespace METools
                     // of a risky, unproven multi-level fix attempt.
                     var fixable = matches.Where(m => !m.IsNested && m.IsEditable).ToList();
                     bool anySucceeded = false;
+                    var failureReasons = new List<string>();
                     foreach (var m in fixable)
                     {
-                        try { if (RemoveImportFromFamily(doc, m.TopLevelFamily, name)) anySucceeded = true; }
-                        catch { }
+                        try
+                        {
+                            // Re-resolve fresh by name right before this
+                            // specific attempt -- do NOT reuse m.TopLevelFamily
+                            // directly. A successful LoadFamily call for an
+                            // EARLIER match in this same loop can invalidate
+                            // .NET wrapper objects for every OTHER family
+                            // collected before it, even ones that were never
+                            // touched -- a real, documented Revit API
+                            // behavior, not a bug in the matching logic. This
+                            // is exactly why the first fix in a batch would
+                            // succeed and every one after it would fail with
+                            // "EditFamily: the referenced object is not
+                            // valid" regardless of which family it was.
+                            var freshFam = new Autodesk.Revit.DB.FilteredElementCollector(doc)
+                                .OfClass(typeof(Autodesk.Revit.DB.Family))
+                                .Cast<Autodesk.Revit.DB.Family>()
+                                .FirstOrDefault(f => string.Equals(f.Name, m.FamilyName, StringComparison.OrdinalIgnoreCase));
+                            if (freshFam == null)
+                            {
+                                failureReasons.Add($"{m.Path}: family '{m.FamilyName}' could not be re-resolved");
+                                continue;
+                            }
+
+                            var (success, error) = RemoveImportFromFamily(doc, freshFam, name);
+                            if (success) anySucceeded = true;
+                            else failureReasons.Add($"{m.Path}: {error}");
+                        }
+                        catch (Exception ex) { failureReasons.Add($"{m.Path}: {ex.Message}"); }
                     }
 
                     if (anySucceeded)
@@ -1900,24 +1994,34 @@ namespace METools
                     {
                         // Found somewhere, but not somewhere this code can
                         // safely fix on its own -- nested inside another
-                        // family, or in a family that isn't editable right
-                        // now (often means someone else has it checked out
-                        // in a workshared model). Persisted directly onto
-                        // the row's own note, not just this one message box
-                        // -- a message box is easy to close by accident
-                        // before reading it, which is exactly what happened
-                        // here; the row itself keeps showing the reason
-                        // every time this list is scanned from now on.
+                        // family, not editable right now (often means
+                        // someone else has it checked out in a workshared
+                        // model), or the fix attempt itself failed, now with
+                        // the ACTUAL error captured instead of a generic
+                        // phrase. Persisted directly onto the row's own
+                        // note, not just this one message box -- a message
+                        // box is easy to close by accident before reading
+                        // it, which is exactly what happened here; the row
+                        // itself keeps showing the real reason every time
+                        // this list is scanned from now on.
                         needsAttentionCount++;
                         var noteParts = new List<string>();
+                        int reasonIdx = 0;
                         foreach (var m in matches)
                         {
                             string why = m.IsNested ? S._("settings.imports.match_nested")
                                        : !m.IsEditable ? S._("settings.imports.match_not_editable")
+                                       : reasonIdx < failureReasons.Count ? failureReasons[reasonIdx++]
                                        : S._("settings.imports.match_fix_failed");
                             noteParts.Add($"{m.Path} ({why})");
-                            needsAttentionLines.Add($"{name} -- {m.Path} ({why})");
                         }
+
+                        if (!needsAttentionByCategory.TryGetValue(name, out var catLines))
+                        {
+                            catLines = new List<string>();
+                            needsAttentionByCategory[name] = catLines;
+                        }
+                        catLines.AddRange(noteParts);
 
                         var row = _importRows.FirstOrDefault(r => string.Equals(r.Name, name, StringComparison.OrdinalIgnoreCase));
                         if (row != null)
@@ -1932,13 +2036,30 @@ namespace METools
                 if (needsAttentionCount > 0)
                 {
                     sb.AppendLine(string.Format(S._("settings.imports.fix_families_attention_line"), needsAttentionCount));
-                    foreach (var line in needsAttentionLines.Distinct().Take(10))
-                        sb.AppendLine("   • " + line);
+                    // BUG FIXED HERE: this used to be one flat, global list
+                    // capped at 10 lines total -- a single category with 10
+                    // family matches (a shared block embedded in many
+                    // family types, which is exactly what happened here)
+                    // could consume the entire cap on its own, silently
+                    // hiding every OTHER category's own reason from the
+                    // summary entirely. Capping per-category instead
+                    // guarantees every category gets at least some
+                    // representation.
+                    foreach (var kv in needsAttentionByCategory.Take(10))
+                    {
+                        sb.AppendLine("   • " + kv.Key);
+                        foreach (var line in kv.Value.Take(2))
+                            sb.AppendLine("      - " + line);
+                        if (kv.Value.Count > 2)
+                            sb.AppendLine(string.Format(S._("settings.imports.n_more_locations"), kv.Value.Count - 2));
+                    }
                 }
                 if (notFoundCount > 0)
                 {
                     sb.AppendLine(string.Format(S._("settings.imports.fix_families_notfound_line"), notFoundCount));
-                    sb.AppendLine(S._("settings.imports.fix_families_notfound_hint"));
+                    sb.AppendLine(_familyIndexIncludesNested
+                        ? S._("settings.imports.fix_families_notfound_hint")
+                        : S._("settings.imports.fix_families_notfound_hint_shallow"));
                     foreach (var n in notFoundNames.Distinct().Take(10))
                         sb.AppendLine("   • " + n);
                 }
