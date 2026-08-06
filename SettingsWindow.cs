@@ -66,6 +66,154 @@ namespace METools
         private StackPanel _importsList;
         private TextBlock  _importsStatus;
         private readonly List<ImportedCategoryRow> _importRows = new List<ImportedCategoryRow>();
+        // Categories confirmed (by a real, verified delete attempt -- not
+        // just a guess) to survive deletion, including Revit's own native
+        // Purge Unused and the family-scan fix, mapped to a SPECIFIC,
+        // human-readable reason where one is known (which family, nested
+        // vs. not editable, etc.) rather than just a yes/no flag. Shown
+        // directly on the row every time the list is scanned, not just
+        // once in a message box -- a message box is easy to dismiss by
+        // accident before reading it (exactly what happened here), and the
+        // row itself doesn't go away.
+        private readonly Dictionary<long, string> _stubbornCategoryNotes = new Dictionary<long, string>();
+
+        // BUG FIXED HERE: this used to be a plain instance field, reset to
+        // empty every time the Settings window was closed and reopened --
+        // Revit creates a brand-new SettingsWindow each time the command
+        // runs, so any in-memory-only "confirmed stubborn" tracking was
+        // wiped the moment the dialog closed. That's exactly why the label
+        // never showed up on a later visit even though a real, verified
+        // delete attempt had already disproven "safe to remove" for those
+        // specific categories. Persisting to a small per-project file
+        // (same project-id mechanism CommentsStorage already provides,
+        // reused here the same way TimeTrackerStorage/ActivityLogStorage
+        // already reuse it) survives window close/reopen and Revit
+        // restarts, since "does this category resist deletion" is a fact
+        // about this specific project file, not about this one dialog session.
+        private static string StubbornCategoriesPath(string projectId) =>
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                "METools", "StubbornImports", $"{projectId}.json");
+
+        private void LoadStubbornCategoryIds(Autodesk.Revit.DB.Document doc)
+        {
+            _stubbornCategoryNotes.Clear();
+            try
+            {
+                var projectId = METools.Comments.CommentsStorage.GetOrCreateProjectId(doc);
+                if (string.IsNullOrWhiteSpace(projectId)) return;
+                var path = StubbornCategoriesPath(projectId);
+                if (!File.Exists(path)) return;
+                var json = File.ReadAllText(path, System.Text.Encoding.UTF8);
+                // Read as Dictionary<string,string> -- JSON object keys are
+                // always strings -- then convert back to long ids.
+                var raw = JsonSerializer.Deserialize<Dictionary<string, string>>(json);
+                if (raw != null)
+                    foreach (var kv in raw)
+                        if (long.TryParse(kv.Key, out var id))
+                            _stubbornCategoryNotes[id] = kv.Value ?? "";
+            }
+            catch { }
+        }
+
+        private void SaveStubbornCategoryIds(Autodesk.Revit.DB.Document doc)
+        {
+            try
+            {
+                var projectId = METools.Comments.CommentsStorage.GetOrCreateProjectId(doc);
+                if (string.IsNullOrWhiteSpace(projectId)) return;
+                var path = StubbornCategoriesPath(projectId);
+                var dir = Path.GetDirectoryName(path);
+                if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+                var raw = _stubbornCategoryNotes.ToDictionary(kv => kv.Key.ToString(), kv => kv.Value);
+                var json = JsonSerializer.Serialize(raw);
+                File.WriteAllText(path, json, System.Text.Encoding.UTF8);
+            }
+            catch { }
+        }
+
+        // A single, minimal record of where a category name was found
+        // while scanning families -- stored by NAME rather than by
+        // element/Family object, since only strings/bools survive a trip
+        // through JSON. The actual Family object gets re-resolved by name
+        // (a single fast collector call, not another EditFamily) whenever
+        // it's actually needed for a fix attempt.
+        private class CachedFamilyMatch
+        {
+            public string Family   { get; set; } = "";
+            public string Path     { get; set; } = "";
+            public bool   Editable { get; set; }
+        }
+
+        private class FamilyIndexFile
+        {
+            public bool Complete { get; set; }
+            public Dictionary<string, List<CachedFamilyMatch>> Index { get; set; }
+                = new Dictionary<string, List<CachedFamilyMatch>>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        // BUG FIXED HERE (performance): "Find & Remove from Families" opens
+        // EVERY loaded family via EditFamily to check its categories --
+        // reported as taking 15-20 minutes for 7 selections on a real
+        // project, which lines up with EditFamily/Close being genuinely
+        // expensive per family, not something a smarter LINQ query can
+        // avoid. What CAN be avoided is paying that cost again on every
+        // repeated attempt (which is exactly what testing this feature
+        // means doing over and over). A full scan now records EVERY
+        // category name it sees along the way -- not just the ones
+        // currently selected, since every family gets opened regardless --
+        // into a small per-project cache. Once complete, that cache
+        // answers "which family contains category X" instantly, without
+        // opening a single family, for every future click, including ones
+        // asking about categories that weren't even selected in the
+        // original scan. A "Force Full Rescan" option exists for when the
+        // cache might be stale (a family was added, removed, or edited
+        // since it was built).
+        private readonly Dictionary<string, List<CachedFamilyMatch>> _familyCategoryIndex
+            = new Dictionary<string, List<CachedFamilyMatch>>(StringComparer.OrdinalIgnoreCase);
+        private bool _familyIndexComplete = false;
+
+        private static string FamilyIndexPath(string projectId) =>
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                "METools", "StubbornImports", $"{projectId}_familyindex.json");
+
+        private void LoadFamilyIndex(Autodesk.Revit.DB.Document doc)
+        {
+            _familyCategoryIndex.Clear();
+            _familyIndexComplete = false;
+            try
+            {
+                var projectId = METools.Comments.CommentsStorage.GetOrCreateProjectId(doc);
+                if (string.IsNullOrWhiteSpace(projectId)) return;
+                var path = FamilyIndexPath(projectId);
+                if (!File.Exists(path)) return;
+                var json = File.ReadAllText(path, System.Text.Encoding.UTF8);
+                var file = JsonSerializer.Deserialize<FamilyIndexFile>(json);
+                if (file != null)
+                {
+                    _familyIndexComplete = file.Complete;
+                    if (file.Index != null)
+                        foreach (var kv in file.Index)
+                            _familyCategoryIndex[kv.Key] = kv.Value ?? new List<CachedFamilyMatch>();
+                }
+            }
+            catch { }
+        }
+
+        private void SaveFamilyIndex(Autodesk.Revit.DB.Document doc)
+        {
+            try
+            {
+                var projectId = METools.Comments.CommentsStorage.GetOrCreateProjectId(doc);
+                if (string.IsNullOrWhiteSpace(projectId)) return;
+                var path = FamilyIndexPath(projectId);
+                var dir = Path.GetDirectoryName(path);
+                if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+                var file = new FamilyIndexFile { Complete = _familyIndexComplete, Index = _familyCategoryIndex };
+                var json = JsonSerializer.Serialize(file);
+                File.WriteAllText(path, json, System.Text.Encoding.UTF8);
+            }
+            catch { }
+        }
 
         private static string WorksetsConfigPath =>
             Path.Combine(
@@ -105,7 +253,6 @@ namespace METools
             {
                 Padding    = new Thickness(24, 18, 24, 24),
                 Background = MeToolsTheme.BrBg,
-                MinHeight  = 280,
             };
 
             _panAppearance = BuildAppearancePanel();
@@ -226,6 +373,17 @@ namespace METools
 
         private string TabTitle(int idx) => idx >= 0 && idx < _homeTiles.Length ? S._(_homeTiles[idx].Key) : "";
 
+        // ResizeToFitContent() measures against the CURRENT layout -- but a
+        // Visibility change (or content being added to a Collapsed-until-now
+        // panel) doesn't get reflected until WPF's next real layout pass,
+        // not the instant the property changes. Calling ResizeToFitContent()
+        // immediately after such a change measures the layout as it was
+        // BEFORE the change, not after. Deferring to the next dispatcher
+        // cycle measures after that real pass instead -- used everywhere a
+        // resize follows a Visibility toggle or a panel repopulating itself.
+        private void DeferredResize() =>
+            Dispatcher.BeginInvoke(new Action(ResizeToFitContent), System.Windows.Threading.DispatcherPriority.Background);
+
         private void ShowHome()
         {
             _activeTab = -1;
@@ -237,7 +395,9 @@ namespace METools
             _panWorksets.Visibility   = Visibility.Collapsed;
             _panHeights.Visibility    = Visibility.Collapsed;
             _panImports.Visibility    = Visibility.Collapsed;
-            ResizeToFitContent();
+            // Deferred (not called immediately) -- see the fix note on
+            // ShowPanel below; the same reasoning applies here.
+            DeferredResize();
         }
 
         private void ShowPanel(int idx)
@@ -258,7 +418,24 @@ namespace METools
             if (idx == 4) LoadHeightsIntoList();
             if (idx == 5) LoadImportedCategories();
 
-            ResizeToFitContent();
+            // BUG FIXED HERE: calling ResizeToFitContent() immediately, in
+            // the same synchronous pass that just flipped several panels'
+            // Visibility, was measuring the window against a layout that
+            // hadn't actually settled yet -- WPF processes a Visibility
+            // change on its own next layout pass, not the instant the
+            // property is set, and newly-visible content (Worksets' two
+            // ListBoxes in particular, which virtualize their items) can
+            // under-report their true height if measured before that real
+            // pass happens. That produced exactly the reported symptom in
+            // both directions: short panels (Appearance, Language) stuck
+            // at whatever taller height a previous panel had left frozen,
+            // and tall panels (Worksets, Imported Objects) never getting
+            // measured tall enough to show everything, cutting off buttons
+            // at the bottom. Deferring to the next dispatcher cycle --
+            // exactly the same technique LoadHeightsIntoList already uses,
+            // for the same underlying reason -- measures AFTER that real
+            // layout pass instead of before it.
+            DeferredResize();
         }
 
         // InitWindow's Loaded handler (see MeToolsWindowBase.cs) measures the
@@ -459,8 +636,20 @@ namespace METools
         private StackPanel BuildWorksetsPanel()
         {
             var p = new StackPanel { Visibility = Visibility.Collapsed };
-            p.Children.Add(Sec(S._("settings.worksets.title")));
-            p.Children.Add(InfoBox(S._("settings.worksets.hint")));
+
+            // Everything below goes inside a bounded, internally-scrolling
+            // area instead of directly in p -- four sections stacked
+            // together (standard worksets editor, apply-to-project,
+            // current-project readonly list, share config) add up to
+            // noticeably more height than fits on a normal screen. This
+            // way the window itself stays a reasonable, fixed size and the
+            // panel scrolls internally for whatever doesn't fit, rather
+            // than the window trying (and failing) to grow tall enough for
+            // all four sections at once.
+            var inner = new StackPanel();
+
+            inner.Children.Add(Sec(S._("settings.worksets.title")));
+            inner.Children.Add(InfoBox(S._("settings.worksets.hint")));
 
             // List
             _lbWorksets = new ListBox
@@ -470,7 +659,7 @@ namespace METools
                 BorderBrush = MeToolsTheme.BrBorder, BorderThickness = new Thickness(1),
                 FontSize = 12, Padding = new Thickness(2),
             };
-            p.Children.Add(_lbWorksets);
+            inner.Children.Add(_lbWorksets);
 
             // Add row
             var addGrid = new Grid { Margin = new Thickness(0, 0, 0, 6) };
@@ -490,7 +679,7 @@ namespace METools
             btnAdd.Height = 32; btnAdd.Padding = new Thickness(16, 0, 16, 0);
             Grid.SetColumn(_tbNewWorkset, 0); Grid.SetColumn(btnAdd, 2);
             addGrid.Children.Add(_tbNewWorkset); addGrid.Children.Add(btnAdd);
-            p.Children.Add(addGrid);
+            inner.Children.Add(addGrid);
 
             // Edit buttons
             var editRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 16) };
@@ -498,18 +687,18 @@ namespace METools
             var btnSave   = FooterBtn(S._("settings.worksets.save"),   primary: true,  onClick: OnSaveWorksets);
             btnRemove.Margin = new Thickness(0, 0, 8, 0);
             editRow.Children.Add(btnRemove); editRow.Children.Add(btnSave);
-            p.Children.Add(editRow);
+            inner.Children.Add(editRow);
 
             // Apply to project button
-            p.Children.Add(new Separator { Margin = new Thickness(0, 0, 0, 16), Background = MeToolsTheme.BrBorder });
-            p.Children.Add(Sec(S._("settings.worksets.apply_title")));
-            p.Children.Add(InfoBox(S._("settings.worksets.apply_hint")));
+            inner.Children.Add(new Separator { Margin = new Thickness(0, 0, 0, 16), Background = MeToolsTheme.BrBorder });
+            inner.Children.Add(Sec(S._("settings.worksets.apply_title")));
+            inner.Children.Add(InfoBox(S._("settings.worksets.apply_hint")));
             var btnApply = ActionBtn(S._("settings.worksets.create_btn"), true, OnApplyWorksets);
             btnApply.Margin = new Thickness(0, 8, 0, 0);
-            p.Children.Add(btnApply);
+            inner.Children.Add(btnApply);
 
             // -- Current project's actual worksets (read-only, live from the open document) --
-            p.Children.Add(new Separator { Margin = new Thickness(0, 20, 0, 16), Background = MeToolsTheme.BrBorder });
+            inner.Children.Add(new Separator { Margin = new Thickness(0, 20, 0, 16), Background = MeToolsTheme.BrBorder });
             var curHdrRow = new Grid { Margin = new Thickness(0, 0, 0, 6) };
             curHdrRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             curHdrRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -518,9 +707,9 @@ namespace METools
             var btnRefreshCur = FooterBtn(S._("settings.worksets.refresh"), false, LoadCurrentProjectWorksets);
             btnRefreshCur.Height = 26; btnRefreshCur.Padding = new Thickness(10, 0, 10, 0); btnRefreshCur.FontSize = 11;
             Grid.SetColumn(btnRefreshCur, 1); curHdrRow.Children.Add(btnRefreshCur);
-            p.Children.Add(curHdrRow);
+            inner.Children.Add(curHdrRow);
 
-            p.Children.Add(InfoBox(S._("settings.worksets.current_hint")));
+            inner.Children.Add(InfoBox(S._("settings.worksets.current_hint")));
 
             _lbCurrentWorksets = new ListBox
             {
@@ -530,19 +719,27 @@ namespace METools
                 FontSize = 12, Padding = new Thickness(2),
                 IsHitTestVisible = true, // allow scrolling; selection has no effect (read-only)
             };
-            p.Children.Add(_lbCurrentWorksets);
+            inner.Children.Add(_lbCurrentWorksets);
 
             // -- Share your whole ME-Tools configuration with a colleague --
-            p.Children.Add(new Separator { Margin = new Thickness(0, 20, 0, 16), Background = MeToolsTheme.BrBorder });
-            p.Children.Add(Sec(S._("settings.config.title")));
-            p.Children.Add(InfoBox(S._("settings.config.hint")));
+            inner.Children.Add(new Separator { Margin = new Thickness(0, 20, 0, 16), Background = MeToolsTheme.BrBorder });
+            inner.Children.Add(Sec(S._("settings.config.title")));
+            inner.Children.Add(InfoBox(S._("settings.config.hint")));
             var configBtnRow = new StackPanel { Orientation = Orientation.Horizontal };
             var exportBtn = FooterBtn(S._("settings.config.export"), true, OnExportConfig);
             exportBtn.Margin = new Thickness(0, 0, 8, 0);
             var importBtn = FooterBtn(S._("settings.config.import"), false, OnImportConfig);
             configBtnRow.Children.Add(exportBtn);
             configBtnRow.Children.Add(importBtn);
-            p.Children.Add(configBtnRow);
+            inner.Children.Add(configBtnRow);
+
+            var scroll = new ScrollViewer
+            {
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                MaxHeight = 480,
+                Content   = inner,
+            };
+            p.Children.Add(scroll);
 
             return p;
         }
@@ -850,6 +1047,7 @@ namespace METools
             if (doc == null)
             {
                 _heightsHost.Children.Add(InfoBox(S._("settings.heights.no_document")));
+                DeferredResize();
                 return;
             }
 
@@ -938,7 +1136,25 @@ namespace METools
             var btnRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 8, 0, 8) };
             var btnAll  = FooterBtn(S._("settings.imports.select_all"),  primary: false, onClick: OnImportsSelectAll);
             var btnNone = FooterBtn(S._("settings.imports.select_none"), primary: false, onClick: OnImportsSelectNone);
-            var btnRescan = FooterBtn(S._("settings.imports.rescan"), primary: false, onClick: LoadImportedCategories);
+            var btnRescan = FooterBtn(S._("settings.imports.rescan"), primary: false, onClick: () =>
+            {
+                // BUG FIXED HERE: Rescan gave literally no visible feedback --
+                // the list silently cleared and repopulated, which (especially
+                // when the result looks identical to before, e.g. nothing was
+                // actually removable) reads as "did that even do anything?"
+                // Every other ME-Tools window shows this kind of feedback in
+                // its own bottom-left status bar; this one just never did.
+                // Deferred so "Rescanning..." gets a real chance to render
+                // before the (potentially slow, per Stefan's own report)
+                // scan work runs, rather than both messages landing in the
+                // same paint and only the second one ever being visible.
+                StatusLeft.Text = S._("settings.imports.rescanning");
+                Dispatcher.BeginInvoke(new Action(() =>
+                {
+                    LoadImportedCategories();
+                    StatusLeft.Text = string.Format(S._("settings.imports.rescan_done"), _importRows.Count);
+                }), System.Windows.Threading.DispatcherPriority.Background);
+            });
             btnAll.Margin = new Thickness(0, 0, 8, 0);
             btnNone.Margin = new Thickness(0, 0, 8, 0);
             btnRow.Children.Add(btnAll);
@@ -972,6 +1188,28 @@ namespace METools
             btnDelete.Click += (s, e) => OnDeleteImportsClicked();
             p.Children.Add(btnDelete);
 
+            // Everything that survives Delete Selected AND Revit's own
+            // native Purge Unused is almost certainly an "Import in
+            // Families" case -- CAD content embedded inside a loaded
+            // family rather than the project itself, which neither
+            // mechanism can touch because the real owner isn't the
+            // project at all. This is a genuinely more invasive operation
+            // than the button above: it opens matching families, edits
+            // them, and reloads them into the project -- affecting every
+            // place that family is used, not just the one entry in this
+            // list. Kept as a separate, deliberate action rather than
+            // folded into Delete Selected, since it can be slow (every
+            // editable family in the project has to be opened to check)
+            // and carries real project-wide side effects a simple delete
+            // attempt doesn't.
+            var btnFixFamilies = ActionBtn(S._("settings.imports.fix_in_families"), true, () => OnFindInFamiliesClicked());
+            btnFixFamilies.Margin = new Thickness(0, 8, 0, 0);
+            p.Children.Add(btnFixFamilies);
+
+            var btnForceRescan = FooterBtn(S._("settings.imports.force_rescan_families"), false, () => OnFindInFamiliesClicked(forceFullRescan: true));
+            btnForceRescan.Margin = new Thickness(0, 6, 0, 0);
+            p.Children.Add(btnForceRescan);
+
             return p;
         }
 
@@ -986,8 +1224,10 @@ namespace METools
             {
                 _importsList.Children.Add(InfoBox(S._("settings.imports.no_document")));
                 UpdateImportsStatus();
+                DeferredResize();
                 return;
             }
+            LoadStubbornCategoryIds(doc);
 
             List<Autodesk.Revit.DB.Category> topLevel;
             var liveInstanceCounts = new Dictionary<long, int>();
@@ -1011,6 +1251,7 @@ namespace METools
             {
                 _importsList.Children.Add(InfoBox(string.Format(S._("settings.imports.scan_failed"), ex.Message)));
                 UpdateImportsStatus();
+                DeferredResize();
                 return;
             }
 
@@ -1022,6 +1263,7 @@ namespace METools
                     Margin = new Thickness(2, 8, 0, 8),
                 });
                 UpdateImportsStatus();
+                DeferredResize();
                 return;
             }
 
@@ -1042,7 +1284,13 @@ namespace METools
                 _importsList.Children.Add(BuildImportRow(row));
             }
             UpdateImportsStatus();
-            ResizeToFitContent();
+            // Deferred for the same reason as ShowHome/ShowPanel -- this
+            // runs synchronously right after ShowPanel just changed several
+            // panels' Visibility, before WPF's next real layout pass has
+            // happened. Also reached directly from the Rescan button, where
+            // the same "measure before layout settles" risk applies if the
+            // list's length changes significantly between scans.
+            DeferredResize();
         }
 
         private UIElement BuildImportRow(ImportedCategoryRow row)
@@ -1063,13 +1311,22 @@ namespace METools
                 Text = row.Name, FontSize = 12, FontWeight = FontWeights.SemiBold, Foreground = MeToolsTheme.BrText,
             });
 
+            bool hasNote = _stubbornCategoryNotes.TryGetValue(row.CategoryId.IntegerValue, out var stubbornNote)
+                           && !string.IsNullOrWhiteSpace(stubbornNote);
             string statusText = row.LiveInstanceCount > 0
                 ? string.Format(S._("settings.imports.row_in_use"), row.SubCategoryCount, row.LiveInstanceCount)
-                : string.Format(S._("settings.imports.row_orphaned"), row.SubCategoryCount);
+                : hasNote
+                    ? string.Format(S._("settings.imports.row_stubborn_note"), row.SubCategoryCount, stubbornNote)
+                    : _stubbornCategoryNotes.ContainsKey(row.CategoryId.IntegerValue)
+                        ? string.Format(S._("settings.imports.row_stubborn"), row.SubCategoryCount)
+                        : string.Format(S._("settings.imports.row_orphaned"), row.SubCategoryCount);
+            bool isStubborn = _stubbornCategoryNotes.ContainsKey(row.CategoryId.IntegerValue);
             textStack.Children.Add(new TextBlock
             {
-                Text = statusText, FontSize = 10.5,
-                Foreground = row.LiveInstanceCount > 0 ? MeToolsTheme.BrOrange : MeToolsTheme.BrMuted,
+                Text = statusText, FontSize = 10.5, TextWrapping = TextWrapping.Wrap,
+                Foreground = row.LiveInstanceCount > 0 ? MeToolsTheme.BrOrange
+                           : isStubborn                ? MeToolsTheme.Br(MeToolsTheme.CRed)
+                                                         : MeToolsTheme.BrMuted,
             });
             Grid.SetColumn(textStack, 1);
 
@@ -1086,10 +1343,16 @@ namespace METools
         private void UpdateImportsStatus()
         {
             if (_importsStatus == null) return;
+            int total = _importRows.Count;
             int selected = _importRows.Count(r => r.Checkbox?.IsChecked == true);
+            // Includes the total count on purpose -- Rescan used to give no
+            // visible feedback at all beyond the list silently repopulating,
+            // which looked like it might not have done anything. Seeing the
+            // total change (or confirm it's the same) is direct evidence a
+            // rescan actually ran.
             _importsStatus.Text = selected > 0
-                ? string.Format(S._("settings.imports.n_selected"), selected)
-                : S._("settings.imports.none_selected");
+                ? string.Format(S._("settings.imports.n_selected"), total, selected)
+                : string.Format(S._("settings.imports.none_selected"), total);
         }
 
         private void OnImportsSelectAll()
@@ -1131,6 +1394,7 @@ namespace METools
                 MessageBoxButton.YesNo, MessageBoxImage.Warning);
             if (result != MessageBoxResult.Yes) return;
 
+            StatusLeft.Text = S._("settings.imports.deleting");
             try
             {
                 using (var tx = new Autodesk.Revit.DB.Transaction(doc, "ME-Tools: Remove Imported Categories"))
@@ -1199,6 +1463,7 @@ namespace METools
                         catch { }
                     }
 
+                    doc.Regenerate();
                     tx.Commit();
                 }
             }
@@ -1227,9 +1492,28 @@ namespace METools
             foreach (var row in selected)
             {
                 if (stillExisting.Contains(row.CategoryId.IntegerValue))
-                { stillPresent++; stillPresentNames.Add(row.Name); }
-                else removed++;
+                {
+                    stillPresent++;
+                    stillPresentNames.Add(row.Name);
+                    // Empty note = "known stubborn, no specific reason yet"
+                    // -- only set if nothing more specific is already on
+                    // file (e.g. from a previous Find & Remove from
+                    // Families attempt), so this doesn't erase a more
+                    // useful note with a blank one.
+                    if (!_stubbornCategoryNotes.ContainsKey(row.CategoryId.IntegerValue))
+                        _stubbornCategoryNotes[row.CategoryId.IntegerValue] = "";
+                }
+                else
+                {
+                    removed++;
+                    // Actually gone this time (e.g. after a Purge Unused or
+                    // family edit since a previous attempt) -- stop
+                    // remembering it as stubborn, or a later re-import
+                    // reusing the same id would wrongly inherit the old label.
+                    _stubbornCategoryNotes.Remove(row.CategoryId.IntegerValue);
+                }
             }
+            SaveStubbornCategoryIds(doc);
 
             var sb = new System.Text.StringBuilder();
             sb.AppendLine(string.Format(S._("settings.imports.removed_line"), removed));
@@ -1243,6 +1527,426 @@ namespace METools
             MessageBox.Show(sb.ToString(), S._("settings.imports.done_title"), MessageBoxButton.OK, MessageBoxImage.None);
 
             LoadImportedCategories();
+        }
+
+        // ── "Find & Remove from Families" ────────────────────────────────
+        //
+        // Standard IFamilyLoadOptions implementation for reloading a family
+        // back into the project it came from -- always overwrite, since
+        // we're the ones who just edited it and want that edit to take
+        // effect. Same shape as the pattern Autodesk's own docs and every
+        // Revit API reference show for exactly this "reload after editing"
+        // scenario.
+        private class OverwriteFamilyLoadOptions : Autodesk.Revit.DB.IFamilyLoadOptions
+        {
+            public bool OnFamilyFound(bool familyInUse, out bool overwriteParameterValues)
+            {
+                overwriteParameterValues = true;
+                return true;
+            }
+
+            public bool OnSharedFamilyFound(Autodesk.Revit.DB.Family sharedFamily, bool familyInUse,
+                out Autodesk.Revit.DB.FamilySource source, out bool overwriteParameterValues)
+            {
+                source = Autodesk.Revit.DB.FamilySource.Family;
+                overwriteParameterValues = true;
+                return true;
+            }
+        }
+
+        // Editing/regenerating a family can trigger routine, informational
+        // Revit warnings that have nothing to do with the actual operation
+        // -- e.g. "constraints between geometry in the family can behave
+        // unpredictably", which just means the family's own geometry isn't
+        // fully constrained to reference planes, a common and mostly
+        // harmless modeling habit, not something this specific operation
+        // caused. Without this, that dialog blocks and needs a manual OK
+        // click -- for every family this scan happens to touch, which
+        // could mean many clicks in a row for something that isn't
+        // actually a problem. Only WARNING-severity messages are
+        // dismissed; actual errors are left completely untouched and
+        // handled normally, exactly the pattern Autodesk's own official
+        // SDK samples use for this.
+        private class SuppressWarningsPreprocessor : Autodesk.Revit.DB.IFailuresPreprocessor
+        {
+            public Autodesk.Revit.DB.FailureProcessingResult PreprocessFailures(Autodesk.Revit.DB.FailuresAccessor failuresAccessor)
+            {
+                foreach (var fma in failuresAccessor.GetFailureMessages())
+                {
+                    try
+                    {
+                        if (fma.GetSeverity() == Autodesk.Revit.DB.FailureSeverity.Warning)
+                            failuresAccessor.DeleteWarning(fma);
+                    }
+                    catch { }
+                }
+                return Autodesk.Revit.DB.FailureProcessingResult.Continue;
+            }
+        }
+
+        // A single place a wanted category name turned up. TopLevelFamily
+        // is always the one directly reachable from the project via
+        // EditFamily -- for a nested match that's the OUTER family, since
+        // that's what the fix would eventually need to open first, even
+        // though the category actually lives one level deeper inside it.
+        private class FamilyMatch
+        {
+            public Autodesk.Revit.DB.Family TopLevelFamily;
+            public string Path;       // e.g. "MyFamily" or "MyFamily > NestedSubFamily"
+            public bool   IsEditable; // editability of the OUTER family -- that's what actually gates whether a fix is even possible
+            public bool   IsNested;   // found inside a family nested within another family, not directly at the top level
+        }
+
+        // Opens every loaded family in the project -- editable or not, since
+        // editability only matters for whether a fix is possible, not for
+        // whether we should even look -- and checks each one's own
+        // top-level categories for a name match against the given set.
+        // Also recurses into families NESTED inside other families (up to
+        // a sane depth limit), since "1 removed, 4 not found anywhere"
+        // pointed at either a non-editable family (skipped by an earlier,
+        // narrower version of this scan) or a nested one (never checked at
+        // all before this).
+        //
+        // forceFullRescan skips the cache entirely and re-opens every
+        // family regardless -- for when the cache might be stale (a family
+        // was added, removed, or edited since it was built).
+        private Dictionary<string, List<FamilyMatch>> FindOwningFamilies(
+            Autodesk.Revit.DB.Document doc, IEnumerable<string> categoryNames, bool forceFullRescan = false)
+        {
+            var wanted = new HashSet<string>(categoryNames, StringComparer.OrdinalIgnoreCase);
+            var result = wanted.ToDictionary(n => n, n => new List<FamilyMatch>(), StringComparer.OrdinalIgnoreCase);
+
+            if (!forceFullRescan)
+            {
+                LoadFamilyIndex(doc);
+                if (_familyIndexComplete)
+                {
+                    ResolveMatchesFromIndex(doc, wanted, result);
+                    return result;
+                }
+            }
+
+            // Full scan (slow -- this is the expensive EditFamily-per-family
+            // cost) -- records EVERY category name seen along the way, not
+            // just the ones in `wanted`, since every family gets opened
+            // regardless. That's what lets a LATER click asking about
+            // completely different categories reuse this same cache
+            // instead of scanning again.
+            var freshIndex = new Dictionary<string, List<CachedFamilyMatch>>(StringComparer.OrdinalIgnoreCase);
+
+            List<Autodesk.Revit.DB.Family> families;
+            try
+            {
+                families = new Autodesk.Revit.DB.FilteredElementCollector(doc)
+                    .OfClass(typeof(Autodesk.Revit.DB.Family))
+                    .Cast<Autodesk.Revit.DB.Family>()
+                    .Where(f => f != null)
+                    .ToList();
+            }
+            catch { families = new List<Autodesk.Revit.DB.Family>(); }
+
+            var visitedFamilyIds = new HashSet<long>();
+            foreach (var fam in families)
+            {
+                if (!visitedFamilyIds.Add(fam.Id.IntegerValue)) continue;
+                Autodesk.Revit.DB.Document famDoc = null;
+                try
+                {
+                    famDoc = doc.EditFamily(fam);
+                    if (famDoc == null || !famDoc.IsFamilyDocument) continue;
+                    ScanFamilyDocForCategories(famDoc, fam, fam.Name, 0, freshIndex, visitedFamilyIds);
+                }
+                catch { }
+                finally { try { famDoc?.Close(false); } catch { } }
+            }
+
+            _familyCategoryIndex.Clear();
+            foreach (var kv in freshIndex) _familyCategoryIndex[kv.Key] = kv.Value;
+            _familyIndexComplete = true;
+            SaveFamilyIndex(doc);
+
+            ResolveMatchesFromIndex(doc, wanted, result);
+            return result;
+        }
+
+        // Turns the (possibly cached) name-based index back into live
+        // FamilyMatch objects -- a single collector call to resolve
+        // families by name, not another round of EditFamily.
+        private void ResolveMatchesFromIndex(Autodesk.Revit.DB.Document doc, HashSet<string> wanted, Dictionary<string, List<FamilyMatch>> result)
+        {
+            List<Autodesk.Revit.DB.Family> liveFamilies;
+            try
+            {
+                liveFamilies = new Autodesk.Revit.DB.FilteredElementCollector(doc)
+                    .OfClass(typeof(Autodesk.Revit.DB.Family))
+                    .Cast<Autodesk.Revit.DB.Family>()
+                    .ToList();
+            }
+            catch { liveFamilies = new List<Autodesk.Revit.DB.Family>(); }
+
+            foreach (var name in wanted)
+            {
+                if (!_familyCategoryIndex.TryGetValue(name, out var cached)) continue;
+                foreach (var c in cached)
+                {
+                    var fam = liveFamilies.FirstOrDefault(f => string.Equals(f.Name, c.Family, StringComparison.OrdinalIgnoreCase));
+                    if (fam == null) continue; // renamed or removed since the cache was built
+                    result[name].Add(new FamilyMatch
+                    {
+                        TopLevelFamily = fam,
+                        Path           = c.Path,
+                        IsEditable     = fam.IsEditable, // re-check live rather than trust a possibly-stale cached flag
+                        IsNested       = c.Path.Contains(">"),
+                    });
+                }
+            }
+        }
+
+        // depth 0 = this IS the top-level family; depth > 0 = nested one
+        // level or more inside it. Depth-limited (3) purely as a safety net
+        // against unusual/circular nesting -- real-world nesting rarely
+        // goes more than one or two levels deep. Records into `index` for
+        // every category name it finds, unconditionally -- not filtered to
+        // any particular wanted set, since the whole point is building a
+        // reusable cache from a cost that's already being paid regardless.
+        private void ScanFamilyDocForCategories(
+            Autodesk.Revit.DB.Document famDocToScan, Autodesk.Revit.DB.Family topLevelFamily, string pathSoFar, int depth,
+            Dictionary<string, List<CachedFamilyMatch>> index, HashSet<long> visitedFamilyIds)
+        {
+            if (depth > 3) return;
+            try
+            {
+                var famCatNames = famDocToScan.Settings.Categories.Cast<Autodesk.Revit.DB.Category>()
+                    .Where(c => c != null && c.Parent == null && c.Id != null && c.Id.IntegerValue > 0)
+                    .Select(c => c.Name)
+                    .ToList();
+
+                foreach (var name in famCatNames)
+                {
+                    if (!index.TryGetValue(name, out var list))
+                    {
+                        list = new List<CachedFamilyMatch>();
+                        index[name] = list;
+                    }
+                    list.Add(new CachedFamilyMatch
+                    {
+                        Family   = topLevelFamily.Name,
+                        Path     = pathSoFar,
+                        Editable = topLevelFamily.IsEditable,
+                    });
+                }
+
+                var nested = new Autodesk.Revit.DB.FilteredElementCollector(famDocToScan)
+                    .OfClass(typeof(Autodesk.Revit.DB.Family))
+                    .Cast<Autodesk.Revit.DB.Family>()
+                    .Where(f => f != null)
+                    .ToList();
+
+                foreach (var nf in nested)
+                {
+                    if (!visitedFamilyIds.Add(nf.Id.IntegerValue)) continue;
+                    Autodesk.Revit.DB.Document nestedDoc = null;
+                    try
+                    {
+                        nestedDoc = famDocToScan.EditFamily(nf);
+                        if (nestedDoc != null && nestedDoc.IsFamilyDocument)
+                            ScanFamilyDocForCategories(nestedDoc, topLevelFamily, pathSoFar + " > " + nf.Name,
+                                depth + 1, index, visitedFamilyIds);
+                    }
+                    catch { }
+                    finally { try { nestedDoc?.Close(false); } catch { } }
+                }
+            }
+            catch { }
+        }
+
+        // Opens the given family, removes the import instances + category
+        // matching categoryName from WITHIN the family itself, then reloads
+        // the family back into the project. This is the operation that
+        // actually has a chance of working where project-level deletion and
+        // Purge Unused both can't -- the category's real owner is the
+        // family, not the project, so the fix has to happen there too.
+        private bool RemoveImportFromFamily(Autodesk.Revit.DB.Document doc, Autodesk.Revit.DB.Family fam, string categoryName)
+        {
+            Autodesk.Revit.DB.Document famDoc = null;
+            try
+            {
+                famDoc = doc.EditFamily(fam);
+                if (famDoc == null || !famDoc.IsFamilyDocument) return false;
+
+                using (var tx = new Autodesk.Revit.DB.Transaction(famDoc, "ME-Tools: Remove Imported Category"))
+                {
+                    tx.Start();
+
+                    var failOpts = tx.GetFailureHandlingOptions();
+                    failOpts.SetFailuresPreprocessor(new SuppressWarningsPreprocessor());
+                    tx.SetFailureHandlingOptions(failOpts);
+
+                    foreach (var ii in new Autodesk.Revit.DB.FilteredElementCollector(famDoc)
+                        .OfClass(typeof(Autodesk.Revit.DB.ImportInstance))
+                        .Cast<Autodesk.Revit.DB.ImportInstance>()
+                        .ToList())
+                    {
+                        try
+                        {
+                            if (string.Equals(ii.Category?.Name, categoryName, StringComparison.OrdinalIgnoreCase))
+                                famDoc.Delete(ii.Id);
+                        }
+                        catch { }
+                    }
+
+                    famDoc.Regenerate();
+
+                    try
+                    {
+                        var cat = famDoc.Settings.Categories.Cast<Autodesk.Revit.DB.Category>()
+                            .FirstOrDefault(c => string.Equals(c.Name, categoryName, StringComparison.OrdinalIgnoreCase) && c.Parent == null);
+                        if (cat != null)
+                        {
+                            try
+                            {
+                                foreach (Autodesk.Revit.DB.Category sub in cat.SubCategories)
+                                    try { famDoc.Delete(sub.Id); } catch { }
+                            }
+                            catch { }
+                            try { famDoc.Delete(cat.Id); } catch { }
+                        }
+                    }
+                    catch { }
+
+                    famDoc.Regenerate();
+                    tx.Commit();
+                }
+
+                // LoadFamily must run with no active transaction on the
+                // family document -- confirmed via Autodesk's own docs and
+                // API reference examples for this exact "reload after
+                // editing" pattern. The transaction above is already
+                // committed by this point, so this is safe.
+                var loaded = famDoc.LoadFamily(doc, new OverwriteFamilyLoadOptions());
+                return loaded != null;
+            }
+            catch { return false; }
+            finally { try { famDoc?.Close(false); } catch { } }
+        }
+
+        private void OnFindInFamiliesClicked(bool forceFullRescan = false)
+        {
+            var selected = _importRows.Where(r => r.Checkbox?.IsChecked == true).ToList();
+            if (selected.Count == 0)
+            {
+                MessageBox.Show(S._("settings.imports.select_first"), S._("settings.imports.title"),
+                    MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            var doc = SettingsCommand.CurrentDocument;
+            if (doc == null)
+            {
+                MessageBox.Show(S._("settings.imports.no_document"), S._("settings.imports.title"),
+                    MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            var confirmResult = MessageBox.Show(S._("settings.imports.fix_families_confirm"),
+                S._("settings.imports.confirm_title"), MessageBoxButton.YesNo, MessageBoxImage.Warning);
+            if (confirmResult != MessageBoxResult.Yes) return;
+
+            StatusLeft.Text = S._("settings.imports.scanning_families");
+            Dispatcher.BeginInvoke(new Action(() =>
+            {
+                var names = selected.Select(r => r.Name).ToList();
+                Dictionary<string, List<FamilyMatch>> owners;
+                try { owners = FindOwningFamilies(doc, names, forceFullRescan); }
+                catch (Exception ex)
+                {
+                    StatusLeft.Text = string.Format(S._("settings.imports.delete_error"), ex.Message);
+                    return;
+                }
+
+                int fixedCount = 0, needsAttentionCount = 0, notFoundCount = 0;
+                var needsAttentionLines = new List<string>();
+                var notFoundNames = new List<string>();
+
+                foreach (var name in names)
+                {
+                    var matches = owners.TryGetValue(name, out var list) ? list : new List<FamilyMatch>();
+                    if (matches.Count == 0)
+                    {
+                        notFoundCount++;
+                        notFoundNames.Add(name);
+                        continue;
+                    }
+
+                    // Only attempt the automatic fix for a match that's both
+                    // directly at the top level AND editable -- anything
+                    // nested or not editable gets reported honestly instead
+                    // of a risky, unproven multi-level fix attempt.
+                    var fixable = matches.Where(m => !m.IsNested && m.IsEditable).ToList();
+                    bool anySucceeded = false;
+                    foreach (var m in fixable)
+                    {
+                        try { if (RemoveImportFromFamily(doc, m.TopLevelFamily, name)) anySucceeded = true; }
+                        catch { }
+                    }
+
+                    if (anySucceeded)
+                    {
+                        fixedCount++;
+                        var row = _importRows.FirstOrDefault(r => string.Equals(r.Name, name, StringComparison.OrdinalIgnoreCase));
+                        if (row != null) _stubbornCategoryNotes.Remove(row.CategoryId.IntegerValue);
+                    }
+                    else
+                    {
+                        // Found somewhere, but not somewhere this code can
+                        // safely fix on its own -- nested inside another
+                        // family, or in a family that isn't editable right
+                        // now (often means someone else has it checked out
+                        // in a workshared model). Persisted directly onto
+                        // the row's own note, not just this one message box
+                        // -- a message box is easy to close by accident
+                        // before reading it, which is exactly what happened
+                        // here; the row itself keeps showing the reason
+                        // every time this list is scanned from now on.
+                        needsAttentionCount++;
+                        var noteParts = new List<string>();
+                        foreach (var m in matches)
+                        {
+                            string why = m.IsNested ? S._("settings.imports.match_nested")
+                                       : !m.IsEditable ? S._("settings.imports.match_not_editable")
+                                       : S._("settings.imports.match_fix_failed");
+                            noteParts.Add($"{m.Path} ({why})");
+                            needsAttentionLines.Add($"{name} -- {m.Path} ({why})");
+                        }
+
+                        var row = _importRows.FirstOrDefault(r => string.Equals(r.Name, name, StringComparison.OrdinalIgnoreCase));
+                        if (row != null)
+                            _stubbornCategoryNotes[row.CategoryId.IntegerValue] =
+                                string.Format(S._("settings.imports.note_found_in"), string.Join("; ", noteParts));
+                    }
+                }
+                SaveStubbornCategoryIds(doc);
+
+                var sb = new System.Text.StringBuilder();
+                sb.AppendLine(string.Format(S._("settings.imports.fix_families_fixed_line"), fixedCount));
+                if (needsAttentionCount > 0)
+                {
+                    sb.AppendLine(string.Format(S._("settings.imports.fix_families_attention_line"), needsAttentionCount));
+                    foreach (var line in needsAttentionLines.Distinct().Take(10))
+                        sb.AppendLine("   • " + line);
+                }
+                if (notFoundCount > 0)
+                {
+                    sb.AppendLine(string.Format(S._("settings.imports.fix_families_notfound_line"), notFoundCount));
+                    sb.AppendLine(S._("settings.imports.fix_families_notfound_hint"));
+                    foreach (var n in notFoundNames.Distinct().Take(10))
+                        sb.AppendLine("   • " + n);
+                }
+                MessageBox.Show(sb.ToString(), S._("settings.imports.done_title"), MessageBoxButton.OK, MessageBoxImage.None);
+
+                StatusLeft.Text = string.Format(S._("settings.imports.rescan_done"), _importRows.Count);
+                LoadImportedCategories();
+            }), System.Windows.Threading.DispatcherPriority.Background);
         }
 
         private UIElement BuildHeightRow(METools.FamilyPlacer.FamilyHeightEntry en,
