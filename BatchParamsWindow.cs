@@ -13,6 +13,7 @@ using Color      = System.Windows.Media.Color;
 using ComboBox   = System.Windows.Controls.ComboBox;
 using Grid       = System.Windows.Controls.Grid;
 using TextBox    = System.Windows.Controls.TextBox;
+using Visibility = System.Windows.Visibility;
 
 namespace METools.BatchParams
 {
