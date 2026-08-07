@@ -36,10 +36,10 @@ namespace METools.BatchParams
         {
             var cfg = req.Renumber ?? new RenumberConfig();
             var ids = req.OrderedElementIds ?? new List<ElementId>();
-            var result = new ApplyResult();
+            var result = new ApplyResult { WhichAction = BatchParamsAction.ApplyRenumber, WasDryRun = req.DryRun };
 
-            if (ids.Count == 0) { Report("No elements to renumber."); return; }
-            if (string.IsNullOrEmpty(cfg.ParameterName)) { Report("No parameter selected."); return; }
+            if (ids.Count == 0) { Report("No elements to renumber."); OnDone?.Invoke(result); return; }
+            if (string.IsNullOrEmpty(cfg.ParameterName)) { Report("No parameter selected."); OnDone?.Invoke(result); return; }
 
             using (var tx = new Transaction(doc, "ME-Tools: Batch Renumber"))
             {
@@ -47,37 +47,59 @@ namespace METools.BatchParams
                 int n = cfg.StartNumber;
                 foreach (var id in ids)
                 {
+                    string label = "";
+                    string newVal = "";
                     try
                     {
                         var el = doc.GetElement(id);
-                        if (el == null) { result.Skipped++; n += cfg.Step; continue; }
+                        string numStr = cfg.Padding > 0 ? n.ToString().PadLeft(cfg.Padding, '0') : n.ToString();
+                        newVal = (cfg.Prefix ?? "") + numStr + (cfg.Suffix ?? "");
+                        label  = ElementLabel(el);
 
-                        var p = el.LookupParameter(cfg.ParameterName);
-                        if (p == null || p.IsReadOnly || p.StorageType != StorageType.String)
+                        if (el == null)
                         {
                             result.Skipped++;
+                            result.Changes.Add(new ElementChangeInfo { ElementId = id, ElementLabel = "(deleted)", NewValue = newVal, Status = ChangeStatus.Skipped, Reason = "element no longer exists" });
                         }
                         else
                         {
-                            string numStr = cfg.Padding > 0 ? n.ToString().PadLeft(cfg.Padding, '0') : n.ToString();
-                            string label  = (cfg.Prefix ?? "") + numStr + (cfg.Suffix ?? "");
-                            p.Set(label);
-                            result.Updated++;
+                            var p = el.LookupParameter(cfg.ParameterName);
+                            if (p == null || p.IsReadOnly || p.StorageType != StorageType.String)
+                            {
+                                result.Skipped++;
+                                string reason = p == null ? "parameter not found on this element"
+                                              : p.IsReadOnly ? "parameter is read-only"
+                                              : "parameter is not a text parameter";
+                                result.Changes.Add(new ElementChangeInfo { ElementId = id, ElementLabel = label, NewValue = newVal, Status = ChangeStatus.Skipped, Reason = reason });
+                            }
+                            else
+                            {
+                                string oldVal = p.AsString() ?? "";
+                                p.Set(newVal);
+                                result.Updated++;
+                                result.Changes.Add(new ElementChangeInfo { ElementId = id, ElementLabel = label, OldValue = oldVal, NewValue = newVal, Status = ChangeStatus.Updated });
+                            }
                         }
                     }
                     catch (Exception ex)
                     {
                         result.Errors++;
                         result.ErrorMessages.Add(ex.Message);
+                        result.Changes.Add(new ElementChangeInfo { ElementId = id, ElementLabel = label, NewValue = newVal, Status = ChangeStatus.Error, Reason = ex.Message });
                     }
                     n += cfg.Step;
                 }
-                if (tx.GetStatus() == TransactionStatus.Started) tx.Commit();
+                if (tx.GetStatus() == TransactionStatus.Started)
+                {
+                    if (req.DryRun) tx.RollBack(); else tx.Commit();
+                }
             }
 
-            var summary = $"Renumbered {result.Updated} element(s)";
-            if (result.Skipped > 0) summary += $", {result.Skipped} skipped (parameter missing, read-only, or not a text parameter)";
+            var verb = req.DryRun ? "Would renumber" : "Renumbered";
+            var summary = $"{verb} {result.Updated} element(s)";
+            if (result.Skipped > 0) summary += $", {result.Skipped} skipped";
             if (result.Errors  > 0) summary += $", {result.Errors} errors: " + result.ErrorMessages.FirstOrDefault();
+            if (req.DryRun) summary += " -- review, then Confirm to apply.";
             Report(summary);
             OnDone?.Invoke(result);
         }
@@ -87,27 +109,43 @@ namespace METools.BatchParams
         {
             var cfg = req.BulkEdit ?? new BulkEditConfig();
             var ids = req.OrderedElementIds ?? new List<ElementId>();
-            var result = new ApplyResult();
+            var result = new ApplyResult { WhichAction = BatchParamsAction.ApplyBulkEdit, WasDryRun = req.DryRun };
 
-            if (ids.Count == 0) { Report("No elements matched."); return; }
-            if (string.IsNullOrEmpty(cfg.ParameterName)) { Report("No parameter selected."); return; }
+            if (ids.Count == 0) { Report("No elements matched."); OnDone?.Invoke(result); return; }
+            if (string.IsNullOrEmpty(cfg.ParameterName)) { Report("No parameter selected."); OnDone?.Invoke(result); return; }
 
             using (var tx = new Transaction(doc, "ME-Tools: Batch Bulk Edit"))
             {
                 tx.Start();
                 foreach (var id in ids)
                 {
+                    string label = "";
                     try
                     {
                         var el = doc.GetElement(id);
-                        if (el == null) { result.Skipped++; continue; }
+                        if (el == null)
+                        {
+                            result.Skipped++;
+                            result.Changes.Add(new ElementChangeInfo { ElementId = id, ElementLabel = "(deleted)", Status = ChangeStatus.Skipped, Reason = "element no longer exists" });
+                            continue;
+                        }
+                        label = ElementLabel(el);
                         var target = cfg.IsInstance ? el : ResolveTypeElement(doc, el);
-                        if (target == null) { result.Skipped++; continue; }
+                        if (target == null)
+                        {
+                            result.Skipped++;
+                            result.Changes.Add(new ElementChangeInfo { ElementId = id, ElementLabel = label, Status = ChangeStatus.Skipped, Reason = "no type element found" });
+                            continue;
+                        }
 
                         var p = target.LookupParameter(cfg.ParameterName);
                         if (p == null || p.IsReadOnly || p.StorageType != StorageType.String)
                         {
                             result.Skipped++;
+                            string reason = p == null ? "parameter not found on this element"
+                                          : p.IsReadOnly ? "parameter is read-only"
+                                          : "parameter is not a text parameter";
+                            result.Changes.Add(new ElementChangeInfo { ElementId = id, ElementLabel = label, Status = ChangeStatus.Skipped, Reason = reason });
                             continue;
                         }
 
@@ -116,6 +154,7 @@ namespace METools.BatchParams
                             current.IndexOf(cfg.ValueFilter, StringComparison.OrdinalIgnoreCase) < 0)
                         {
                             result.Skipped++;
+                            result.Changes.Add(new ElementChangeInfo { ElementId = id, ElementLabel = label, OldValue = current, Status = ChangeStatus.Skipped, Reason = "current value doesn't match the filter" });
                             continue;
                         }
 
@@ -134,24 +173,43 @@ namespace METools.BatchParams
                             default: next = current; break;
                         }
 
-                        if (string.Equals(next, current, StringComparison.Ordinal)) { result.Skipped++; continue; }
+                        if (string.Equals(next, current, StringComparison.Ordinal))
+                        {
+                            result.Skipped++;
+                            result.Changes.Add(new ElementChangeInfo { ElementId = id, ElementLabel = label, OldValue = current, NewValue = next, Status = ChangeStatus.Skipped, Reason = "no change" });
+                            continue;
+                        }
                         p.Set(next);
                         result.Updated++;
+                        result.Changes.Add(new ElementChangeInfo { ElementId = id, ElementLabel = label, OldValue = current, NewValue = next, Status = ChangeStatus.Updated });
                     }
                     catch (Exception ex)
                     {
                         result.Errors++;
                         result.ErrorMessages.Add(ex.Message);
+                        result.Changes.Add(new ElementChangeInfo { ElementId = id, ElementLabel = label, Status = ChangeStatus.Error, Reason = ex.Message });
                     }
                 }
-                if (tx.GetStatus() == TransactionStatus.Started) tx.Commit();
+                if (tx.GetStatus() == TransactionStatus.Started)
+                {
+                    if (req.DryRun) tx.RollBack(); else tx.Commit();
+                }
             }
 
-            var summary = $"Updated {result.Updated} element(s)";
+            var verb = req.DryRun ? "Would update" : "Updated";
+            var summary = $"{verb} {result.Updated} element(s)";
             if (result.Skipped > 0) summary += $", {result.Skipped} skipped";
             if (result.Errors  > 0) summary += $", {result.Errors} errors: " + result.ErrorMessages.FirstOrDefault();
+            if (req.DryRun) summary += " -- review, then Confirm to apply.";
             Report(summary);
             OnDone?.Invoke(result);
+        }
+
+        private static string ElementLabel(Element el)
+        {
+            if (el == null) return "(deleted)";
+            try { return $"{el.Category?.Name ?? "Element"} #{el.Id.Value}"; }
+            catch { return "Element"; }
         }
 
         private void Report(string msg) => OnStatus?.Invoke(msg);

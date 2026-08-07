@@ -83,6 +83,29 @@ namespace METools.BatchParams
 
         public RenumberConfig Renumber { get; set; } = new RenumberConfig();
         public BulkEditConfig BulkEdit { get; set; } = new BulkEditConfig();
+
+        // When true, the handler runs the exact same logic (including
+        // attempting every write, so read-only/missing-parameter detection
+        // is accurate) inside a transaction that gets rolled back instead of
+        // committed -- a preview of exactly what Apply would do, using the
+        // same code path so it can't drift from the real thing.
+        public bool DryRun { get; set; } = false;
+    }
+
+    public enum ChangeStatus { Updated, Skipped, Error }
+
+    // One element's before/after -- the same record powers both the preview
+    // (before you commit) and the after-the-fact detail list (which elements
+    // got skipped/errored and why), since both come from the same dry-run-or-
+    // real pass over the elements.
+    public class ElementChangeInfo
+    {
+        public Autodesk.Revit.DB.ElementId ElementId { get; set; }
+        public string ElementLabel { get; set; } = "";
+        public string OldValue     { get; set; } = "";
+        public string NewValue     { get; set; } = "";
+        public ChangeStatus Status { get; set; } = ChangeStatus.Updated;
+        public string Reason       { get; set; } = "";
     }
 
     public class ApplyResult
@@ -91,5 +114,13 @@ namespace METools.BatchParams
         public int Skipped { get; set; }
         public int Errors  { get; set; }
         public List<string> ErrorMessages { get; set; } = new List<string>();
+
+        // Which action produced this result and whether it was a dry run --
+        // lets one shared UI panel/handler distinguish "here's what WOULD
+        // happen, confirm?" from "here's what DID happen, and why anything
+        // was skipped" without separate plumbing for each.
+        public BatchParamsAction WhichAction { get; set; } = BatchParamsAction.None;
+        public bool WasDryRun { get; set; } = false;
+        public List<ElementChangeInfo> Changes { get; set; } = new List<ElementChangeInfo>();
     }
 }

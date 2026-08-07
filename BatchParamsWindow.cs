@@ -50,6 +50,11 @@ namespace METools.BatchParams
         private TextBlock _lblManualCount;
         private ElementId _pathCurveId = ElementId.InvalidElementId;
         private TextBlock _lblPathStatus;
+        private BatchParamsRequest _pendingRenumberRequest;
+        private StackPanel _panRenumberResult;
+        private TextBlock  _lblRenumberSummary;
+        private StackPanel _renumberResultList;
+        private Button     _btnRenumberConfirm, _btnRenumberCancel;
 
         // -- Bulk Edit tab -----------------------------------------------------
         private ComboBox _cbBulkParam;
@@ -57,6 +62,11 @@ namespace METools.BatchParams
         private BulkEditAction _bulkAction = BulkEditAction.AddPrefix;
         private TextBox _tbBulkPrefix, _tbBulkSuffix, _tbFind, _tbReplace, _tbSetValue, _tbValueFilter;
         private StackPanel _panBulkPrefix, _panBulkSuffix, _panBulkReplace, _panBulkSet;
+        private BatchParamsRequest _pendingBulkRequest;
+        private StackPanel _panBulkResult;
+        private TextBlock  _lblBulkSummary;
+        private StackPanel _bulkResultList;
+        private Button     _btnBulkConfirm, _btnBulkCancel;
 
         public BatchParamsWindow(UIApplication uiApp, ExternalEvent extEvent, BatchParamsHandler handler)
         {
@@ -72,7 +82,7 @@ namespace METools.BatchParams
         private void WireHandler()
         {
             _handler.OnStatus = msg => Dispatcher.Invoke(() => UpdateStatusBar(msg));
-            _handler.OnDone   = _   => Dispatcher.Invoke(() => { });
+            _handler.OnDone   = result => Dispatcher.Invoke(() => HandleApplyResult(result));
         }
 
         // ── Build ─────────────────────────────────────────────────────────
@@ -213,6 +223,13 @@ namespace METools.BatchParams
             UpdateManualCountLabel();
             _pathCurveId = ElementId.InvalidElementId;
             if (_lblPathStatus != null) _lblPathStatus.Text = S._("batchparams.path_not_picked");
+
+            // Same for any preview/result already on screen -- it was built
+            // from the previous matched set.
+            _pendingRenumberRequest = null;
+            _pendingBulkRequest = null;
+            if (_panRenumberResult != null) _panRenumberResult.Visibility = Visibility.Collapsed;
+            if (_panBulkResult != null) _panBulkResult.Visibility = Visibility.Collapsed;
         }
 
         private void RefreshParamCombos()
@@ -348,6 +365,12 @@ namespace METools.BatchParams
             var btnApplyRenumber = ActionBtn(S._("batchparams.apply_renumber"), false, OnApplyRenumberClicked);
             btnApplyRenumber.HorizontalAlignment = HorizontalAlignment.Left;
             sp.Children.Add(btnApplyRenumber);
+
+            _panRenumberResult = BuildResultPanel(
+                out _lblRenumberSummary, out _renumberResultList,
+                out _btnRenumberConfirm, out _btnRenumberCancel,
+                OnConfirmRenumberClicked, OnCancelRenumberPreview);
+            sp.Children.Add(_panRenumberResult);
 
             return sp;
         }
@@ -497,7 +520,7 @@ namespace METools.BatchParams
             int step  = int.TryParse(_tbStep?.Text,    out var s1) ? s1 : 1;
             int pad   = int.TryParse(_tbPadding?.Text, out var s2) ? s2 : 0;
 
-            _handler.Request = new BatchParamsRequest
+            _pendingRenumberRequest = new BatchParamsRequest
             {
                 Action            = BatchParamsAction.ApplyRenumber,
                 OrderedElementIds = ordered,
@@ -511,9 +534,27 @@ namespace METools.BatchParams
                     Padding       = pad,
                     OrderMode     = _orderMode,
                 },
+                DryRun = true,
             };
+            _handler.Request = _pendingRenumberRequest;
+            _extEvent.Raise();
+            UpdateStatusBar(S._("batchparams.previewing"));
+        }
+
+        private void OnConfirmRenumberClicked()
+        {
+            if (_pendingRenumberRequest == null) return;
+            _pendingRenumberRequest.DryRun = false;
+            _handler.Request = _pendingRenumberRequest;
             _extEvent.Raise();
             UpdateStatusBar(S._("batchparams.applying"));
+        }
+
+        private void OnCancelRenumberPreview()
+        {
+            _pendingRenumberRequest = null;
+            if (_panRenumberResult != null) _panRenumberResult.Visibility = Visibility.Collapsed;
+            UpdateStatusBar(S._("batchparams.ready"));
         }
 
         // ═════════════════════════════════════════════════════════════════
@@ -574,6 +615,12 @@ namespace METools.BatchParams
             btnApplyBulk.HorizontalAlignment = HorizontalAlignment.Left;
             sp.Children.Add(btnApplyBulk);
 
+            _panBulkResult = BuildResultPanel(
+                out _lblBulkSummary, out _bulkResultList,
+                out _btnBulkConfirm, out _btnBulkCancel,
+                OnConfirmBulkEditClicked, OnCancelBulkEditPreview);
+            sp.Children.Add(_panBulkResult);
+
             return sp;
         }
 
@@ -606,7 +653,7 @@ namespace METools.BatchParams
                 return;
             }
 
-            _handler.Request = new BatchParamsRequest
+            _pendingBulkRequest = new BatchParamsRequest
             {
                 Action            = BatchParamsAction.ApplyBulkEdit,
                 OrderedElementIds = _matchedElements.Select(e => e.Id).ToList(),
@@ -622,9 +669,135 @@ namespace METools.BatchParams
                     SetText       = _tbSetValue?.Text ?? "",
                     ValueFilter   = _tbValueFilter?.Text ?? "",
                 },
+                DryRun = true,
             };
+            _handler.Request = _pendingBulkRequest;
+            _extEvent.Raise();
+            UpdateStatusBar(S._("batchparams.previewing"));
+        }
+
+        private void OnConfirmBulkEditClicked()
+        {
+            if (_pendingBulkRequest == null) return;
+            _pendingBulkRequest.DryRun = false;
+            _handler.Request = _pendingBulkRequest;
             _extEvent.Raise();
             UpdateStatusBar(S._("batchparams.applying"));
+        }
+
+        private void OnCancelBulkEditPreview()
+        {
+            _pendingBulkRequest = null;
+            if (_panBulkResult != null) _panBulkResult.Visibility = Visibility.Collapsed;
+            UpdateStatusBar(S._("batchparams.ready"));
+        }
+
+        // ═════════════════════════════════════════════════════════════════
+        // SHARED RESULT/PREVIEW PANEL -- one layout, used by both tabs.
+        // A dry-run result shows Confirm/Cancel (this is what WOULD happen);
+        // a real-apply result hides them and just leaves the list up so you
+        // can see exactly what got skipped and why, rather than a bare count.
+        // ═════════════════════════════════════════════════════════════════
+        private StackPanel BuildResultPanel(out TextBlock lblSummary, out StackPanel list,
+            out Button btnConfirm, out Button btnCancel, Action onConfirm, Action onCancel)
+        {
+            var panel = new StackPanel { Visibility = Visibility.Collapsed, Margin = new Thickness(0, 10, 0, 0) };
+
+            lblSummary = new TextBlock { FontSize = 12, FontWeight = FontWeights.SemiBold,
+                TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 6) };
+            panel.Children.Add(lblSummary);
+
+            var box = new Border
+            {
+                BorderBrush = MeToolsTheme.BrBorder, BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(5), MaxHeight = 160, ClipToBounds = true,
+            };
+            var scroll = new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
+            var innerList = new StackPanel { Margin = new Thickness(6) };
+            scroll.Content = innerList; box.Child = scroll;
+            panel.Children.Add(box);
+            list = innerList;
+
+            var btnRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 6, 0, 0) };
+            var confirm = ActionBtn(S._("batchparams.confirm_apply"), false, onConfirm);
+            var cancel  = ActionBtn(S._("batchparams.cancel"), true, onCancel);
+            confirm.Margin = new Thickness(0, 0, 6, 0);
+            btnRow.Children.Add(confirm);
+            btnRow.Children.Add(cancel);
+            panel.Children.Add(btnRow);
+            btnConfirm = confirm; btnCancel = cancel;
+
+            return panel;
+        }
+
+        private void HandleApplyResult(ApplyResult result)
+        {
+            if (result == null) return;
+            if (result.WhichAction == BatchParamsAction.ApplyRenumber)
+                ShowResultPanel(result, _panRenumberResult, _lblRenumberSummary, _renumberResultList, _btnRenumberConfirm, _btnRenumberCancel);
+            else if (result.WhichAction == BatchParamsAction.ApplyBulkEdit)
+                ShowResultPanel(result, _panBulkResult, _lblBulkSummary, _bulkResultList, _btnBulkConfirm, _btnBulkCancel);
+        }
+
+        private void ShowResultPanel(ApplyResult result, StackPanel panel, TextBlock lblSummary,
+            StackPanel list, Button btnConfirm, Button btnCancel)
+        {
+            if (panel == null) return;
+            panel.Visibility = Visibility.Visible;
+
+            string verb = result.WasDryRun ? S._("batchparams.would_update") : S._("batchparams.did_update");
+            string summary = string.Format(verb, result.Updated);
+            if (result.Skipped > 0) summary += string.Format(S._("batchparams.n_skipped"), result.Skipped);
+            if (result.Errors  > 0) summary += string.Format(S._("batchparams.n_errors"), result.Errors);
+            lblSummary.Text = summary;
+            lblSummary.Foreground = result.Errors > 0 ? MeToolsTheme.Br(MeToolsTheme.CRed)
+                                   : result.Skipped > 0 ? MeToolsTheme.Br(MeToolsTheme.COrange)
+                                   : MeToolsTheme.BrPetrol;
+
+            list.Children.Clear();
+            const int cap = 200;
+            int shown = 0;
+            foreach (var c in result.Changes)
+            {
+                if (shown >= cap)
+                {
+                    list.Children.Add(new TextBlock
+                    {
+                        Text = string.Format(S._("batchparams.n_more"), result.Changes.Count - cap),
+                        FontSize = 10, Foreground = MeToolsTheme.BrMuted, Margin = new Thickness(0, 2, 0, 0),
+                    });
+                    break;
+                }
+                var row = new TextBlock { FontSize = 11, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 1, 0, 1) };
+                switch (c.Status)
+                {
+                    case ChangeStatus.Updated:
+                        row.Text = $"{c.ElementLabel}: '{c.OldValue}' \u2192 '{c.NewValue}'";
+                        row.Foreground = MeToolsTheme.BrText;
+                        break;
+                    case ChangeStatus.Skipped:
+                        row.Text = $"{c.ElementLabel}: {S._("batchparams.skipped_because")} {c.Reason}";
+                        row.Foreground = MeToolsTheme.Br(MeToolsTheme.COrange);
+                        break;
+                    default:
+                        row.Text = $"{c.ElementLabel}: {S._("batchparams.error_prefix")} {c.Reason}";
+                        row.Foreground = MeToolsTheme.Br(MeToolsTheme.CRed);
+                        break;
+                }
+                list.Children.Add(row);
+                shown++;
+            }
+
+            bool isPreview = result.WasDryRun;
+            btnConfirm.Visibility = isPreview ? Visibility.Visible : Visibility.Collapsed;
+            btnCancel.Visibility  = isPreview ? Visibility.Visible : Visibility.Collapsed;
+            btnConfirm.IsEnabled  = result.Updated > 0;
+            if (!isPreview)
+            {
+                if (result.WhichAction == BatchParamsAction.ApplyRenumber) _pendingRenumberRequest = null;
+                else if (result.WhichAction == BatchParamsAction.ApplyBulkEdit) _pendingBulkRequest = null;
+            }
         }
     }
 }
