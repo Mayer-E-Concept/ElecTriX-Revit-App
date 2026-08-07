@@ -969,7 +969,7 @@ namespace METools.FamilyPlacer
             sp.Children.Add(pGrid);
             _allInputs.Add(_tbSetGapMm); _allInputs.Add(_tbSetOffsetYMm); _allInputs.Add(_tbSetStackGapMm);
 
-            sp.Children.Add(Div());
+            sp.Children.Add(Div(16));
 
             // -- Secondary Label Style (matches Revit TextNoteType parameters exactly) ----
             sp.Children.Add(SecH(S._("circuittagger.secondary_label_style")));
@@ -1256,7 +1256,7 @@ namespace METools.FamilyPlacer
             tbWidthFactor.Tag = "WidthFactor";
             _extraSettingsTb = new[] { tbLW, tbLeaderOffset, tbTabSize, tbWidthFactor };
 
-            sp.Children.Add(Div());
+            sp.Children.Add(Div(16));
 
             // Save button            sp.Children.Add(Div());
 
@@ -1650,23 +1650,9 @@ namespace METools.FamilyPlacer
         }
 
         // ?? UI Helpers ????????????????????????????????????????????????????
-        private static TextBlock SecH(string text) => new TextBlock
-        {
-            Text = text.ToUpper(), FontSize = 10, FontWeight = FontWeights.SemiBold,
-            Foreground = MeToolsTheme.BrMuted, Margin = new Thickness(0, 0, 0, 6),
-        };
-
-        private Border Div() => new Border
-        {
-            Height = 1, Background = MeToolsTheme.BrBorder, Margin = new Thickness(0, 16, 0, 16),
-        };
-
-        // Slimmer divider for the reworked Tag tab -- same line, tighter
-        // vertical margin, so sections sit closer together.
-        private Border Div(double vmargin) => new Border
-        {
-            Height = 1, Background = MeToolsTheme.BrBorder, Margin = new Thickness(0, vmargin, 0, vmargin),
-        };
+        // (SecH, Div, CompactField, CompactComboStrict, InlineCard, ComboCard
+        // now live on MeToolsWindowBase -- shared with BatchParamsWindow and
+        // any future tool, instead of each window keeping its own copy.)
 
         // A plain muted caption line -- like InfoBox's text, but without the
         // colored background/padding, for hints worth keeping visible
@@ -1677,96 +1663,6 @@ namespace METools.FamilyPlacer
             Text = text, FontSize = 10, Foreground = MeToolsTheme.BrMuted,
             TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 6),
         };
-
-        // Compact label-above-narrow-input field for short circuit values
-        // (a couple of digits or letters, e.g. "F1", "B25A") -- replaces the
-        // old full-width InlineCard, which sized the box to the column
-        // rather than to what actually goes in it. The format-example hint
-        // that used to sit visibly below the box is now a tooltip instead.
-        private StackPanel CompactField(string label, string hint, double width, out TextBox tb)
-        {
-            var sp = new StackPanel { Margin = new Thickness(0, 0, 14, 8) };
-            sp.Children.Add(new TextBlock { Text = label.ToUpper(), FontSize = 8, FontWeight = FontWeights.SemiBold,
-                Foreground = MeToolsTheme.BrMuted, Margin = new Thickness(1, 0, 0, 3) });
-            var box = new TextBox
-            {
-                Width = width, Height = 26, FontSize = 12, FontFamily = new FontFamily("Consolas"), FontWeight = FontWeights.SemiBold,
-                Background = MeToolsTheme.BrInput, Foreground = MeToolsTheme.BrInputFg,
-                BorderBrush = MeToolsTheme.BrBorder, BorderThickness = new Thickness(1),
-                Padding = new Thickness(5, 0, 5, 0), VerticalContentAlignment = VerticalAlignment.Center,
-                HorizontalAlignment = HorizontalAlignment.Left,
-                ToolTip = hint,
-            };
-            sp.Children.Add(box);
-            tb = box;
-            return sp;
-        }
-
-        // Bare non-editable combo (no card, no label -- the Tag Family row
-        // supplies its own inline label to the left) sized to a sensible
-        // fixed width instead of stretching full-width for a one- or
-        // two-word family name.
-        private ComboBox CompactComboStrict(string hint, double width)
-        {
-            return new ComboBox
-            {
-                Width = width, Height = 26, FontSize = 12, IsEditable = false,
-                FontFamily = new FontFamily("Consolas"), FontWeight = FontWeights.SemiBold,
-                Background = MeToolsTheme.BrInput, Foreground = MeToolsTheme.BrInputFg,
-                BorderBrush = MeToolsTheme.BrBorder, ToolTip = hint,
-                DisplayMemberPath = "DisplayName",
-            };
-        }
-
-        private Border InlineCard(string label, string hint, out TextBox tb)
-        {
-            var card = new Border
-            {
-                Background = MeToolsTheme.BrSurface, BorderBrush = MeToolsTheme.BrBorder,
-                BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(5),
-                Padding = new Thickness(12, 10, 12, 10),
-            };
-            var sp = new StackPanel();
-            sp.Children.Add(new TextBlock { Text = label.ToUpper(), FontSize = 9, FontWeight = FontWeights.SemiBold,
-                Foreground = MeToolsTheme.BrMuted, Margin = new Thickness(0, 0, 0, 5) });
-            var box = new TextBox
-            {
-                Height = 32, FontSize = 13, FontFamily = new FontFamily("Consolas"), FontWeight = FontWeights.SemiBold,
-                Background = MeToolsTheme.BrInput, Foreground = MeToolsTheme.BrInputFg,
-                BorderBrush = MeToolsTheme.BrBorder, BorderThickness = new Thickness(1),
-                Padding = new Thickness(6, 0, 6, 0), VerticalContentAlignment = VerticalAlignment.Center,
-                ToolTip = hint,
-            };
-            sp.Children.Add(box);
-            sp.Children.Add(new TextBlock { Text = hint, FontSize = 10,
-                Foreground = MeToolsTheme.BrMuted, TextWrapping = TextWrapping.Wrap,
-                Margin = new Thickness(0, 4, 0, 0) });
-            card.Child = sp; tb = box;
-            return card;
-        }
-
-        private Border ComboCard(string label, string hint, out ComboBox cb)
-        {
-            var card = new Border
-            {
-                Background = MeToolsTheme.BrSurface, BorderBrush = MeToolsTheme.BrBorder,
-                BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(5),
-                Padding = new Thickness(12, 8, 12, 8), MaxWidth = 220, HorizontalAlignment = HorizontalAlignment.Left,
-            };
-            var sp = new StackPanel();
-            sp.Children.Add(new TextBlock { Text = label.ToUpper(), FontSize = 9, FontWeight = FontWeights.SemiBold,
-                Foreground = MeToolsTheme.BrMuted, Margin = new Thickness(0, 0, 0, 5) });
-            var combo = new ComboBox
-            {
-                Height = 28, FontSize = 12, IsEditable = true,
-                FontFamily = new FontFamily("Consolas"), FontWeight = FontWeights.SemiBold,
-                Background = MeToolsTheme.BrInput, Foreground = MeToolsTheme.BrInputFg,
-                BorderBrush = MeToolsTheme.BrBorder, ToolTip = hint,
-            };
-            sp.Children.Add(combo);
-            card.Child = sp; cb = combo;
-            return card;
-        }
 
         // Re-scans the project for every loaded Multi-Category Tag family/
         // type and repopulates the picker. Called on window construction, on
@@ -1933,8 +1829,6 @@ namespace METools.FamilyPlacer
             b.Click      += (s, e) => onClick();
             return b;
         }
-
-        private void UpdateStatusBar(string msg) { if (StatusLeft != null) StatusLeft.Text = msg; }
 
         // Locale-independent -- matches the same confirmed category IDs used
         // by CatIsSocket/CatIsLamp/CatIsSwitch. The previous version matched

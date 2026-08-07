@@ -21,8 +21,21 @@ $ErrorActionPreference = "Stop"
 $Subject          = "CN=Mayer E-Concept SRL, O=Mayer E-Concept SRL, C=RO"
 $FriendlyName     = "Mayer E-Concept SRL Code Signing"
 $PfxPath          = Join-Path $PSScriptRoot "signing\mec-codesign.pfx"
-$PfxPasswordPlain = "MEC2025"   # ggf. anpassen — muss mit csproj übereinstimmen
 $CerPath          = Join-Path $PSScriptRoot "signing\mec-codesign.cer"
+
+# Passwort kommt aus der Umgebungsvariable MEC_CERT_PASSWORD (dieselbe, die
+# METools.csproj beim Signieren liest) -- damit steht das Passwort nirgendwo
+# als Klartext in einer Datei, die eingecheckt werden könnte. Einmalig setzen:
+#   setx MEC_CERT_PASSWORD "dein-passwort"
+# (Terminal/VS danach neu starten, damit die Variable geladen wird.)
+$PfxPasswordPlain = $env:MEC_CERT_PASSWORD
+if ([string]::IsNullOrWhiteSpace($PfxPasswordPlain)) {
+    Write-Host "MEC_CERT_PASSWORD ist nicht gesetzt." -ForegroundColor Yellow
+    $securePwd = Read-Host "Passwort fuer das neue Zertifikat eingeben" -AsSecureString
+    $PfxPasswordPlain = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
+        [Runtime.InteropServices.Marshal]::SecureStringToGlobalAllocUnicode($securePwd))
+    Write-Host "Tipp: 'setx MEC_CERT_PASSWORD `"$PfxPasswordPlain`"' ausfuehren, damit csproj beim Signieren dasselbe Passwort automatisch findet." -ForegroundColor Yellow
+}
 
 Write-Host "==========================================" -ForegroundColor Cyan
 Write-Host "ElecTriX Code-Signing Setup" -ForegroundColor Cyan
@@ -91,5 +104,5 @@ Write-Host ""
 Write-Host "Hinweis:" -ForegroundColor Yellow
 Write-Host "  Das PFX (Private Key) liegt unter:" -ForegroundColor Yellow
 Write-Host "  $PfxPath" -ForegroundColor Yellow
-Write-Host "  NICHT ins Git einchecken — signing/ ist im _gitignore." -ForegroundColor Yellow
+Write-Host "  NICHT ins Git einchecken — signing/ ist im .gitignore." -ForegroundColor Yellow
 Write-Host ""

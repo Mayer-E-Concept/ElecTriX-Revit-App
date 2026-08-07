@@ -99,7 +99,6 @@ namespace METools
             };
             var fpButton = panelPlacement.AddItem(fpBtn) as PushButton;
             RibbonThemeWatcher.Register(fpButton, "icon_fp");
-            panelPlacement.AddSeparator();
 
             // -- Family Browser ---------------------------------------------
             var fbBtn = new PushButtonData(
@@ -113,7 +112,6 @@ namespace METools
             };
             var fbButton = panelPlacement.AddItem(fbBtn) as PushButton;
             RibbonThemeWatcher.Register(fbButton, "icon_fb");
-            panelPlacement.AddSeparator();
 
             // -- Lamp Placer -------------------------------------------------
             var lpBtn = new PushButtonData(
@@ -140,7 +138,6 @@ namespace METools
             };
             var flButton = panelLevels.AddItem(flBtn) as PushButton;
             RibbonThemeWatcher.Register(flButton, "icon_fl_fix");
-            panelLevels.AddSeparator();
 
             // -- Level Manager (also handles IFC level import -- see its own
             // "Import from IFC" tab; that used to be a separate ribbon button) --
@@ -161,7 +158,6 @@ namespace METools
             };
             var lmButton = panelLevels.AddItem(lmBtn) as PushButton;
             RibbonThemeWatcher.Register(lmButton, "icon_lm");
-            panelLevels.AddSeparator();
 
             // -- Project Transfer ---------------------------------------------
             var ptBtn = new PushButtonData(
@@ -193,7 +189,6 @@ namespace METools
             };
             var ctButton = panelCircuits.AddItem(ctBtn) as PushButton;
             RibbonThemeWatcher.Register(ctButton, "icon_ct");
-            panelCircuits.AddSeparator();
 
             // -- Statistics ------------------------------------------------
             var statsBtn = new PushButtonData(
@@ -247,8 +242,6 @@ namespace METools
             };
             var cmtButton = panelTeam.AddItem(cmtBtn) as PushButton;
             RibbonThemeWatcher.Register(cmtButton, "icon_comments");
-
-            panelTeam.AddSeparator();
 
             // -- Activity Log & Time Tracker ------------------------------------
             // Time Tracker used to be its own button here; merged into this one

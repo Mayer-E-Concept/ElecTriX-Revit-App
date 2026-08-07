@@ -19,7 +19,7 @@
     <Company>Mayer E-Concept SRL</Company>
     <Product>ElecTriX for Autodesk Revit</Product>
     <Copyright>© 2026 Mayer E-Concept SRL</Copyright>
-    <Version>1.6.0</Version>
+    <Version>2.0.9</Version>
   </PropertyGroup>
 
   <!-- Revit API references — links against a Revit 2025 install (used at
@@ -57,7 +57,7 @@
   <Target Name="SignAssembly" AfterTargets="Build">
     <PropertyGroup>
       <CertPath>$(ProjectDir)signing\mec-codesign.pfx</CertPath>
-      <CertPassword>MEC2025</CertPassword>
+      <CertPassword>$(MEC_CERT_PASSWORD)</CertPassword>
       <TimestampUrl>http://timestamp.digicert.com</TimestampUrl>
     </PropertyGroup>
     <!-- signtool.exe aus Windows SDK — mehrere bekannte Pfade probieren -->
@@ -66,6 +66,8 @@
           ContinueOnError="true" />
     <Message Condition="Exists('$(CertPath)')" Text="✓ Signed: $(TargetPath)" Importance="high" />
     <Message Condition="!Exists('$(CertPath)')" Text="⚠ Nicht signiert — setup-signing.ps1 zuerst ausführen." Importance="high" />
+    <Warning Condition="Exists('$(CertPath)') and '$(MEC_CERT_PASSWORD)' == ''"
+             Text="Zertifikat gefunden, aber Umgebungsvariable MEC_CERT_PASSWORD ist nicht gesetzt -- Signieren wird fehlschlagen. Einmalig setzen: setx MEC_CERT_PASSWORD &quot;dein-passwort&quot; (dann VS/Terminal neu starten)." />
   </Target>
 
   <!--

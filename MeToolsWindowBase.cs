@@ -649,5 +649,125 @@ namespace METools
             Margin = new Thickness(0, 0, 8, 26),
             IsHitTestVisible = false,
         };
+
+        // ═════════════════════════════════════════════════════════════════
+        // SHARED SMALL UI HELPERS
+        // Previously each tool window (CircuitTaggerWindow, BatchParamsWindow)
+        // kept its own private copy of these -- which meant fixes only landed
+        // wherever they were first written. Two real bugs came from exactly
+        // that: BatchParamsWindow shipped without the `using Visibility =
+        // System.Windows.Visibility;` alias CircuitTaggerWindow already had
+        // (CS0176, since Window.Visibility is an instance property that
+        // shadows the enum type), and its LabeledField had no tooltip
+        // parameter at all even though CircuitTagger's equivalent did. Living
+        // here once means every future tool gets both fixes automatically.
+
+        // Updates the window's status bar text (bottom-left).
+        protected void UpdateStatusBar(string msg) { if (StatusLeft != null) StatusLeft.Text = msg; }
+
+        // Small muted section-header label, e.g. "CIRCUIT PARAMETERS".
+        protected static TextBlock SecH(string text) => new TextBlock
+        {
+            Text = text.ToUpper(), FontSize = 10, FontWeight = FontWeights.SemiBold,
+            Foreground = MeToolsTheme.BrMuted, Margin = new Thickness(0, 0, 0, 6),
+        };
+
+        // Thin horizontal divider between sections.
+        protected Border Div(double vmargin = 10) => new Border
+        {
+            Height = 1, Background = MeToolsTheme.BrBorder, Margin = new Thickness(0, vmargin, 0, vmargin),
+        };
+
+        // Compact label-above-narrow-input field, sized to what actually
+        // goes in it rather than stretching to fill its column. hint becomes
+        // a hover tooltip; defaultText is optional (most fields start empty).
+        protected StackPanel CompactField(string label, string hint, double width, out TextBox tb, string defaultText = "")
+        {
+            var sp = new StackPanel { Margin = new Thickness(0, 0, 14, 8) };
+            sp.Children.Add(new TextBlock { Text = label.ToUpper(), FontSize = 8, FontWeight = FontWeights.SemiBold,
+                Foreground = MeToolsTheme.BrMuted, Margin = new Thickness(1, 0, 0, 3) });
+            var box = new TextBox
+            {
+                Text = defaultText, Width = width, Height = 26, FontSize = 12,
+                FontFamily = new FontFamily("Consolas"), FontWeight = FontWeights.SemiBold,
+                Background = MeToolsTheme.BrInput, Foreground = MeToolsTheme.BrInputFg,
+                BorderBrush = MeToolsTheme.BrBorder, BorderThickness = new Thickness(1),
+                Padding = new Thickness(5, 0, 5, 0), VerticalContentAlignment = VerticalAlignment.Center,
+                HorizontalAlignment = HorizontalAlignment.Left,
+                ToolTip = hint,
+            };
+            sp.Children.Add(box);
+            tb = box;
+            return sp;
+        }
+
+        // Bare non-editable combo (no card, no label) sized to a fixed
+        // width instead of stretching full-width for a short value.
+        protected ComboBox CompactComboStrict(string hint, double width)
+        {
+            return new ComboBox
+            {
+                Width = width, Height = 26, FontSize = 12, IsEditable = false,
+                FontFamily = new FontFamily("Consolas"), FontWeight = FontWeights.SemiBold,
+                Background = MeToolsTheme.BrInput, Foreground = MeToolsTheme.BrInputFg,
+                BorderBrush = MeToolsTheme.BrBorder, ToolTip = hint,
+                DisplayMemberPath = "DisplayName",
+            };
+        }
+
+        // Bordered card: label above, full-width input below, hint below
+        // that. Used for settings-style fields with room to spare.
+        protected Border InlineCard(string label, string hint, out TextBox tb)
+        {
+            var card = new Border
+            {
+                Background = MeToolsTheme.BrSurface, BorderBrush = MeToolsTheme.BrBorder,
+                BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(5),
+                Padding = new Thickness(12, 10, 12, 10),
+            };
+            var sp = new StackPanel();
+            sp.Children.Add(new TextBlock { Text = label.ToUpper(), FontSize = 9, FontWeight = FontWeights.SemiBold,
+                Foreground = MeToolsTheme.BrMuted, Margin = new Thickness(0, 0, 0, 5) });
+            var box = new TextBox
+            {
+                Height = 32, FontSize = 13, FontFamily = new FontFamily("Consolas"), FontWeight = FontWeights.SemiBold,
+                Background = MeToolsTheme.BrInput, Foreground = MeToolsTheme.BrInputFg,
+                BorderBrush = MeToolsTheme.BrBorder, BorderThickness = new Thickness(1),
+                Padding = new Thickness(6, 0, 6, 0), VerticalContentAlignment = VerticalAlignment.Center,
+                ToolTip = hint,
+            };
+            sp.Children.Add(box);
+            sp.Children.Add(new TextBlock { Text = hint, FontSize = 10,
+                Foreground = MeToolsTheme.BrMuted, TextWrapping = TextWrapping.Wrap,
+                Margin = new Thickness(0, 4, 0, 0) });
+            card.Child = sp; tb = box;
+            return card;
+        }
+
+        // Bordered card: label above, editable (free-text-with-suggestions)
+        // combo below. MaxWidth keeps it from stretching to fill a whole
+        // star-sized grid column for what's usually a short value.
+        protected Border ComboCard(string label, string hint, out ComboBox cb)
+        {
+            var card = new Border
+            {
+                Background = MeToolsTheme.BrSurface, BorderBrush = MeToolsTheme.BrBorder,
+                BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(5),
+                Padding = new Thickness(12, 8, 12, 8), MaxWidth = 220, HorizontalAlignment = HorizontalAlignment.Left,
+            };
+            var sp = new StackPanel();
+            sp.Children.Add(new TextBlock { Text = label.ToUpper(), FontSize = 9, FontWeight = FontWeights.SemiBold,
+                Foreground = MeToolsTheme.BrMuted, Margin = new Thickness(0, 0, 0, 5) });
+            var combo = new ComboBox
+            {
+                Height = 28, FontSize = 12, IsEditable = true,
+                FontFamily = new FontFamily("Consolas"), FontWeight = FontWeights.SemiBold,
+                Background = MeToolsTheme.BrInput, Foreground = MeToolsTheme.BrInputFg,
+                BorderBrush = MeToolsTheme.BrBorder, ToolTip = hint,
+            };
+            sp.Children.Add(combo);
+            card.Child = sp; cb = combo;
+            return card;
+        }
     }
 }

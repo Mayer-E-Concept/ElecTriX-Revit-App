@@ -43,6 +43,10 @@ KeyGenerator.exe
 KeyGenerator/bin/
 KeyGenerator/obj/
 
+# WICHTIG: Code-Signing-Zertifikat (Private Key) niemals hochladen
+signing/
+*.pfx
+
 # Revit backup files
 *.[0-9][0-9][0-9][0-9].rvt
 *.[0-9][0-9][0-9][0-9].rfa

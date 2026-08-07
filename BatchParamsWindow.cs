@@ -280,11 +280,11 @@ namespace METools.BatchParams
 
             sp.Children.Add(SecH(S._("batchparams.numbering")));
             var numRow = new WrapPanel { Orientation = Orientation.Horizontal };
-            numRow.Children.Add(LabeledField(S._("batchparams.prefix"),  S._("batchparams.prefix_hint"),  "",  70, out _tbPrefix));
-            numRow.Children.Add(LabeledField(S._("batchparams.start"),   S._("batchparams.start_hint"),   "1", 50, out _tbStart));
-            numRow.Children.Add(LabeledField(S._("batchparams.step"),    S._("batchparams.step_hint"),    "1", 50, out _tbStep));
-            numRow.Children.Add(LabeledField(S._("batchparams.padding"), S._("batchparams.padding_hint"), "0", 50, out _tbPadding));
-            numRow.Children.Add(LabeledField(S._("batchparams.suffix"),  S._("batchparams.suffix_hint"),  "",  70, out _tbSuffix));
+            numRow.Children.Add(CompactField(S._("batchparams.prefix"),  S._("batchparams.prefix_hint"),  70, out _tbPrefix));
+            numRow.Children.Add(CompactField(S._("batchparams.start"),   S._("batchparams.start_hint"),   50, out _tbStart,   "1"));
+            numRow.Children.Add(CompactField(S._("batchparams.step"),    S._("batchparams.step_hint"),    50, out _tbStep,    "1"));
+            numRow.Children.Add(CompactField(S._("batchparams.padding"), S._("batchparams.padding_hint"), 50, out _tbPadding, "0"));
+            numRow.Children.Add(CompactField(S._("batchparams.suffix"),  S._("batchparams.suffix_hint"),  70, out _tbSuffix));
             sp.Children.Add(numRow);
 
             _lblPreview = new TextBlock
@@ -530,7 +530,7 @@ namespace METools.BatchParams
             _cbBulkParam.ToolTip = S._("batchparams.param_combo_bulk_hint");
             sp.Children.Add(_cbBulkParam);
 
-            sp.Children.Add(LabeledField(S._("batchparams.value_filter"), S._("batchparams.value_filter_hint"), "", 180, out _tbValueFilter));
+            sp.Children.Add(CompactField(S._("batchparams.value_filter"), S._("batchparams.value_filter_hint"), 180, out _tbValueFilter));
 
             sp.Children.Add(Div());
             sp.Children.Add(SecH(S._("batchparams.action")));
@@ -551,22 +551,22 @@ namespace METools.BatchParams
             sp.Children.Add(actRow);
 
             _panBulkPrefix = new StackPanel();
-            _panBulkPrefix.Children.Add(LabeledField(S._("batchparams.prefix"), S._("batchparams.bulk_prefix_hint"), "", 120, out _tbBulkPrefix));
+            _panBulkPrefix.Children.Add(CompactField(S._("batchparams.prefix"), S._("batchparams.bulk_prefix_hint"), 120, out _tbBulkPrefix));
             sp.Children.Add(_panBulkPrefix);
 
             _panBulkSuffix = new StackPanel { Visibility = Visibility.Collapsed };
-            _panBulkSuffix.Children.Add(LabeledField(S._("batchparams.suffix"), S._("batchparams.bulk_suffix_hint"), "", 120, out _tbBulkSuffix));
+            _panBulkSuffix.Children.Add(CompactField(S._("batchparams.suffix"), S._("batchparams.bulk_suffix_hint"), 120, out _tbBulkSuffix));
             sp.Children.Add(_panBulkSuffix);
 
             _panBulkReplace = new StackPanel { Visibility = Visibility.Collapsed };
             var replRow = new StackPanel { Orientation = Orientation.Horizontal };
-            replRow.Children.Add(LabeledField(S._("batchparams.find"),         S._("batchparams.find_hint"),         "", 120, out _tbFind));
-            replRow.Children.Add(LabeledField(S._("batchparams.replace_with"), S._("batchparams.replace_with_hint"), "", 120, out _tbReplace));
+            replRow.Children.Add(CompactField(S._("batchparams.find"),         S._("batchparams.find_hint"),         120, out _tbFind));
+            replRow.Children.Add(CompactField(S._("batchparams.replace_with"), S._("batchparams.replace_with_hint"), 120, out _tbReplace));
             _panBulkReplace.Children.Add(replRow);
             sp.Children.Add(_panBulkReplace);
 
             _panBulkSet = new StackPanel { Visibility = Visibility.Collapsed };
-            _panBulkSet.Children.Add(LabeledField(S._("batchparams.new_value"), S._("batchparams.new_value_hint"), "", 180, out _tbSetValue));
+            _panBulkSet.Children.Add(CompactField(S._("batchparams.new_value"), S._("batchparams.new_value_hint"), 180, out _tbSetValue));
             sp.Children.Add(_panBulkSet);
 
             sp.Children.Add(Div());
@@ -625,44 +625,6 @@ namespace METools.BatchParams
             };
             _extEvent.Raise();
             UpdateStatusBar(S._("batchparams.applying"));
-        }
-
-        // ── Small local UI helpers (each window in this app keeps its own
-        // copies rather than sharing via the base class) ───────────────────
-        private void UpdateStatusBar(string msg) { if (StatusLeft != null) StatusLeft.Text = msg; }
-
-        private static TextBlock SecH(string text) => new TextBlock
-        {
-            Text = text.ToUpper(), FontSize = 10, FontWeight = FontWeights.SemiBold,
-            Foreground = MeToolsTheme.BrMuted, Margin = new Thickness(0, 10, 0, 6),
-        };
-
-        private Border Div(double vmargin = 10) => new Border
-        {
-            Height = 1, Background = MeToolsTheme.BrBorder, Margin = new Thickness(0, vmargin, 0, vmargin),
-        };
-
-        // Compact label-above-narrow-input field, sized to what actually
-        // goes in it rather than stretching to fill its column -- same idea
-        // as Circuit Tagger's CompactField. hint becomes a hover tooltip.
-        private StackPanel LabeledField(string label, string hint, string defaultText, double width, out TextBox tb)
-        {
-            var sp = new StackPanel { Margin = new Thickness(0, 0, 14, 8) };
-            sp.Children.Add(new TextBlock { Text = label.ToUpper(), FontSize = 8, FontWeight = FontWeights.SemiBold,
-                Foreground = MeToolsTheme.BrMuted, Margin = new Thickness(1, 0, 0, 3) });
-            var box = new TextBox
-            {
-                Text = defaultText, Width = width, Height = 26, FontSize = 12,
-                FontFamily = new FontFamily("Consolas"), FontWeight = FontWeights.SemiBold,
-                Background = MeToolsTheme.BrInput, Foreground = MeToolsTheme.BrInputFg,
-                BorderBrush = MeToolsTheme.BrBorder, BorderThickness = new Thickness(1),
-                Padding = new Thickness(5, 0, 5, 0), VerticalContentAlignment = VerticalAlignment.Center,
-                HorizontalAlignment = HorizontalAlignment.Left,
-                ToolTip = hint,
-            };
-            sp.Children.Add(box);
-            tb = box;
-            return sp;
         }
     }
 }
