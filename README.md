@@ -1,162 +1,8 @@
 # ME-Tools for Autodesk Revit
 
-**Mayer E-Concept SRL** — Professional electrical and MEP tools for Revit
+**Mayer E-Concept SRL** — electrical/MEP tools for Revit, all in one **ElecTriX** ribbon tab.
 
----
-
-## Tools
-
-### Settings
-Central configuration panel for the entire add-in.
-- **Appearance** — switch between Dark and Light themes for all ME-Tools windows simultaneously
-- **Language** — English / Deutsch / Română
-- **License** — activate / deactivate license key, copy Machine ID for key generation; shows license status **and how long it's valid for** (`Licensed — N days left` or `Licensed — Permanent`)
-- **Worksets** — define standard worksets created in workshared projects; separate read-only view of the worksets that already exist in the current project
-- **Heights** — configure default mounting heights per family category
-- Each tab now re-measures the window to fit its own content when you switch to it — previously the window's height froze at whatever the first tab needed, so License/Worksets could look cut off until manually resized
-
----
-
-### Project Health Check
-Checks the things that silently break Circuit Tagger on a project that didn't inherit the full company template (e.g. a detached or brand-new project) — born directly from a real debugging session where these two gaps took hours to track down by hand.
-- **Tag family check** — is `ME-Tools_CircuitTag` loaded in this project?
-- **Shared parameter check** — are `Vorsicherung` / `FI-Kreis` / `Stromkreis Tag` / `Schaltkreis` / `CAx_Apartment` / `CAx_Building` bound to all 8 electrical/MEP categories?
-- **Environment checks** — three more, all read-only: the shared network folder Comments/Activity Log depend on (configured vs. reachable are distinguished, since they mean different things — a broken setting vs. a down network path); and whether the two installer-bundled files Fix All needs (`ME-Tools_CircuitTag.rfa`, `METools_SharedParameters.txt`) are actually present in `%ProgramData%\METools\Resources\`, surfaced here instead of only showing up as a confusing failure buried inside Fix All's own output
-- **Fix All** — loads the tag family and binds any missing parameter/category combinations in one click, from files bundled with the installer (see [Installer bundled resources](#installer-bundled-resources) below) — no more per-project Transfer Project Standards
-- **Refresh** — re-runs the check on demand
-- Read-only scan; **Fix All** is the only action that writes to the document, wrapped in its own transaction
-
----
-
-### Activity Log
-Tracks who added, modified, or deleted which electrical/MEP elements, and when — for tracing down "who deleted my lamps" after the fact.
-- Scoped to the electrical/MEP categories ElecTriX actually works with (Electrical Fixtures, Lighting Fixtures, Lighting Devices, Electrical Equipment, Data/Fire Alarm/Communication/Security Devices, Cable Tray + Fitting, Conduit + Fitting, Wire) — not every category in the model
-- **Deleted elements still show what they WERE** (category, family, type, level) via an in-memory snapshot cache, refreshed on every Added/Modified event and primed with a one-time scan when a document opens — since the element itself is already gone by the time a Deleted event fires
-- **Go to Level** button per entry — jumps the active view to that element's floor plan, using the same `INSTANCE_SCHEDULE_ONLY_LEVEL_PARAM`-first level-detection Fix Level already relies on (plain `Element.LevelId` is frequently blank for these families — see Key architecture notes)
-- Filter by user, action (Added/Modified/Deleted), or free-text search; **Export CSV**
-- Shares Comments' shared network folder and per-project ID system — nothing new to configure if Comments is already set up
-- **Not live** — reads the shared log on open and on manual Refresh; another teammate's changes won't appear until you refresh
-
----
-
-### Family Placer
-Place stacked combinations of electrical families at a single click.
-- Add multiple slots (families), each with its own mounting height (Niveau), 2D offset (Off Y) and 3D level offset
-- **Drag-reorder** — hold and drag the ⠿ handle to reorder slots
-- **Auto-offsets** — 2D stacking offset increments automatically as slots are added; 3D offset detects height collisions and avoids them
-- **Y=Frame** — inline checkbox per slot (default on), aligns element to the frame edge
-- Save and reload named **Templates** for repeatable multi-family groups
-- **Stacked** or **Side by Side** arrangement
-- **Place** (single drop) or **Multi-Place** (multiple drops, ESC to finish)
-- SPACEBAR rotates before placing; wall detection and free workplane both supported
-- Per-slot parameter overrides now report which ones failed to apply (not found, read-only, or wrong value type) instead of silently doing nothing
-
-### Family Browser
-Browse all loaded `_E_CAx` families grouped by category, with live search.
-- **9 categories**, auto-detected by name (case-insensitive, so German compound words like `Wechselschalter`/`Serienschalter` classify correctly): Sockets, Switches, Lighting, Panels, Fire Alarm, Data/Comms, Sensors, **Lightning Protection**, **Conduit & Fittings**
-- Hover a family to reveal a rounded **Place** button (enters placement mode, like drag-and-drop)
-- **+ Load Family from Disk** — load new `.rfa` files directly into the project
-- Group tabs show live counts; only a couple of genuinely generic family names (no category-indicating keyword at all) fall back to "Other"
-
----
-
-### Lamp Placer
-Automate lighting fixture placement in ceiling plans.
-- **Area-based** — lamps distributed automatically by room area and sqm/lamp ratio
-- **Manual grid** — fixed rows × columns
-- **Line mode** — place along one or several existing model/detail lines; spacing by distance or count; Along Line or Perpendicular orientation; multiple selected lines are filled independently (not just the closest one)
-- Lamp family and type selection with live detection of loaded families; save/reuse **presets**
-- Face-based or workplane-based placement
-- Wall margin and overlap threshold configurable
-- UKD offset for correct ceiling height
-
----
-
-### Level & IFC Manager
-See every level in the project laid out like a section, add new ones, or import levels straight from an IFC file. Two tabs in one window — IFC import used to be its own separate ribbon tool/window, folded in here so there's one place for anything level-related.
-
-**Project Levels tab**
-- **Section view** — all levels stacked top-to-bottom by real elevation, with a colored tick + bubble per row, name, zone chip and elevation value
-- **Compact mode** (default) — even spacing so dense clusters of levels (e.g. UKD/FFB pairs a metre apart) stay readable
-- **True Scale mode** — spacing proportional to actual elevation gaps (clamped so one large gap doesn't crush the rest)
-- **Auto-grouping** — groups levels by whatever prefix recurs across the project's own naming (e.g. `UKD`, `FFB`, `Obergeschoss`) and by a trailing zone/house tag (e.g. `H1`, `H2`) — nothing is hardcoded to any one project's convention
-- **Group and zone filters**, plus a live count of what's shown
-- **Add Level** — name + elevation (metres); clicking a level in the list prefills the elevation field at +3.000 m as a starting point
-
-**Import from IFC tab**
-- Detects any IFC file already **linked or imported** in the project (checks `RevitLinkType` and `ImportInstance` for an external file reference ending `.ifc`) and offers it directly — with exactly one candidate found, it loads automatically; with several, pick one; with none, **Browse for an IFC file…**
-- Reads the file directly via a lightweight, dependency-free STEP parser (`IfcLiteReader.cs`) — not a full IFC import, so it stays fast even on large files; only a small whitelist of entity types (storeys, site, units) is ever kept in memory, everything else (all geometry) is discarded the instant its type is read
-- **Unit comparison** — shows the file's declared length unit next to your project's, with a clear warning (and the exact multiplier) if they don't match, e.g. file in cm vs. project in mm
-- **Site / location** — local placement coordinates, geographic lat/long, and IFC4 survey Eastings/Northings if present. **Read-only, informational only** — nothing here ever touches your Project Base Point, Survey Point, or shared coordinates
-- **Levels table** — every `IFCBUILDINGSTOREY` found, with elevation shown in both the file's raw unit and your project's unit side by side; tick which ones to create as real Revit Levels; a level whose name already exists in the project is shown disabled with an inline reason rather than silently overwritten
-- **Change source** at any time without closing the window
-
----
-
-### Project Transfer
-Copy Filters, Views, Sheets and Schedules from the active project into another one.
-- **Copy To** — pick any other Revit project already open in the same session, or **Browse…** to open one from disk (re-uses it if it's already open instead of erroring)
-- **4 categories**, checkable and searchable: Filters, Views, Sheets, Schedules, with live per-category counts
-- **Views** is intentionally limited to **Drafting Views and Legends** — Plan/Section/Elevation/3D views are tied to their own project's Levels and Grids, so copying them into an unrelated project rarely produces a working result (same limitation Revit's own "Insert Views from File" has)
-- **Sheets** are copied together with whatever is placed on them (Revit brings viewports/titleblocks along automatically); a sheet gets a ⚠ warning icon if it holds a plan/section/3D view, since that part may not transfer cleanly
-- Copies run **per category** so one failure doesn't take the rest down with it; duplicate type names in the target keep the target project's own version
-
----
-
-### Fix Level
-Assigns the correct schedule level to electrical elements.
-- Corrects the `CAx_Trassenbezugsebene` and `CAx_Ebenenhöhenwert` CAx level parameters
-- Scope: **Active view only**, **Current storey**, or **Whole model**
-- Categories: Sockets (Electrical Fixtures → FFB), Switches (Lighting Devices → FFB), Lamps (Lighting Fixtures → UKD ceiling level)
-- Skip wall-mounted lamps option (by host offset or family name)
-- **Preview** mode — counts affected elements without making changes
-- **Fix Levels** — applies corrections in a single transaction
-- Its `CurrentLevelId(FamilyInstance)` method (`INSTANCE_SCHEDULE_ONLY_LEVEL_PARAM` first, `Element.LevelId` as fallback) is the reference implementation Activity Log's own level detection was fixed to match
-
----
-
-### Circuit Tagger
-Tag electrical elements with circuit data and generate circuit annotations.
-- **Tag Elements tab** — select elements, fill in circuit parameters (Vorsicherung, FI, Stromkreis, Sub-index, Beleuchtungskreis, Apartment, Building), click Apply & Tag
-- Circuit label preview updates live (e.g. `1F2_1`)
-- **Secondary tag** — optional text annotation (a, b, c…) placed independently near each element
-- Tag orientation auto-detected from element facing direction (horizontal / vertical)
-- Smart tag alignment: tag head positioned relative to element bounding box after placement
-- **Circuit Stats tab** — grouped by Building → Apartment → Circuit; sub-circuits listed under parent. Per-row checkboxes plus a header select-all and a **Clear Selected (N)** button clear any number of circuits in one scan + one transaction (previously each row's Clear did its own full model scan and its own confirmation dialog, so clearing several circuits meant repeating that in full each time); the per-row **Clear** button still exists for a quick one-off. Sock./Lamp/Sw./Total columns use fixed-width columns end to end (header and rows previously used different column-sizing rules and could drift out of alignment — see Key architecture notes)
-- A parent circuit's counts previously included every sub-circuit's elements too (e.g. tagging 3 switches to `2F2_1` also silently counted them under `2F2`) — the parent row (and its expandable element-ID list) is now scoped to elements with the exact base label only; sub-circuits already had their own correct counts
-- Switch classification was missing `OST_LightingDevices` (-2008087) entirely, so switch families using that category (confirmed live against this project's own `_E_CAx Wechselschalter` family) fell through into the socket count — fixed
-- **Duplicate-apartment detection** — copying an already-tagged apartment (Copy/Paste, Paste Aligned, Mirror, Array, or placing a Group containing them) is detected automatically: brand-new element IDs that already carry `CAx_Building`/`CAx_Apartment` values only happen this way, never from a fresh placement. A prompt offers a new House/Apartment for the duplicate so it shows as its own group in Stats instead of merging into the original's counts, and places fresh circuit tags for the copy in the active view in the same step — since Revit tags are view-specific and don't travel with Copy/Paste across levels, only the host elements and their parameters do
-- Auto-refresh stats on document change (DocumentChanged event)
-- Reports plainly when the tag family isn't loaded or a shared parameter isn't bound to a category, instead of reporting "Done" as if it fully succeeded
-- **Settings tab** — tag placement (X offset, Y offset, Stack gap); full secondary label style matching Revit's TextNoteType parameters (Color with native Revit color picker, Line Weight, Background, Show Border, Leader/Border Offset, Leader Arrowhead, Font, Size, Tab Size, Width Factor, Bold, Italic, Underline); saved to `%APPDATA%\METools\circuit-tagger.json`
-- **Export Excel** — exports circuit data to CSV
-
----
-
-### Statistics
-Live element count and length summary for the active model.
-- **Electrical** — Lamps, Sockets, Switches, Panels, Circuits, Fire Alarm, Data, Communication, Security, Nurse Call, Telephone devices
-- **Sockets by type / Switches by type** — breakdown by family type name, sorted alphabetically
-- **By workset** — Sockets/Switches/Lamps by workset (workshared projects only)
-- **Per floor** — Sockets / Switches / Lamps per level (reads `CAx_Trassenbezugsebene`)
-- **Cable & Containment** — Cable Trays and Conduits shown as **total length in metres**; fittings shown as count; Wires shown as count
-- **Mechanical & Plumbing** — Mechanical Equipment, Ducts, Air Terminals, Pipes, Plumbing Fixtures, Sprinklers
-- **Spaces & Levels** — Rooms, MEP Spaces, Levels
-- **Refresh** button recomputes on demand
-- **Export CSV** — exports all rows, in a fixed section order, to `Documents\METools\statistics_<model>_<date>.csv`
-
----
-
-### Comments
-Cross-machine, per-project comment/notification system for team coordination.
-- Comments are tagged to whichever level (and Scope Box, for projects with multiple building sections sharing level names) the active view is on when left
-- **Reference an Item** — pin a comment to a specific element instead of (or alongside) a level, for pointing at one thing on a crowded plan (e.g. "fix these lamps"). Click **+ Reference Item**, pick the element in the model, a small removable chip confirms what was picked
-- **Go to Item** — selects and zooms to that exact element via `UIDocument.ShowElements`, on any comment that has one; degrades to a clear "that element no longer exists" message if it's since been deleted, rather than failing silently
-- Stored on a shared network folder (configured once, shared by the whole team) rather than inside the model — visible to teammates the moment they open the same project, no round-trip through Central required
-- A corner popup notifies other users of new comments relevant to them, with a sound cue (togglable) and one-click **Mark Done** / **Ignore** / **Go There** / **Go to Item**
-- **Go There** switches the active view straight to the correct level/building-section combination the comment was left on
-- Main window lists every comment, grouped by author then by level, filterable by status (Open / Done / Ignored / All)
-- **Delete** available per comment, with a confirmation step since it can't be undone the way Ignore/Done can (those can always be Reopened)
+For build instructions, architecture notes, and bug-fix history, see [NOTES.md](NOTES.md).
 
 ---
 
@@ -167,226 +13,56 @@ Cross-machine, per-project comment/notification system for team coordination.
 | Revit 2025 | .NET 8.0 | ✅ Supported |
 | Revit 2026 | .NET 8.0 (same binary as 2025) | ✅ Supported |
 
-`METools.csproj` targets `net8.0-windows` only. (Revit 2024 support was dropped -- that ran on .NET Framework 4.8, a genuinely different runtime that needed its own separate compiled binary; not worth maintaining two builds for one legacy version.)
-
 ---
 
-## Installation (end users)
+## Installation
 
 1. Download `setup_metools_vX.X.X.exe`
-2. Run the installer and select which Revit version(s) to install for (2025 / 2026 — any combination)
-3. Restart Revit
-4. The **ElecTriX** tab appears in the Revit ribbon, organized into 5 panels: **Setup** (Settings, Project Health Check), **Placement** (Family Placer, Family Browser, Lamp Placer), **Levels & Structure** (Fix Level, Level & IFC Manager, Project Transfer), **Circuits & Reporting** (Circuit Tagger, Statistics), **Team** (Comments, Activity Log)
+2. Run the installer and select which Revit version(s) to install for
+3. Restart Revit — the **ElecTriX** tab appears in the ribbon
 
 ### License / Beta access
-The add-in runs free for **14 days** as a beta trial. Once the trial ends, every tool (except Settings, so you can always activate a key) shows a clear "trial expired" message and refuses to open — it doesn't just nag, it actually stops working. For a permanent activation code, send your **Machine ID** (visible in Settings → License) to:
-
-**office@mayer-econcept.ro**
-
-The License tab also shows how long an activated key is valid for (`Licensed — N days left`, or `Licensed — Permanent`).
-
-### Installer bundled resources
-The installer deploys two files to `%ProgramData%\METools\Resources\`, used only by Project Health Check's **Fix All** button:
-- `ME-Tools_CircuitTag.rfa` — the Multi-Category Tag family Circuit Tagger needs
-- `METools_SharedParameters.txt` — the shared-parameter definition file (Vorsicherung / FI-Kreis / Stromkreis Tag / Schaltkreis / CAx_Apartment / CAx_Building), carrying the **same GUIDs** already in use everywhere else
-
-Both are overwritten on every install/update (unlike the Comments/worksets seed files, which use `onlyifdoesntexist`) since they're app-owned dependency files, not user data. **If you ever add a parameter to the real master shared-parameter file, re-export and re-bundle this copy** — there's no live sync between "the real file" and this shipped snapshot.
-
-Fix All is safe by construction, not just by convention: it briefly repoints `Application.SharedParametersFilename` at the bundled copy just long enough to read the 6 definitions it needs, then restores whatever the user had configured before — byte for byte, including the case where nothing was configured at all. It cannot affect any already-bound parameter in any project, because a bound parameter's data lives inside the project file itself once bound, not in whatever external `.txt` happens to be configured at the moment you look.
+Free for **14 days** as a trial. After that, every tool except Settings refuses to open until activated. Get your Machine ID from **Settings → License** and send it to **office@mayer-econcept.ro** for a permanent key.
 
 ---
 
-## Visual design
+## How to use each tool
 
-All windows share one dark teal/near-black background with a bright cyan accent (`MeToolsTheme.CAccent`), inspired by the me-concept.ro brand site — a deliberate move away from a generic neutral-grey dark mode. Every window shows a thin cyan accent line under its title bar as a small nod to the circuit-trace lines on the site. All buttons across every tool share one rounded template (`MeToolsWindowBase.RoundedBtnTemplate()`, `internal` so plain `Window` dialogs that don't inherit the shared base — e.g. small popup prompts, or nested classes like `FamilyPlacerWindow`'s `SlotRow`/`SaveTemplateDialog` — can still use the exact same look).
+### Setup panel
 
-Ribbon icons are two-tone: a white/light-grey outline for the main shape, with **one** mint-teal accent element (≈ RGB 90,200,165) for the focal detail — the gear's center dot, the speech bubble's middle dot, a checkmark, a clock's hands. New icons should match this exactly rather than introduce a new style. Icon file suffix is the *opposite* of what's intuitive: `_dark_16/32.png` is shown when Revit's theme **is** dark (so it needs to be the light-colored version), `_light_*` is shown on Revit's light theme (needs to be the dark-colored version) — see `RibbonThemeWatcher.ApplyCurrentTheme()`'s `variant = dark ? "dark" : "light"`.
+**Settings** — Configure the add-in once: language, theme, license activation, standard worksets for new workshared projects, and default mounting heights per family category.
 
-Ribbon panel *backgrounds* cannot be colored through the public Revit API — confirmed on Autodesk's own API forum, including a paid App Store extension that did this being pulled from the store. `RibbonPanelColorizer.cs` is a best-effort, clearly-labeled experimental attempt via an internal, undocumented `Autodesk.Windows.RibbonPanel` property (`CustomPanelTitleBarBackground`, found via reflection, not the same as the whole-panel `CustomPanelBackground`) — treat it as liable to break on a future Revit update, not as a normal part of the app's supported surface.
+**Project Health Check** — Run this first on any new or detached project, before using Circuit Tagger. It checks whether the tag family and the 6 shared parameters are set up. If anything's missing, click **Fix All** to load/bind it in one step.
 
----
+### Placement panel
 
-## Development
+**Family Placer** — Add one or more family "slots," each with its own mounting height and offset, then click **Place** (one drop) or **Multi-Place** (several, Esc to finish). Save a combination as a **Template** to reuse later.
 
-### Repository
-- **GitHub:** `https://github.com/Mayer-E-Concept/ElecTriX-Revit-App`
-- **Local:** `X:\02_sabloane\01_Revit\ElecTriX-Revit-App\`
-- **Auto-deploy (Debug):** `C:\ProgramData\Autodesk\Revit\Addins\2025\`, `\2026\` (whichever you're actively building/testing against)
+**Family Browser** — Browse every loaded electrical family by category. Hover one and click **Place** to drop it, or **+ Load Family from Disk** first if it isn't loaded yet.
 
-### Build
-```
-# Daily development (auto-deploys to Revit add-ins folder)
-Build → Debug
+**Lamp Placer** — Pick a lamp family, choose **Area** (fills a room automatically), **Grid** (fixed rows × columns), or **Line** (along a drawn line), then place. Save your setup as a preset.
 
-# Release (for installer only)
-Build → Release
-```
+### Levels & Structure panel
 
-### Versioning
-The version shown in Settings and in ribbon tooltips is read live from `setup.iss`'s `#define AppVersion "X.X.X"` — it must be listed under `<EmbeddedResource>` in `METools.csproj` (not just `<None>`) or the app silently falls back to the assembly's default version instead of erroring, which is a confusing failure mode to debug. Bump the version in `setup.iss` only; nowhere else.
+**Fix Level** — Pick a scope and categories, click **Preview** to see how many elements would change, then **Fix Levels** to apply it.
 
-### Create installer (after Release build)
-1. Make sure `Resources\ME-Tools_CircuitTag.rfa` and `Resources\METools_SharedParameters.txt` exist next to the project (see [Installer bundled resources](#installer-bundled-resources))
-2. Open `setup.iss` in Inno Setup Compiler
-3. Press **F9** (Build → Compile)
-4. Output: `installer_output\setup_metools_vX.X.X.exe`
+**Level & IFC Manager** — *Project Levels* tab: view every level like a section, add new ones by name + elevation. *Import from IFC* tab: point at an IFC file (auto-detected if one's already linked), tick which levels to bring in, and create them as real Revit Levels.
 
-### Generate a license key
-The generator is its own small WPF app (`METoolsKeyGen`), **not** a browser-based `KeyGenerator.html` — that was the earlier version. Separate repo: `https://github.com/Mayer-E-Concept/ME-Tools-License-Generator` (keep this **private** — it contains no key itself, but generates/holds the private signing key locally).
+**Project Transfer** — Pick another open project (or browse for one), tick which Filters/Views/Sheets/Schedules you want, and copy them across.
 
-- Paste the customer's Machine ID (Settings → License → Machine ID in the running add-in), pick a license type, Generate
-- Every issued code is recorded locally (customer/notes, machine ID, type, expiry, the exact code string) so there's a record of what was sent to whom, and so a "lost" code can be resent exactly rather than regenerated differently (ECDSA signing isn't deterministic — a fresh signature for the same inputs looks different every time, though both are equally valid)
-- The private signing key lives at `%APPDATA%\METools\KeyGen\metools_private.key` — deliberately outside the project/build folder. **Never let this file end up inside a git-tracked folder** (a `bin`/`obj` build-output folder sweeping it into a commit is exactly how a leak happens) and never ship it anywhere
+### Circuits & Reporting panel
 
-### GitHub workflow (after each coding session)
-1. Open **GitHub Desktop** — changed files appear automatically
-2. Write a short summary (e.g. `Fix tag alignment, add settings tab`)
-3. **Commit to main**
-4. **Push origin**
+**Circuit Tagger** — Select elements, fill in the circuit fields, click **Apply & Tag** (the label previews live as you type). The **Circuit Stats** tab groups totals by Building → Apartment → Circuit, with bulk-clear for old circuits.
 
----
+**Statistics** — Live counts for everything in the model — lamps, sockets, switches, cable/conduit lengths, and more. **Export CSV** for a snapshot.
 
-## Project structure
+**Batch Params** — Pick a scope and category, **Scan**, then either **Renumber** (prefix + counter + suffix, ordered by clicking elements or along a drawn line) or **Bulk Edit** (add prefix/suffix, find & replace, set, or clear one parameter across every matched element). Every Apply shows a preview first — review it, then **Confirm & Apply**. Works on any category and any text parameter, not just electrical ones.
 
-```
-ElecTriX-Revit-App/
-├── Icons/                          ← All PNG icons (light/dark × 16/32 per tool). icon_ifc_* exist but are currently unused -- made for a standalone IFC Level Importer button before that tool got folded into Level & IFC Manager (which kept its own icon); safe to reuse or delete
-├── Resources/                      ← Bundled installer assets (see Installer bundled resources)
-│   ├── ME-Tools_CircuitTag.rfa
-│   └── METools_SharedParameters.txt
-├── App.cs                          ← Ribbon setup (ElecTriX tab, 5 panels: Setup/Placement/Levels & Structure/Circuits & Reporting/Team)
-├── AppSwitcher.cs                  ← Title-bar app switcher dropdown
-├── MeToolsWindowBase.cs            ← Base class for all windows (theme, title bar, status bar, shared button styles, resize-glitch fix)
-├── MeToolsTheme.cs                 ← Color palette (Dark / Light), brand accent, brushes
-├── RibbonThemeWatcher.cs           ← Swaps ribbon icons to match Revit's own light/dark theme
-├── RibbonPanelColorizer.cs         ← EXPERIMENTAL panel-title coloring via undocumented internal API
-├── Strings.cs                      ← EN / DE / RO localisation table
-│
-├── SettingsWindow.cs               ← Settings (Appearance, Language, License, Worksets, Heights)
-├── SettingsCommand.cs
-├── CreateStandardWorksetsCommand.cs ← Creates worksets from config/standard_worksets.json
-├── standard_worksets.json
-├── ThemeToggleCommand.cs           ← Dark/Light toggle (not gated by trial expiry — cosmetic only)
-│
-├── ProjectHealthCheckWindow.cs     ← Project Health Check UI
-├── ProjectHealthCheckCommand.cs    ← Collector (read-only scan) + Fixer (Fix All, transactional) + Handler
-│
-├── ActivityLogWindow.cs            ← Activity Log UI (filters, cards, Export CSV)
-├── ActivityLogCommand.cs           ← Refresh + Go-To-Level handlers/ExternalEvents
-├── ActivityLogWatcher.cs           ← Background DocumentChanged tracker + element-snapshot cache
-├── ActivityLogStorage.cs           ← Shared JSON-Lines storage (reuses Comments' shared folder + project ID)
-├── ActivityLogModels.cs            ← ActivityLogEntry, ElementSnapshot, ActivityAction
-│
-├── FamilyPlacerWindow.cs           ← Family Placer UI + drag-reorder + slot management
-├── FamilyPlacerHandler.cs          ← Family placement (PromptForFamilyInstancePlacement)
-├── FamilyPlacerCommand.cs
-├── FamilyBrowserWindow.cs          ← Family Browser (_E_CAx families, 9 auto-detected categories)
-├── FamilyBrowserCommand.cs
-├── FamilyParamInspector.cs         ← Reads editable instance params on demand
-├── FamilyHeightScanner.cs          ← Derives default Niveau from placed instances
-├── FamilyHeightStore.cs
-├── FamilyLoader.cs
-├── Models.cs                       ← FamilySlot, PlacerTemplate, FamilyTypeInfo, etc.
-├── TemplateManager.cs              ← Load/save placement templates to JSON
-│
-├── LampPlacerWindow.cs             ← Lamp Placer UI
-├── LampPlacerHandler.cs            ← Lamp placement logic (area, grid, line modes)
-├── LampPlacerCommand.cs
-├── LampPlacerModels.cs
-├── LampPresetStore.cs
-├── RasterRoomDetector.cs
-├── RaumHelper.cs
-├── NumberRoomsDialog.cs
-├── LevelGuard.cs                   ← "Are you on the right level?" confirmation before placing
-│
-├── LevelManagerWindow.cs           ← Level & IFC Manager UI: Project Levels tab (section view, filters, add level) + Import from IFC tab
-├── LevelManagerHandler.cs          ← Gathers/creates levels (Project Levels tab)
-├── LevelManagerCommand.cs          ← Also detects any linked/imported IFC file and sets up the IFC handler/ExternalEvent
-├── LevelManagerModels.cs           ← LevelRow + project-agnostic name-based auto-grouping
-├── IfcLiteReader.cs                ← Dependency-free STEP/IFC parser: storeys, length unit, site placement -- no Revit API needed, no full IFC import
-├── IfcLevelImportModels.cs         ← IfcLevelRow, IfcLevelImportRequest/Result (used by LevelManagerWindow's Import from IFC tab)
-├── IfcLevelImportHandler.cs        ← Creates Revit Levels from selected IFC storeys, one transaction
-│
-├── ProjectTransferWindow.cs        ← Project Transfer UI (target picker, 4 category tabs)
-├── ProjectTransferHandler.cs       ← Cross-document CopyElements, per-category SubTransactions
-├── ProjectTransferCommand.cs
-├── ProjectTransferModels.cs
-│
-├── FixLevelWindow.cs               ← Fix Level UI
-├── FixLevelCommand.cs              ← Reference implementation for INSTANCE_SCHEDULE_ONLY_LEVEL_PARAM level detection
-│
-├── CircuitTaggerWindow.cs          ← Circuit Tagger UI (3 tabs)
-├── CircuitTaggerHandler.cs         ← Writes params, places tags, clears data; honest reporting on missing family/params; several helpers (FindTagSymbol, GetElementCenter, GetFacingDirection, GetDirectionKey) made `internal` so CircuitDuplicateHandler can reuse them
-├── CircuitTaggerCommand.cs         ← Singleton + DocumentChanged auto-refresh
-├── CircuitTaggerModels.cs          ← Request/response models
-├── CircuitTaggerSettings.cs        ← Persistent settings to JSON
-├── CircuitBuilderHandler.cs
-├── CircuitDuplicateWatcher.cs      ← Background DocumentChanged watcher: detects an already-tagged apartment being duplicated
-├── CircuitDuplicateHandler.cs      ← Reassigns House/Apartment + places tags for the duplicate, one transaction
-├── CircuitDuplicatePromptWindow.cs ← Small prompt asking for the new House/Apartment (plain Window, not MeToolsWindowBase -- same reasoning as Dialog.cs)
-├── CircuitDuplicateModels.cs       ← ReassignRequest/ReassignResult
-├── KonfigurationsModels.cs         ← ProjektKonfiguration data model — used by Circuit Tagger, not just the old tool
-├── KonfigStorage.cs                ← Persists circuit config (ExtensibleStorage + JSON backup) — used by Circuit Tagger
-├── KonfigViewModel.cs              ← Match-prefix derivation logic — used by Circuit Tagger
-│
-├── StatisticsWindow.cs             ← Statistics UI (length for trays/conduits, by-workset)
-├── StatisticsCommand.cs            ← StatRow, StatisticsCollector, StatisticsHandler
-│
-├── CommentsWindow.cs               ← Comments UI (composer, Reference an Item, comment list)
-├── CommentsHandler.cs              ← Load/Add/SetStatus/Delete/JumpToLevel/GoToElement
-├── CommentsCommand.cs
-├── CommentsModels.cs               ← ProjectComment (incl. ReferencedElementId/Summary), CommentsRequest
-├── CommentsStorage.cs              ← Shared folder + persistent project ID (also reused by Activity Log)
-├── CommentsWatcher.cs              ← Background popup notifications
-├── CommentPopupWindow.cs           ← Corner notification popup (Go There / Go to Item / Mark Done / Ignore)
-│
-├── Command.cs                      ← DistributeCommand (symmetric object distribution, "Verteilen")
-├── Dialog.cs                       ← DistDialog — the "Verteilen" popup (plain Window, not MeToolsWindowBase)
-│
-├── LicenseManager.cs               ← 14-day trial + key-based licensing (ECDSA-signed codes); CheckAccessOrExplain() gate used by every tool command except Settings
-├── LicenseWindow.cs                ← Purchase / activation window
-├── LicenseCheck.cs
-├── SplashGate.cs                   ← Trial splash on Revit startup + live app version resolution
-├── SplashWindow.cs
-│
-├── RevitDatenHelper.cs
-├── METools.csproj
-├── METools_2025.addin              ← Deployed as METools.addin into the 2025 Addins folder (Debug post-build + installer)
-├── METools_2026.addin              ← Same, for 2026. Keep these two in sync by hand -- a Command entry present in one but not the other means that tool's ribbon-button-vs-External-Tools-entry behavior differs by Revit version
-└── setup.iss                       ← Inno Setup installer script (AppVersion lives here; bundles Resources/)
-```
+### Team panel
 
----
+**Comments** — Leave a note tied to a level or a specific element (**+ Reference Item** to pin it to one thing). Teammates get a popup with **Go There** to jump straight to it.
 
-## Key architecture notes
-
-- **Pure WPF, no XAML** — all UI built in C# code-behind
-- **Namespace:** `METools` (sub-namespaces in use: `METools.FamilyPlacer`, `METools.LampPlacer`, `METools.LevelManager`, `METools.ProjectTransfer`, `METools.Comments`, `METools.ActivityLog`, `METools.IfcImport`, `METools.CircuitDuplicate`)
-- **Transaction isolation:** SubTransactions per item (circuit, filter/view/sheet/schedule category, etc.) are mandatory — a single transaction causes silent rollback of everything on any failure
-- **Honest reporting:** a batch operation's success count must reflect what actually succeeded, not just "did we attempt it." Two real bugs this shape were found and fixed — Circuit Tagger reporting "Done" when the tag family wasn't loaded or a shared parameter wasn't bound, and Family Placer silently ignoring a bad parameter-override name in a saved template. Both now surface the failure in the status message instead of looking like success.
-- **Level detection for CAx family instances:** never trust plain `Element.LevelId` alone — it's frequently `InvalidElementId` for these families even when they have a perfectly good, user-meaningful level. Always check `BuiltInParameter.INSTANCE_SCHEDULE_ONLY_LEVEL_PARAM` first (the same "Schedule Level" parameter Lamp Placer sets post-placement and Fix Level exists to repair), falling back to `Element.LevelId` only if that's unset. See `FixLevelCommand.CurrentLevelId(FamilyInstance)` for the reference implementation; Activity Log's `ResolveLevel` was fixed to match it after shipping with the naive version first.
-- **N+1 collector/lookup pattern keeps recurring — check for it in any per-element loop:** a `FilteredElementCollector` (or any document query) run once per item in a loop, instead of once before the loop with the result cached, has been found and fixed in `LampPlacerHandler.GetNearestLevel`, `FamilyPlacerHandler.GetNearestWall`, and `StatisticsCommand.CountByFloor` (the last one re-scanned 3 categories that `Collect()` a few lines above it had *just* fetched, from a helper — `FetchCategory` — that was added specifically to stop that exact pattern, then bypassed by code added afterward). Worth a specific look whenever adding a new per-element step to an existing loop.
-- **Cache small, frequently-re-read settings files too, not just collector results:** `CommentsStorage.GetSharedFolder()` re-read and re-parsed its JSON settings file on every call — unremarkable on its own, except `ActivityLogWatcher` calls it on *every* `DocumentChanged` event, i.e. every transaction anyone commits on a shared central model, not just electrical edits. Now cached in memory, invalidated via a cheap `File.GetLastWriteTimeUtc` check rather than a blind read, so an external change (hand-editing the file, or a change from Settings) is still picked up without paying the full re-parse cost on every single edit.
-- **Background `DocumentChanged`/`Idling` handlers need to actively prune any per-Document cache they keep**, or it becomes a real memory leak: `ActivityLogWatcher`'s `Dictionary<Document, ...>` element-snapshot cache never removed an entry when a project closed, so every project opened and closed in a session stayed pinned in memory (the `Document` object itself, as the dictionary key, can't be garbage-collected while referenced). Fixed by hooking `DocumentClosing` and removing the entry there. Any future per-document cache in a background watcher should do the same from the start.
-- **License machine-ID basis should be durable, not just "unique":** `LicenseManager.GetMachineId()` originally hashed `MachineName + UserDomainName` — both change the moment a customer renames their PC or leaves/joins a domain, silently invalidating an already-activated license with no obvious cause. Now based on the registry `MachineGuid` (`HKLM\SOFTWARE\Microsoft\Cryptography`), which only changes on an OS reinstall, with the old scheme kept as `GetLegacyMachineId()` and `VerifyCode` accepting either — so switching the basis doesn't retroactively break any code already issued under the old one.
-- **`.addin` files: keep `METools_2025.addin` and `METools_2026.addin` structurally identical** (App entry only) unless a tool is genuinely version-specific. A stray `<AddIn Type="Command">` entry left in one but not the other — from an old tool that no longer has a ribbon button of its own, like the once-removed Symmetric Distributor — creates a duplicate entry under Revit's Add-Ins → External Tools panel on whichever version still has it, alongside the tool's real ribbon button. Also: the Debug post-build target deploys from these two versioned files directly now, not from a third root-level `METools.addin` — that file, if it still exists locally, is not used by anything and is safe to delete.
-- **Unit awareness:** Auxalia CAx family parameters are LENGTH type in internal feet — never assume millimetres
-- **Revit API notes (2025/2026):**
-  - Use `UnitTypeId` (e.g. `UnitTypeId.Millimeters`), not the older `DisplayUnitType` -- removed entirely as of 2025/2026's API, not just deprecated (this bit when the project still targeted Revit 2024 too; the modern API is simply correct now)
-  - Use `GroupTypeId` (e.g. `GroupTypeId.Data`, for `BindingMap.Insert`/`ReInsert`), not `BuiltInParameterGroup` -- same story
-  - `ElementIntersectsGeometryFilter` requires a separate assembly → use `BoundingBoxIntersectsFilter`
-  - `NewOpening(Wall, …)` removed → use `Level.Create(doc, elevation)` for new levels
-  - `ColorSelectionDialog.SelectedColor` is read-only
-- **WPF vs. `Autodesk.Revit.DB` namespace collisions** (not `Autodesk.Revit.UI` -- confirmed against several real compile errors this session): `System.Windows.Controls.ComboBox`/`TextBox`/`Grid` and `System.Windows.Media.Color` and `System.Windows.Shapes.Ellipse`/`Line` all collide with same-named types in `Autodesk.Revit.DB` (a Revit datum `Grid`, a graphics-override `Color`, an `Ellipse`/`Line` curve type). Always alias (`using Grid = System.Windows.Controls.Grid;` etc.) in any file that imports both a `System.Windows.*` UI namespace and `Autodesk.Revit.DB` — only alias the ones a given file actually uses as bare type names, and only add the alias once that file actually needs it (don't pre-emptively alias everything in every file)
-- **`Visibility` is a different kind of gotcha, not a same-named-type collision:** every `Window`/`UIElement` already has an *instance property* called `Visibility`. Inside a method of a class that inherits from `Window` (e.g. any `MeToolsWindowBase` subclass), bare `Visibility.Collapsed` resolves to `this.Visibility` (the property) first and then fails trying to access `.Collapsed` on that (`CS0176`) — it never reaches the enum type at all. Only fix: fully qualify as `System.Windows.Visibility.Collapsed`. This one bit `LevelManagerWindow` specifically when the IFC import tab (which sets `Visibility` on its two tab panels) got merged into a `MeToolsWindowBase`-derived class for the first time
-- **`ExternalEvent` must be created during a valid API context, not lazily on first use from a button click** — `App.OnStartup` (or a command's `Open()`/`Execute()`) counts as valid; a WPF button's `Click` handler does not, even if the button lives in a window that itself was opened during a valid context. `CommentsHandler`'s popup actions hit this exactly (`InvalidOperationException: Attempting to create an ExternalEvent outside of a standard API execution`) because their `ExternalEvent` was created lazily inside the action methods the popup's buttons call directly. Fixed by creating it once, proactively, in `App.OnStartup` (see `CommentsHandler.Ensure()`) — the same pattern `CircuitDuplicateWatcher.Register()` and `AppSwitcher.Ensure()` already use
-- **External Events for all model writes** — never run transactions directly from WPF click handlers (causes "outside API context" error). One established exception: a modeless window that already holds a `UIApplication` reference can call `Selection.PickObject`/`PickObjects` directly from its own button-click handler by calling `Hide()` first and `Show()` after — no ExternalEvent round-trip needed just to capture a selection (see `CircuitTaggerWindow.OnSelectClicked`, `CommentsWindow.OnReferenceItemClicked`)
-- **Cross-document copy** (Project Transfer): `ElementTransformUtils.CopyElements(sourceDoc, ids, targetDoc, Transform.Identity, options)` works well for Filters, Schedules, Drafting Views/Legends and Sheets between two open documents; Plan/Section/Elevation/3D views don't transfer meaningfully since they're tied to their own project's Levels/Grids
-- **DockPanel fill order matters:** in `MeToolsWindowBase`, whichever element is added to `RootDock.Children` **last** gets the remaining space, regardless of its own `Dock` value (`LastChildFill = true`). Always call `BuildStatusBar()` **before** building the main content panel, or the status bar silently steals the content area's layout space
-- **Window resize-glitch fix:** `SizeToContent` and a free resize grip (`ResizeMode.CanResizeWithGrip`) fight each other in WPF — the window can visibly glitch and snap toward one screen edge mid-drag. Fixed by measuring the window once via `SizeToContent.Height` in the `Loaded` handler, then freezing it to a fixed `Height` with `SizeToContent = SizeToContent.Manual`. Tradeoff: any window with tabs of very different content heights needs to re-run that same measure-then-freeze sequence on every tab switch (`SizeToContent.Height` → `UpdateLayout()` → capture `ActualHeight` → back to `Manual`), or later tabs stay stuck at whatever height the first tab needed — see `SettingsWindow.ResizeToFitActiveTab()`.
-- **Button padding:** `RoundedBtnTemplate()`'s `ContentPresenter` must bind its `Margin` to the button's own `Padding` (`TemplateBinding`-equivalent via `RelativeSource.TemplatedParent`) — without that binding, every button's `Padding` setting is silently ignored and text renders touching the button's edges. This one binding fixes the look of every button in the app that sets `Padding`, since nearly all of them share this one template.
-- **License gate:** every tool command's `Open()`/`Execute()` calls `LicenseManager.CheckAccessOrExplain()` as its first line — except `SettingsCommand` (must always stay reachable to activate a key) and `ThemeToggleCommand` (cosmetic, left ungated on purpose)
-- **AppSwitcher** — all modeless windows show a dropdown in the title bar to switch to any other ME-Tools app; register a window by overriding `protected override string AppKey => "MyKey";`, and add the same key to `AppSwitcher.Apps` and `AppSwitchHandler.Execute()`. `AppSwitcher.Apps`'s order is kept matching the ribbon's own panel/button order (Placement → Levels & Structure → Circuits & Reporting → Team) rather than insertion order, so the dropdown doesn't need its own separate mental model of "where things are." Settings and Project Health Check aren't in this list on purpose — they live in the Setup panel but aren't meant to be switchable apps in this menu
+**Activity Log** — See who added, changed, or deleted which electrical elements, and when. Filter by user/action, or **Export CSV**.
 
 ---
 

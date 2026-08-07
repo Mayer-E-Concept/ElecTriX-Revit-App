@@ -378,5 +378,40 @@ namespace METools.BatchParams
             catch { }
             return null;
         }
+
+        // Completeness check -- the opposite question from Renumber/Bulk
+        // Edit: not "change these," but "which of these are missing a
+        // value?" Reuses the exact same ElementLabel/ResolveTypeElement
+        // helpers as the write paths, and reuses ElementChangeInfo purely
+        // as a display record here (Status is always Skipped -- nothing is
+        // ever written by this scan, it's read-only start to finish, so no
+        // ExternalEvent round trip is needed; the window calls this
+        // directly, same as GetParameterOptions).
+        public static List<ElementChangeInfo> FindMissingValues(Document doc, IEnumerable<Element> elements, string paramName, bool isInstance)
+        {
+            var result = new List<ElementChangeInfo>();
+            foreach (var el in elements)
+            {
+                try
+                {
+                    if (el == null) continue;
+                    var target = isInstance ? el : ResolveTypeElement(doc, el);
+                    if (target == null) continue;
+
+                    var p = target.LookupParameter(paramName);
+                    var label = ElementLabel(el);
+                    if (p == null)
+                    {
+                        result.Add(new ElementChangeInfo { ElementId = el.Id, ElementLabel = label, Status = ChangeStatus.Skipped, Reason = "parameter not found on this element" });
+                    }
+                    else if (string.IsNullOrWhiteSpace(p.AsString()))
+                    {
+                        result.Add(new ElementChangeInfo { ElementId = el.Id, ElementLabel = label, Status = ChangeStatus.Skipped, Reason = "value is empty" });
+                    }
+                }
+                catch { }
+            }
+            return result;
+        }
     }
 }

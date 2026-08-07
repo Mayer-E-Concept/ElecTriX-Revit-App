@@ -36,8 +36,8 @@ namespace METools.BatchParams
         private List<ParamOption> _paramOptions = new List<ParamOption>();
 
         // -- Tabs -------------------------------------------------------------
-        private Button _tabRenumber, _tabBulk;
-        private StackPanel _panRenumber, _panBulk;
+        private Button _tabRenumber, _tabBulk, _tabCompleteness;
+        private StackPanel _panRenumber, _panBulk, _panCompleteness;
 
         // -- Renumber tab -----------------------------------------------------
         private ComboBox _cbRenumberParam;
@@ -67,6 +67,13 @@ namespace METools.BatchParams
         private TextBlock  _lblBulkSummary;
         private StackPanel _bulkResultList;
         private Button     _btnBulkConfirm, _btnBulkCancel;
+
+        // -- Completeness tab -----------------------------------------------
+        private ComboBox _cbCompletenessParam;
+        private TextBlock _lblCompletenessSummary;
+        private StackPanel _completenessResultList;
+        private Button _btnSelectMissing;
+        private List<ElementId> _missingElementIds = new List<ElementId>();
 
         public BatchParamsWindow(UIApplication uiApp, ExternalEvent extEvent, BatchParamsHandler handler)
         {
@@ -107,6 +114,7 @@ namespace METools.BatchParams
             outer.Children.Add(BuildTabRow());
             outer.Children.Add(_panRenumber);
             outer.Children.Add(_panBulk);
+            outer.Children.Add(_panCompleteness);
 
             scroll.Content = outer;
             contentGrid.Children.Add(scroll);
@@ -230,6 +238,10 @@ namespace METools.BatchParams
             _pendingBulkRequest = null;
             if (_panRenumberResult != null) _panRenumberResult.Visibility = Visibility.Collapsed;
             if (_panBulkResult != null) _panBulkResult.Visibility = Visibility.Collapsed;
+            _missingElementIds.Clear();
+            if (_completenessResultList != null) _completenessResultList.Children.Clear();
+            if (_lblCompletenessSummary != null) _lblCompletenessSummary.Text = "";
+            if (_btnSelectMissing != null) _btnSelectMissing.Visibility = Visibility.Collapsed;
         }
 
         private void RefreshParamCombos()
@@ -247,21 +259,31 @@ namespace METools.BatchParams
                 _cbBulkParam.ItemsSource = _paramOptions;
                 if (_paramOptions.Count > 0) _cbBulkParam.SelectedIndex = 0;
             }
+            if (_cbCompletenessParam != null)
+            {
+                _cbCompletenessParam.ItemsSource = null;
+                _cbCompletenessParam.ItemsSource = _paramOptions;
+                if (_paramOptions.Count > 0) _cbCompletenessParam.SelectedIndex = 0;
+            }
         }
 
         // ── Tab row (two toggle buttons, not a full colored tab bar --
         // there are only two, so ToggleBtn already does the job) ──────────
         private StackPanel BuildTabRow()
         {
-            _panRenumber = BuildRenumberPanel();
-            _panBulk     = BuildBulkEditPanel();
+            _panRenumber      = BuildRenumberPanel();
+            _panBulk          = BuildBulkEditPanel();
+            _panCompleteness  = BuildCompletenessPanel();
 
             var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 4, 0, 10) };
-            _tabRenumber = ToggleBtn(S._("batchparams.tab_renumber"), true,  ShowRenumberTab);
-            _tabBulk     = ToggleBtn(S._("batchparams.tab_bulkedit"), false, ShowBulkTab);
+            _tabRenumber     = ToggleBtn(S._("batchparams.tab_renumber"),     true,  ShowRenumberTab);
+            _tabBulk         = ToggleBtn(S._("batchparams.tab_bulkedit"),     false, ShowBulkTab);
+            _tabCompleteness = ToggleBtn(S._("batchparams.tab_completeness"), false, ShowCompletenessTab);
             _tabRenumber.Margin = new Thickness(0, 0, 6, 0);
+            _tabBulk.Margin     = new Thickness(0, 0, 6, 0);
             row.Children.Add(_tabRenumber);
             row.Children.Add(_tabBulk);
+            row.Children.Add(_tabCompleteness);
             return row;
         }
 
@@ -269,16 +291,30 @@ namespace METools.BatchParams
         {
             UpdateToggle(_tabRenumber, true);
             UpdateToggle(_tabBulk, false);
-            _panRenumber.Visibility = Visibility.Visible;
-            _panBulk.Visibility     = Visibility.Collapsed;
+            UpdateToggle(_tabCompleteness, false);
+            _panRenumber.Visibility     = Visibility.Visible;
+            _panBulk.Visibility         = Visibility.Collapsed;
+            _panCompleteness.Visibility = Visibility.Collapsed;
         }
 
         private void ShowBulkTab()
         {
             UpdateToggle(_tabRenumber, false);
             UpdateToggle(_tabBulk, true);
-            _panRenumber.Visibility = Visibility.Collapsed;
-            _panBulk.Visibility     = Visibility.Visible;
+            UpdateToggle(_tabCompleteness, false);
+            _panRenumber.Visibility     = Visibility.Collapsed;
+            _panBulk.Visibility         = Visibility.Visible;
+            _panCompleteness.Visibility = Visibility.Collapsed;
+        }
+
+        private void ShowCompletenessTab()
+        {
+            UpdateToggle(_tabRenumber, false);
+            UpdateToggle(_tabBulk, false);
+            UpdateToggle(_tabCompleteness, true);
+            _panRenumber.Visibility     = Visibility.Collapsed;
+            _panBulk.Visibility         = Visibility.Collapsed;
+            _panCompleteness.Visibility = Visibility.Visible;
         }
 
         // ═════════════════════════════════════════════════════════════════
@@ -690,6 +726,110 @@ namespace METools.BatchParams
             _pendingBulkRequest = null;
             if (_panBulkResult != null) _panBulkResult.Visibility = Visibility.Collapsed;
             UpdateStatusBar(S._("batchparams.ready"));
+        }
+
+        // ═════════════════════════════════════════════════════════════════
+        // TAB 3 -- COMPLETENESS CHECK
+        // The opposite question from Renumber/Bulk Edit: not "change these,"
+        // but "which of these are missing a value?" Read-only start to
+        // finish (no ExternalEvent, no transaction, nothing is written), so
+        // there's no preview/confirm step -- Check just shows the answer.
+        // ═════════════════════════════════════════════════════════════════
+        private StackPanel BuildCompletenessPanel()
+        {
+            var sp = new StackPanel { Visibility = Visibility.Collapsed };
+
+            sp.Children.Add(SecH(S._("batchparams.parameter")));
+            _cbCompletenessParam = StyledCombo();
+            _cbCompletenessParam.DisplayMemberPath = "DisplayName";
+            _cbCompletenessParam.Margin  = new Thickness(0, 0, 0, 10);
+            _cbCompletenessParam.ToolTip = S._("batchparams.param_combo_bulk_hint");
+            sp.Children.Add(_cbCompletenessParam);
+
+            sp.Children.Add(Div());
+            var btnCheck = ActionBtn(S._("batchparams.check_completeness"), false, OnCheckCompletenessClicked);
+            btnCheck.HorizontalAlignment = HorizontalAlignment.Left;
+            sp.Children.Add(btnCheck);
+
+            _lblCompletenessSummary = new TextBlock { FontSize = 12, FontWeight = FontWeights.SemiBold,
+                TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 8, 0, 4) };
+            sp.Children.Add(_lblCompletenessSummary);
+
+            var box = new Border
+            {
+                BorderBrush = MeToolsTheme.BrBorder, BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(5), MaxHeight = 200, ClipToBounds = true,
+            };
+            var scroll = new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
+            _completenessResultList = new StackPanel { Margin = new Thickness(6) };
+            scroll.Content = _completenessResultList; box.Child = scroll;
+            sp.Children.Add(box);
+
+            _btnSelectMissing = ActionBtn(S._("batchparams.select_missing"), true, OnSelectMissingClicked);
+            _btnSelectMissing.HorizontalAlignment = HorizontalAlignment.Left;
+            _btnSelectMissing.Margin = new Thickness(0, 8, 0, 0);
+            _btnSelectMissing.Visibility = Visibility.Collapsed;
+            sp.Children.Add(_btnSelectMissing);
+
+            return sp;
+        }
+
+        private void OnCheckCompletenessClicked()
+        {
+            var chosen = _cbCompletenessParam?.SelectedItem as ParamOption;
+            if (chosen == null)
+            {
+                MessageBox.Show(S._("batchparams.pick_param_first"), S._("batchparams.title"), MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+            if (_matchedElements.Count == 0)
+            {
+                MessageBox.Show(S._("batchparams.scan_first"), S._("batchparams.title"), MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+            var doc = _uiApp?.ActiveUIDocument?.Document;
+            if (doc == null) return;
+
+            var missing = BatchParamsHandler.FindMissingValues(doc, _matchedElements, chosen.Name, chosen.IsInstance);
+            _missingElementIds = missing.Select(m => m.ElementId).ToList();
+
+            int total = _matchedElements.Count;
+            _lblCompletenessSummary.Text = string.Format(S._("batchparams.n_missing"), missing.Count, total);
+            _lblCompletenessSummary.Foreground = missing.Count > 0 ? MeToolsTheme.Br(MeToolsTheme.COrange) : MeToolsTheme.BrPetrol;
+
+            _completenessResultList.Children.Clear();
+            const int cap = 200;
+            int shown = 0;
+            foreach (var m in missing)
+            {
+                if (shown >= cap)
+                {
+                    _completenessResultList.Children.Add(new TextBlock
+                    {
+                        Text = string.Format(S._("batchparams.n_more"), missing.Count - cap),
+                        FontSize = 10, Foreground = MeToolsTheme.BrMuted, Margin = new Thickness(0, 2, 0, 0),
+                    });
+                    break;
+                }
+                _completenessResultList.Children.Add(new TextBlock
+                {
+                    Text = $"{m.ElementLabel}: {m.Reason}", FontSize = 11,
+                    Foreground = MeToolsTheme.Br(MeToolsTheme.COrange), TextWrapping = TextWrapping.Wrap,
+                    Margin = new Thickness(0, 1, 0, 1),
+                });
+                shown++;
+            }
+
+            _btnSelectMissing.Visibility = _missingElementIds.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        private void OnSelectMissingClicked()
+        {
+            var uiDoc = _uiApp?.ActiveUIDocument;
+            if (uiDoc == null || _missingElementIds.Count == 0) return;
+            try { uiDoc.Selection.SetElementIds(_missingElementIds); }
+            catch { }
         }
 
         // ═════════════════════════════════════════════════════════════════

@@ -19,8 +19,52 @@
     <Company>Mayer E-Concept SRL</Company>
     <Product>ElecTriX for Autodesk Revit</Product>
     <Copyright>© 2026 Mayer E-Concept SRL</Copyright>
+  </PropertyGroup>
+
+  <!--
+    Version is normally read from setup.iss (below) at build time, so
+    bumping the installer version doesn't ALSO require a separate manual
+    edit here. This literal value is only the fallback used if setup.iss
+    is missing or its AppVersion line can't be parsed; keep it roughly
+    current, but the SyncVersionFromSetupIss target below is what actually
+    controls the version on a normal build.
+  -->
+  <PropertyGroup>
     <Version>2.0.9</Version>
   </PropertyGroup>
+
+  <!--
+    Reads #define AppVersion "X.X.X" out of setup.iss and applies it to
+    Version/AssemblyVersion/FileVersion, so setup.iss stays the single
+    source of truth for the version number. Runs before the properties are
+    consumed (CoreCompile/GetAssemblyVersion write them into the compiled
+    assembly). If setup.iss is missing or the line doesn't match the
+    expected format, this warns and leaves the fallback <Version> above in
+    place rather than failing the build.
+
+    This exists because the two fields drifted once already (csproj said
+    1.6.0 while setup.iss/commits were already at 2.0.6) purely from being
+    two separate manual edits; this target removes that failure mode
+    rather than just fixing that one instance of it.
+  -->
+  <Target Name="SyncVersionFromSetupIss" BeforeTargets="BeforeBuild;CoreCompile;GetAssemblyVersion">
+    <ReadLinesFromFile File="$(MSBuildProjectDirectory)\setup.iss"
+                        Condition="Exists('$(MSBuildProjectDirectory)\setup.iss')">
+      <Output TaskParameter="Lines" ItemName="_SetupIssLines" />
+    </ReadLinesFromFile>
+    <PropertyGroup>
+      <_SetupIssJoined>@(_SetupIssLines, '%0a')</_SetupIssJoined>
+      <_IssVersionMatch>$([System.Text.RegularExpressions.Regex]::Match($(_SetupIssJoined), 'AppVersion\s+"([\d\.]+)"').Groups[1].Value)</_IssVersionMatch>
+    </PropertyGroup>
+    <PropertyGroup Condition="'$(_IssVersionMatch)' != ''">
+      <Version>$(_IssVersionMatch)</Version>
+      <AssemblyVersion>$(_IssVersionMatch).0</AssemblyVersion>
+      <FileVersion>$(_IssVersionMatch).0</FileVersion>
+    </PropertyGroup>
+    <Warning Condition="'$(_IssVersionMatch)' == ''"
+             Text="Could not read AppVersion from setup.iss -- keeping the fallback &lt;Version&gt; ($(Version)) instead. Check the '#define AppVersion &quot;X.X.X&quot;' line's format." />
+    <Message Condition="'$(_IssVersionMatch)' != ''" Text="Version synced from setup.iss: $(_IssVersionMatch)" Importance="high" />
+  </Target>
 
   <!-- Revit API references — links against a Revit 2025 install (used at
        runtime for 2026 too). Adjust these HintPaths if your install lives
