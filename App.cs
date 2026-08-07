@@ -214,8 +214,7 @@ namespace METools
             // line) and OneParameter (bulk add-prefix/add-suffix/find-replace/
             // clear across many elements) -- combined into one tool, generic
             // across any category/parameter rather than scoped to electrical
-            // ones specifically. No custom icon yet -- text-only button until
-            // one gets made.
+            // ones specifically.
             var bpBtn = new PushButtonData(
                 "BatchParams", "Batch\nParams", dll,
                 "METools.BatchParams.BatchParamsCommand")
@@ -225,8 +224,11 @@ namespace METools
                                   "* Renumber tab: prefix + counter + suffix into any text parameter, ordered manually (click one by one) or along a picked detail line\n" +
                                   "* Bulk Edit tab: add prefix, add suffix, find & replace, set, or clear one parameter across every matched element in one click\n\n" +
                                   "Works on any category and any writable text parameter -- not limited to electrical categories.",
+                Image           = LoadIcon("icon_bp_light_16.png"),
+                LargeImage      = LoadIcon("icon_bp_light_32.png"),
             };
             var bpButton = panelCircuits.AddItem(bpBtn) as PushButton;
+            RibbonThemeWatcher.Register(bpButton, "icon_bp");
 
             // -- Comments ----------------------------------------------------
             var cmtBtn = new PushButtonData(
