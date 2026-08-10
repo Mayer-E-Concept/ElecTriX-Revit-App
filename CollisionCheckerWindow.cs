@@ -69,7 +69,13 @@ namespace METools.CollisionChecker
         private void WireHandler()
         {
             _handler.OnStatus = msg => Dispatcher.Invoke(() => UpdateStatusBar(msg));
-            _handler.OnDone   = result => Dispatcher.Invoke(() => HandlePlaceResult(result));
+            _handler.OnDone   = result => Dispatcher.Invoke(() =>
+            {
+                if (result?.ResultAction == CollisionCheckerAction.MarkCollisions)
+                    HandleMarkResult(result);
+                else
+                    HandlePlaceResult(result);
+            });
         }
 
         // ── Build ─────────────────────────────────────────────────────────
@@ -325,7 +331,15 @@ namespace METools.CollisionChecker
 
             RenderResultList();
             UpdateStatusBar(_lblSummary.Text);
-            HighlightCollisions(doc, uiDoc.ActiveView);
+
+            _handler.Request = new CollisionCheckerRequest
+            {
+                Action       = CollisionCheckerAction.MarkCollisions,
+                Collisions   = _collisions,
+                OldMarkerIds = new List<ElementId>(_markerIds),
+            };
+            _extEvent.Raise();
+
             CollisionCheckerWatcher.SaveScanResults(doc, _collisions);
             UpdateLastScannedLabel(DateTime.Now);
         }
@@ -514,127 +528,6 @@ namespace METools.CollisionChecker
             catch { return null; }
         }
 
-        // Marks every collision that doesn't have a hole yet in red, in
-        // whatever view is currently active -- a graphic override on the
-        // conduit/cable tray itself, not a separate marker element. Runs
-        // directly (lightweight transaction from a click handler), matching
-        // Circuit Tagger's established SetPendingMark convention for
-        // graphic overrides -- this is display metadata, not model data,
-        // and safely re-appliable on every Scan.
-        private void HighlightCollisions(Document doc, View view)
-        {
-            if (view == null || doc == null) return;
-            int attempted = 0, failed = 0;
-            string firstError = null;
-            try
-            {
-                using (var tx = new Transaction(doc, "ME-Tools: Mark collisions"))
-                {
-                    tx.Start();
-
-                    // Clear this window's own markers from a previous Scan.
-                    if (_markerIds.Count > 0)
-                    {
-                        try { doc.Delete(_markerIds); } catch { }
-                        _markerIds.Clear();
-                        _markersByCollisionId.Clear();
-                    }
-
-                    // Detail Lines are a 2D, view-specific annotation and
-                    // aren't supported in 3D views -- skip drawing marks
-                    // there rather than throwing on every single one.
-                    if (!(view is View3D))
-                    {
-                        double? planeZ = GetViewPlaneZ(view);
-
-                        var red = new Autodesk.Revit.DB.Color(226, 42, 42);
-                        var ogs = new OverrideGraphicSettings();
-                        try { ogs.SetProjectionLineColor(red); ogs.SetProjectionLineWeight(7); } catch { }
-
-                        double radiusFt = 250.0 / 304.8; // ~250mm radius -- visible regardless of view scale
-                        XYZ xAxis = view.RightDirection;
-                        XYZ yAxis = view.UpDirection;
-
-                        foreach (var c in _collisions)
-                        {
-                            if (c.HasHole || c.Point == null) continue;
-                            attempted++;
-                            try
-                            {
-                                var center = planeZ.HasValue
-                                    ? new XYZ(c.Point.X, c.Point.Y, planeZ.Value)
-                                    : c.Point;
-
-                                // A circle, as two half-circle arcs (Revit
-                                // detail curves can't be a single closed
-                                // loop) on a plane centered exactly at the
-                                // (projected) collision point.
-                                var centeredPlane = Plane.CreateByOriginAndBasis(center, xAxis, yAxis);
-                                var arc1 = Arc.Create(centeredPlane, radiusFt, 0, Math.PI);
-                                var arc2 = Arc.Create(centeredPlane, radiusFt, Math.PI, 2 * Math.PI);
-                                var dc1 = doc.Create.NewDetailCurve(view, arc1);
-                                var dc2 = doc.Create.NewDetailCurve(view, arc2);
-                                view.SetElementOverrides(dc1.Id, ogs);
-                                view.SetElementOverrides(dc2.Id, ogs);
-
-                                _markerIds.Add(dc1.Id);
-                                _markerIds.Add(dc2.Id);
-                                if (!_markersByCollisionId.TryGetValue(c.Id, out var list))
-                                {
-                                    list = new List<ElementId>();
-                                    _markersByCollisionId[c.Id] = list;
-                                }
-                                list.Add(dc1.Id);
-                                list.Add(dc2.Id);
-                            }
-                            catch (Exception ex)
-                            {
-                                failed++;
-                                if (firstError == null) firstError = ex.Message;
-                            }
-                        }
-                    }
-
-                    if (tx.GetStatus() == TransactionStatus.Started) tx.Commit();
-                }
-            }
-            catch (Exception ex)
-            {
-                failed++;
-                if (firstError == null) firstError = "outer: " + ex.Message;
-            }
-
-            // A MessageBox, not just a status bar update -- the status bar
-            // text was getting silently overwritten by whatever happened
-            // next (e.g. clicking Place Holes right after Scan), so the
-            // diagnostic was being set correctly but never actually seen.
-            if (failed > 0)
-                MessageBox.Show(
-                    string.Format(S._("collisioncheck.mark_failed"), failed, attempted, firstError),
-                    S._("collisioncheck.title"), MessageBoxButton.OK, MessageBoxImage.Warning);
-        }
-
-        // The Z-height detail curves must be drawn at for this view to
-        // accept them, tried in order of reliability: a Floor/Ceiling
-        // Plan's own associated level (always present for that view type,
-        // unlike SketchPlane which may well be null), then SketchPlane
-        // (covers Section/Elevation/Drafting views, which don't have a
-        // GenLevel), then the view's own Origin as a last resort.
-        private static double? GetViewPlaneZ(View view)
-        {
-            try { if (view is ViewPlan vp && vp.GenLevel != null) return vp.GenLevel.Elevation; }
-            catch { }
-            try
-            {
-                var plane = view.SketchPlane?.GetPlane();
-                if (plane != null) return plane.Origin.Z;
-            }
-            catch { }
-            try { return view.Origin.Z; }
-            catch { }
-            return null;
-        }
-
         // Removes just the circle for one specific collision, immediately
         // after its hole is placed, rather than waiting for the next Scan
         // to redraw everything. Runs in its own small transaction -- called
@@ -685,6 +578,28 @@ namespace METools.CollisionChecker
             };
             _extEvent.Raise();
             UpdateStatusBar(S._("collisioncheck.placing"));
+        }
+
+        // Merges newly-drawn markers into this window's own tracking
+        // dictionaries (needed later by RemoveMarkerFor when a hole gets
+        // placed for one of them), and surfaces any failure via a popup --
+        // not the status bar, which gets silently overwritten by whatever
+        // happens next and was why the diagnostic went unseen before.
+        private void HandleMarkResult(PlaceHolesResult result)
+        {
+            if (result == null) return;
+            _markerIds.Clear();
+            _markersByCollisionId.Clear();
+            foreach (var kv in result.MarkersByCollisionId)
+            {
+                _markersByCollisionId[kv.Key] = kv.Value;
+                _markerIds.AddRange(kv.Value);
+            }
+
+            if (result.MarksFailed > 0)
+                MessageBox.Show(
+                    string.Format(S._("collisioncheck.mark_failed"), result.MarksFailed, result.MarksAttempted, result.FirstMarkError),
+                    S._("collisioncheck.title"), MessageBoxButton.OK, MessageBoxImage.Warning);
         }
 
         private void HandlePlaceResult(PlaceHolesResult result)

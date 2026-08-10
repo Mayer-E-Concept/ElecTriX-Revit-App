@@ -30,7 +30,7 @@ namespace METools.CollisionChecker
         public bool HasHole => HoleInstanceId != null && HoleInstanceId != Autodesk.Revit.DB.ElementId.InvalidElementId;
     }
 
-    public enum CollisionCheckerAction { None, PlaceHoles, MoveHoles }
+    public enum CollisionCheckerAction { None, PlaceHoles, MoveHoles, MarkCollisions }
 
     public class CollisionCheckerRequest
     {
@@ -44,6 +44,12 @@ namespace METools.CollisionChecker
         // the watcher is running in); Hole/Wall are UniqueIds since those
         // are what's actually persisted in Extensible Storage.
         public List<HoleMoveInfo> HoleMoves { get; set; } = new List<HoleMoveInfo>();
+
+        // Used only by MarkCollisions -- detail-curve marker elements from
+        // a previous Scan that need deleting before drawing new ones.
+        // Deleting them also needs a transaction, hence going through this
+        // request rather than the window deleting them directly.
+        public List<Autodesk.Revit.DB.ElementId> OldMarkerIds { get; set; } = new List<Autodesk.Revit.DB.ElementId>();
     }
 
     // One hole that needs to be repositioned because the run it belongs to
@@ -59,6 +65,11 @@ namespace METools.CollisionChecker
 
     public class PlaceHolesResult
     {
+        // Which action produced this result -- PlaceHoles and MarkCollisions
+        // now share this one result type and the same OnDone callback, so
+        // the window needs to know which handler to run on it.
+        public CollisionCheckerAction ResultAction { get; set; } = CollisionCheckerAction.PlaceHoles;
+
         public int Placed  { get; set; }
         public int Skipped { get; set; }
         public int Errors  { get; set; }
@@ -76,6 +87,15 @@ namespace METools.CollisionChecker
         // rather than making a successful row look like it failed.
         public int DimensionWarnings { get; set; }
         public string FirstDimensionWarning { get; set; }
+
+        // -- MarkCollisions-specific fields --
+        public int MarksAttempted { get; set; }
+        public int MarksFailed { get; set; }
+        public string FirstMarkError { get; set; }
+        // Row id -> the detail-curve element IDs drawn for it, so the
+        // window can track them for later removal (RemoveMarkerFor) the
+        // same way it did when it drew them directly.
+        public Dictionary<string, List<Autodesk.Revit.DB.ElementId>> MarkersByCollisionId { get; set; } = new Dictionary<string, List<Autodesk.Revit.DB.ElementId>>();
     }
 
     // One loaded family/type the user can pick as the hole marker.

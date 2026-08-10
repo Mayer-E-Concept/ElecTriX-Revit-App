@@ -57,6 +57,8 @@ namespace METools.CollisionChecker
                 ExecutePlaceHoles(doc, req);
             else if (req.Action == CollisionCheckerAction.MoveHoles)
                 ExecuteMoveHoles(doc, req);
+            else if (req.Action == CollisionCheckerAction.MarkCollisions)
+                ExecuteMarkCollisions(doc, app.ActiveUIDocument?.ActiveView, req);
         }
 
         // ═════════════════════════════════════════════════════════════════
@@ -651,6 +653,117 @@ namespace METools.CollisionChecker
                     if (tx.GetStatus() == TransactionStatus.Started) tx.RollBack();
                 }
             }
+        }
+
+        // Draws a red circle at every unresolved collision point, in
+        // whatever view the person had active when Scan was clicked.
+        // Confirmed via the actual Revit error message that a plain
+        // button-click handler is not a valid context for starting a
+        // transaction ("Starting a transaction from an external
+        // application running outside of API context is not allowed") --
+        // this used to run directly from the window's OnScanClicked, which
+        // is exactly that invalid context. Routed through the ExternalEvent
+        // instead, the same way every other write in this file already is.
+        private void ExecuteMarkCollisions(Document doc, View view, CollisionCheckerRequest req)
+        {
+            var result = new PlaceHolesResult { ResultAction = CollisionCheckerAction.MarkCollisions };
+            if (view == null || req.Collisions == null) { OnDone?.Invoke(result); return; }
+
+            using (var tx = new Transaction(doc, "ME-Tools: Mark collisions"))
+            {
+                tx.Start();
+                try
+                {
+                    if (req.OldMarkerIds != null && req.OldMarkerIds.Count > 0)
+                    {
+                        try { doc.Delete(req.OldMarkerIds); } catch { }
+                    }
+
+                    // Detail Lines are a 2D, view-specific annotation and
+                    // aren't supported in 3D views -- skip drawing marks
+                    // there rather than throwing on every single one.
+                    if (!(view is View3D))
+                    {
+                        double? planeZ = GetViewPlaneZ(view);
+
+                        var red = new Autodesk.Revit.DB.Color(226, 42, 42);
+                        var ogs = new OverrideGraphicSettings();
+                        try { ogs.SetProjectionLineColor(red); ogs.SetProjectionLineWeight(7); } catch { }
+
+                        double radiusFt = 250.0 / 304.8; // ~250mm radius -- visible regardless of view scale
+                        XYZ xAxis = view.RightDirection;
+                        XYZ yAxis = view.UpDirection;
+
+                        foreach (var c in req.Collisions)
+                        {
+                            if (c.HasHole || c.Point == null) continue;
+                            result.MarksAttempted++;
+                            try
+                            {
+                                var center = planeZ.HasValue
+                                    ? new XYZ(c.Point.X, c.Point.Y, planeZ.Value)
+                                    : c.Point;
+
+                                // A circle, as two half-circle arcs (Revit
+                                // detail curves can't be a single closed
+                                // loop) on a plane centered exactly at the
+                                // (projected) collision point.
+                                var centeredPlane = Plane.CreateByOriginAndBasis(center, xAxis, yAxis);
+                                var arc1 = Arc.Create(centeredPlane, radiusFt, 0, Math.PI);
+                                var arc2 = Arc.Create(centeredPlane, radiusFt, Math.PI, 2 * Math.PI);
+                                var dc1 = doc.Create.NewDetailCurve(view, arc1);
+                                var dc2 = doc.Create.NewDetailCurve(view, arc2);
+                                view.SetElementOverrides(dc1.Id, ogs);
+                                view.SetElementOverrides(dc2.Id, ogs);
+
+                                if (!result.MarkersByCollisionId.TryGetValue(c.Id, out var list))
+                                {
+                                    list = new List<ElementId>();
+                                    result.MarkersByCollisionId[c.Id] = list;
+                                }
+                                list.Add(dc1.Id);
+                                list.Add(dc2.Id);
+                            }
+                            catch (Exception ex)
+                            {
+                                result.MarksFailed++;
+                                if (result.FirstMarkError == null) result.FirstMarkError = ex.Message;
+                            }
+                        }
+                    }
+
+                    tx.Commit();
+                }
+                catch (Exception ex)
+                {
+                    if (tx.GetStatus() == TransactionStatus.Started) tx.RollBack();
+                    result.MarksFailed++;
+                    if (result.FirstMarkError == null) result.FirstMarkError = "outer: " + ex.Message;
+                }
+            }
+
+            OnDone?.Invoke(result);
+        }
+
+        // The Z-height detail curves must be drawn at for this view to
+        // accept them, tried in order of reliability: a Floor/Ceiling
+        // Plan's own associated level (always present for that view type,
+        // unlike SketchPlane which may well be null), then SketchPlane
+        // (covers Section/Elevation/Drafting views, which don't have a
+        // GenLevel), then the view's own Origin as a last resort.
+        private static double? GetViewPlaneZ(View view)
+        {
+            try { if (view is ViewPlan vp && vp.GenLevel != null) return vp.GenLevel.Elevation; }
+            catch { }
+            try
+            {
+                var plane = view.SketchPlane?.GetPlane();
+                if (plane != null) return plane.Origin.Z;
+            }
+            catch { }
+            try { return view.Origin.Z; }
+            catch { }
+            return null;
         }
 
         // The wall's side face (whichever shell layer) whose plane is
