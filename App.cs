@@ -38,6 +38,13 @@ namespace METools
             // open->close, shared folder same as Comments) -------------------
             METools.TimeTracker.TimeTrackerWatcher.Register(app);
 
+            // -- Collision Checker's live-follow watcher: repositions a
+            // placed hole when the conduit/cable tray it belongs to moves.
+            // Session-long, independent of whether the tool's own window is
+            // open -- see CollisionCheckerWatcher.cs for why this needs its
+            // own ExternalEvent created here rather than lazily later.
+            METools.CollisionChecker.CollisionCheckerWatcher.Register(app);
+
             // -- Circuit Tagger: detects a previously-tagged apartment being
             // duplicated (Copy/Paste, Mirror, Array, Group placement) and
             // prompts for a new House/Apartment so it doesn't merge into the
@@ -224,6 +231,29 @@ namespace METools
             };
             var bpButton = panelCircuits.AddItem(bpBtn) as PushButton;
             RibbonThemeWatcher.Register(bpButton, "icon_bp");
+
+            // -- Collision Checker (conduits/cable trays vs walls) -----------
+            // Finds where a conduit/cable tray run crosses a wall, lists each
+            // crossing with a Go To button and its level/category/wall type,
+            // marks unresolved ones red in the current view, and places a
+            // user-supplied hole-marker family at any you select. Placed
+            // holes are linked to their run via Extensible Storage and kept
+            // in sync by CollisionCheckerWatcher if the run is later moved.
+            var ccBtn = new PushButtonData(
+                "CollisionChecker", "Collision\nChecker", dll,
+                "METools.CollisionChecker.CollisionCheckerCommand")
+            {
+                ToolTip         = "Find where conduits/cable trays cross walls, jump to each one, and place a hole marker -- the hole follows if you later move the run.",
+                LongDescription = $"Collision Checker -- {VENDOR}\n\nScans conduits and cable trays against every wall in the chosen scope (selection / active view / whole model) and lists every crossing point, with its level, category, and wall type.\n\n" +
+                                  "* Go To selects the run and zooms to it\n" +
+                                  "* Unresolved crossings are marked red in the current view\n" +
+                                  "* Select any number of rows and Place Holes -- your chosen family/type is placed at each point, hosted on the wall face automatically if the family supports it\n" +
+                                  "* If you later move a run that already has a hole, the hole moves with it",
+                Image           = LoadIcon("icon_cc_light_16.png"),
+                LargeImage      = LoadIcon("icon_cc_light_32.png"),
+            };
+            var ccButton = panelCircuits.AddItem(ccBtn) as PushButton;
+            RibbonThemeWatcher.Register(ccButton, "icon_cc");
 
             // -- Comments ----------------------------------------------------
             var cmtBtn = new PushButtonData(

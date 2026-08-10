@@ -36,6 +36,8 @@ namespace METools
                     METools.ActivityLog.ActivityLogCommand.Open(app);
                 else if (Target == "BatchParams")
                     METools.BatchParams.BatchParamsCommand.Open(app);
+                else if (Target == "CollisionChecker")
+                    METools.CollisionChecker.CollisionCheckerCommand.Open(app);
             }
             catch { }
         }
@@ -82,6 +84,7 @@ namespace METools
                 ("CircuitTagger", "Circuit Tagger"),
                 ("Statistics",    "Statistics"),
                 ("BatchParams",   "Batch Params"),
+                ("CollisionChecker", "Collision Checker"),
                 ("Comments",      "Comments"),
                 ("ActivityLog",   "Activity Log & Time"),
             };
