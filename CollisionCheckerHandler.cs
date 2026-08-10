@@ -112,6 +112,25 @@ namespace METools.CollisionChecker
                 var walls = new FilteredElementCollector(doc).OfClass(typeof(Wall)).WhereElementIsNotElementType().Cast<Wall>().ToList();
                 if (runs.Count == 0 || walls.Count == 0) return result;
 
+                // Existing hole links, re-keyed by (run, wall) instead of
+                // by hole, so a fresh scan can recognize "this crossing
+                // already has a hole from a previous session" instead of
+                // reporting every single collision as new every time --
+                // ScanForCollisions previously had no way to know about
+                // anything placed outside the current in-memory session.
+                var linkByRunAndWall = new Dictionary<(string RunUid, string WallUid), string>();
+                var holeUidsByRun = new Dictionary<string, List<string>>();
+                foreach (var kv in ReadHoleLinkMap(doc))
+                {
+                    linkByRunAndWall[(kv.Value.RunUniqueId, kv.Value.WallUniqueId)] = kv.Key;
+                    if (!holeUidsByRun.TryGetValue(kv.Value.RunUniqueId, out var list))
+                    {
+                        list = new List<string>();
+                        holeUidsByRun[kv.Value.RunUniqueId] = list;
+                    }
+                    list.Add(kv.Key);
+                }
+
                 foreach (var run in runs)
                 {
                     Curve runCurve;
@@ -146,7 +165,7 @@ namespace METools.CollisionChecker
                             var point = FindCrossingPoint(doc, wall, runCurve);
                             if (point == null) continue;
 
-                            result.Add(new CollisionInfo
+                            var info = new CollisionInfo
                             {
                                 ElementId       = run.Id,
                                 WallId          = wall.Id,
@@ -154,9 +173,47 @@ namespace METools.CollisionChecker
                                 ElementTypeName = TypeNameOf(doc, run),
                                 WallTypeName    = TypeNameOf(doc, wall),
                                 Point           = point,
-                                LevelId         = ResolveLevelId(doc, run),
-                                LevelName       = ResolveLevelName(doc, ResolveLevelId(doc, run)),
-                            });
+                                LevelId         = ResolveLevelIdByElevation(doc, point.Z),
+                                LevelName       = ResolveLevelName(doc, ResolveLevelIdByElevation(doc, point.Z)),
+                            };
+
+                            if (linkByRunAndWall.TryGetValue((run.UniqueId, wall.UniqueId), out var holeUid))
+                            {
+                                try
+                                {
+                                    var holeEl = doc.GetElement(holeUid);
+                                    if (holeEl != null) info.HoleInstanceId = holeEl.Id;
+                                }
+                                catch { }
+                            }
+
+                            // Fallback: the exact wall this scan resolved
+                            // the crossing against may not be the same Wall
+                            // object the original hole was linked to (most
+                            // likely right at a corner where two walls
+                            // meet, or after a wall was edited) -- check
+                            // this run's other existing holes by physical
+                            // distance instead of only by exact wall match.
+                            if (!info.HasHole && holeUidsByRun.TryGetValue(run.UniqueId, out var candidateHoleUids))
+                            {
+                                const double proximityToleranceFt = 300.0 / 304.8; // ~300mm
+                                foreach (var candidateUid in candidateHoleUids)
+                                {
+                                    try
+                                    {
+                                        var holeEl = doc.GetElement(candidateUid);
+                                        var holeLoc = (holeEl?.Location as LocationPoint)?.Point;
+                                        if (holeLoc != null && holeLoc.DistanceTo(point) <= proximityToleranceFt)
+                                        {
+                                            info.HoleInstanceId = holeEl.Id;
+                                            break;
+                                        }
+                                    }
+                                    catch { }
+                                }
+                            }
+
+                            result.Add(info);
                         }
                         catch { }
                     }
@@ -282,6 +339,37 @@ namespace METools.CollisionChecker
         private static ElementId ResolveLevelId(Document doc, Element el)
         {
             try { return el.LevelId ?? ElementId.InvalidElementId; }
+            catch { return ElementId.InvalidElementId; }
+        }
+
+        // Which level a given Z-height physically sits on, by comparing
+        // against every level's own elevation -- the level whose elevation
+        // is the highest one still at or below this Z. This is deliberately
+        // NOT the run's own Reference Level property: an MEP element's
+        // Reference Level plus its own vertical offset (shown as "Middle
+        // Elevation" in Revit's own UI) doesn't reliably match where it
+        // physically sits, especially when that offset is large enough to
+        // put it into a different level's usual range -- exactly what was
+        // sending "Go To" to a level whose own plan view doesn't show
+        // anything useful at this spot.
+        private static ElementId ResolveLevelIdByElevation(Document doc, double z)
+        {
+            try
+            {
+                Level best = null;
+                foreach (var lvl in new FilteredElementCollector(doc).OfClass(typeof(Level)).Cast<Level>())
+                {
+                    if (lvl.Elevation <= z && (best == null || lvl.Elevation > best.Elevation))
+                        best = lvl;
+                }
+                // Nothing at or below z (e.g. below the lowest level) -- fall
+                // back to whichever level is closest overall rather than
+                // reporting no level at all.
+                if (best == null)
+                    best = new FilteredElementCollector(doc).OfClass(typeof(Level)).Cast<Level>()
+                        .OrderBy(l => Math.Abs(l.Elevation - z)).FirstOrDefault();
+                return best?.Id ?? ElementId.InvalidElementId;
+            }
             catch { return ElementId.InvalidElementId; }
         }
 

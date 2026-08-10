@@ -53,6 +53,15 @@ namespace METools.CollisionChecker
             _settingsData = CollisionCheckerSettings.Load();
             InitWindow(S._("collisioncheck.title"), 660);
             MaxHeight = Math.Min(780, SystemParameters.WorkArea.Height - 60);
+            // Fixed height, not auto-measured: the results section below
+            // uses a star-sized row so it always gets whatever space is
+            // left after the (short, fixed) intro/scope/family section --
+            // that only works with a real, bounded window height to divide
+            // up, not the base class's "measure natural content size"
+            // default (SizeToContent.Height), which doesn't have a
+            // meaningful answer for a star-sized row.
+            SizeToContent = SizeToContent.Manual;
+            Height = Math.Min(700, SystemParameters.WorkArea.Height - 80);
             WireHandler();
             Build();
         }
@@ -70,24 +79,40 @@ namespace METools.CollisionChecker
 
             var contentGrid = new Grid { Background = MeToolsTheme.BrBg };
             contentGrid.Children.Add(Watermark());
-            var scroll = new ScrollViewer
+
+            var rootGrid = new Grid();
+            rootGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            rootGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+
+            // Top row: intro/scope/hole family -- naturally short, so this
+            // scrolls on its own only in the unlikely case it's ever taller
+            // than expected, rather than eating into the results row below.
+            var topScroll = new ScrollViewer
             {
                 VerticalScrollBarVisibility   = ScrollBarVisibility.Auto,
                 HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
                 Background = System.Windows.Media.Brushes.Transparent,
-                Padding    = new Thickness(16, 12, 16, 10),
+                Padding    = new Thickness(16, 12, 16, 0),
             };
-            var outer = new StackPanel();
+            var topStack = new StackPanel();
+            topStack.Children.Add(InfoBox(S._("collisioncheck.intro_hint")));
+            topStack.Children.Add(BuildScopeSection());
+            topStack.Children.Add(Div());
+            topStack.Children.Add(BuildHoleFamilySection());
+            topScroll.Content = topStack;
+            Grid.SetRow(topScroll, 0);
+            rootGrid.Children.Add(topScroll);
 
-            outer.Children.Add(InfoBox(S._("collisioncheck.intro_hint")));
-            outer.Children.Add(BuildScopeSection());
-            outer.Children.Add(Div());
-            outer.Children.Add(BuildHoleFamilySection());
-            outer.Children.Add(Div());
-            outer.Children.Add(BuildResultsSection());
+            // Bottom row (star-sized -- gets whatever space is left):
+            // results list + Place Holes button, always both visible. Only
+            // the results box itself scrolls internally when there are a
+            // lot of collisions to show.
+            var resultsDock = new DockPanel { Margin = new Thickness(16, 8, 16, 12), LastChildFill = true };
+            Grid.SetRow(resultsDock, 1);
+            BuildResultsSectionInto(resultsDock);
+            rootGrid.Children.Add(resultsDock);
 
-            scroll.Content = outer;
-            contentGrid.Children.Add(scroll);
+            contentGrid.Children.Add(rootGrid);
             RootDock.Children.Add(contentGrid);
 
             TryRestoreCachedScan();
@@ -248,37 +273,42 @@ namespace METools.CollisionChecker
         }
 
         // ── Results ───────────────────────────────────────────────────────
-        private StackPanel BuildResultsSection()
+        private void BuildResultsSectionInto(DockPanel dock)
         {
-            var sp = new StackPanel();
-            sp.Children.Add(SecH(S._("collisioncheck.results")));
-
+            var header = new StackPanel();
+            header.Children.Add(SecH(S._("collisioncheck.results")));
             var selRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 6) };
             var btnAll  = ActionBtn(S._("collisioncheck.select_all"),  true, () => SetAllChecked(true));
             var btnNone = ActionBtn(S._("collisioncheck.select_none"), true, () => SetAllChecked(false));
             btnAll.Margin = new Thickness(0, 0, 6, 0);
             selRow.Children.Add(btnAll);
             selRow.Children.Add(btnNone);
-            sp.Children.Add(selRow);
+            header.Children.Add(selRow);
+            DockPanel.SetDock(header, Dock.Top);
+            dock.Children.Add(header);
 
+            _btnPlaceHoles = ActionBtn(S._("collisioncheck.place_holes"), false, OnPlaceHolesClicked);
+            _btnPlaceHoles.HorizontalAlignment = HorizontalAlignment.Left;
+            _btnPlaceHoles.Margin = new Thickness(0, 8, 0, 0);
+            DockPanel.SetDock(_btnPlaceHoles, Dock.Bottom);
+            dock.Children.Add(_btnPlaceHoles);
+
+            // Last child in the DockPanel -- with LastChildFill=true, this
+            // one gets whatever space is left after the header above and
+            // the button below, instead of a fixed MaxHeight that could cut
+            // off the button when there are enough collisions to fill it.
             var box = new Border
             {
                 BorderBrush = MeToolsTheme.BrBorder, BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(5), MinHeight = 100, MaxHeight = 320, ClipToBounds = true,
+                CornerRadius = new CornerRadius(5), ClipToBounds = true, Margin = new Thickness(0, 4, 0, 0),
             };
             var scroll = new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
                 HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
             _resultList = new StackPanel { Margin = new Thickness(6) };
             scroll.Content = _resultList; box.Child = scroll;
-            sp.Children.Add(box);
-
-            sp.Children.Add(Div());
-            _btnPlaceHoles = ActionBtn(S._("collisioncheck.place_holes"), false, OnPlaceHolesClicked);
-            _btnPlaceHoles.HorizontalAlignment = HorizontalAlignment.Left;
-            sp.Children.Add(_btnPlaceHoles);
+            dock.Children.Add(box);
 
             RenderResultList();
-            return sp;
         }
 
         private void OnScanClicked()
@@ -294,11 +324,10 @@ namespace METools.CollisionChecker
                 : string.Format(S._("collisioncheck.n_found"), _collisions.Count);
 
             RenderResultList();
-            HighlightCollisions(doc, uiDoc.ActiveView);
             UpdateStatusBar(_lblSummary.Text);
+            HighlightCollisions(doc, uiDoc.ActiveView);
             CollisionCheckerWatcher.SaveScanResults(doc, _collisions);
             UpdateLastScannedLabel(DateTime.Now);
-            Dispatcher.BeginInvoke(new Action(ResizeToFitContent), System.Windows.Threading.DispatcherPriority.Background);
         }
 
         private void RenderResultList()
@@ -430,8 +459,19 @@ namespace METools.CollisionChecker
         {
             var uiDoc = _uiApp?.ActiveUIDocument;
             if (uiDoc == null || c.Point == null) return;
+            var doc = uiDoc.Document;
             try
             {
+                // Switch to a plan view on the collision's own level first,
+                // if the active view isn't already on that level --
+                // otherwise zooming just pans/zooms whatever's currently
+                // open, which may not show this level's geometry at all.
+                var targetView = FindPlanViewForLevel(doc, c.LevelId);
+                if (targetView != null && targetView.Id != uiDoc.ActiveView?.Id)
+                {
+                    try { uiDoc.ActiveView = targetView; } catch { }
+                }
+
                 var idToSelect = c.HasHole ? c.HoleInstanceId : c.ElementId;
                 uiDoc.Selection.SetElementIds(new List<ElementId> { idToSelect });
 
@@ -455,6 +495,25 @@ namespace METools.CollisionChecker
             catch { }
         }
 
+        // Prefers an actual Floor Plan view on the given level over other
+        // plan-based view types (Ceiling Plan, Structural Plan, Area Plan)
+        // that also happen to report the same GenLevel, since a Floor Plan
+        // is what every screenshot of this tool has been used in so far.
+        private static View FindPlanViewForLevel(Document doc, ElementId levelId)
+        {
+            if (doc == null || levelId == null || levelId == ElementId.InvalidElementId) return null;
+            try
+            {
+                var candidates = new FilteredElementCollector(doc)
+                    .OfClass(typeof(ViewPlan))
+                    .Cast<ViewPlan>()
+                    .Where(v => !v.IsTemplate && v.GenLevel != null && v.GenLevel.Id == levelId)
+                    .ToList();
+                return candidates.FirstOrDefault(v => v.ViewType == ViewType.FloorPlan) ?? candidates.FirstOrDefault();
+            }
+            catch { return null; }
+        }
+
         // Marks every collision that doesn't have a hole yet in red, in
         // whatever view is currently active -- a graphic override on the
         // conduit/cable tray itself, not a separate marker element. Runs
@@ -465,6 +524,8 @@ namespace METools.CollisionChecker
         private void HighlightCollisions(Document doc, View view)
         {
             if (view == null || doc == null) return;
+            int attempted = 0, failed = 0;
+            string firstError = null;
             try
             {
                 using (var tx = new Transaction(doc, "ME-Tools: Mark collisions"))
@@ -484,46 +545,25 @@ namespace METools.CollisionChecker
                     // there rather than throwing on every single one.
                     if (!(view is View3D))
                     {
-                        // The actual bug that made nothing ever appear:
-                        // NewDetailCurve throws "Curve must be in the
-                        // plane" (a documented, deliberate Revit behavior)
-                        // unless the curve lies EXACTLY on the view's own
-                        // sketch plane -- the collision point's real 3D
-                        // height essentially never matches that exactly, so
-                        // every single creation attempt was throwing and
-                        // being silently swallowed by the catch below.
-                        Plane viewPlane = null;
-                        try { viewPlane = view.SketchPlane?.GetPlane(); } catch { }
+                        double? planeZ = GetViewPlaneZ(view);
 
                         var red = new Autodesk.Revit.DB.Color(226, 42, 42);
                         var ogs = new OverrideGraphicSettings();
                         try { ogs.SetProjectionLineColor(red); ogs.SetProjectionLineWeight(7); } catch { }
 
                         double radiusFt = 250.0 / 304.8; // ~250mm radius -- visible regardless of view scale
+                        XYZ xAxis = view.RightDirection;
+                        XYZ yAxis = view.UpDirection;
 
                         foreach (var c in _collisions)
                         {
                             if (c.HasHole || c.Point == null) continue;
+                            attempted++;
                             try
                             {
-                                XYZ center; XYZ xAxis, yAxis;
-                                if (viewPlane != null)
-                                {
-                                    // Project onto the view's plane: remove
-                                    // whatever component of the point sits
-                                    // along the plane's own normal.
-                                    var offset = c.Point - viewPlane.Origin;
-                                    var alongNormal = offset.DotProduct(viewPlane.Normal);
-                                    center = c.Point - viewPlane.Normal.Multiply(alongNormal);
-                                    xAxis = viewPlane.XVec;
-                                    yAxis = viewPlane.YVec;
-                                }
-                                else
-                                {
-                                    center = c.Point;
-                                    xAxis = view.RightDirection;
-                                    yAxis = view.UpDirection;
-                                }
+                                var center = planeZ.HasValue
+                                    ? new XYZ(c.Point.X, c.Point.Y, planeZ.Value)
+                                    : c.Point;
 
                                 // A circle, as two half-circle arcs (Revit
                                 // detail curves can't be a single closed
@@ -547,14 +587,52 @@ namespace METools.CollisionChecker
                                 list.Add(dc1.Id);
                                 list.Add(dc2.Id);
                             }
-                            catch { }
+                            catch (Exception ex)
+                            {
+                                failed++;
+                                if (firstError == null) firstError = ex.Message;
+                            }
                         }
                     }
 
                     if (tx.GetStatus() == TransactionStatus.Started) tx.Commit();
                 }
             }
+            catch (Exception ex)
+            {
+                failed++;
+                if (firstError == null) firstError = "outer: " + ex.Message;
+            }
+
+            // A MessageBox, not just a status bar update -- the status bar
+            // text was getting silently overwritten by whatever happened
+            // next (e.g. clicking Place Holes right after Scan), so the
+            // diagnostic was being set correctly but never actually seen.
+            if (failed > 0)
+                MessageBox.Show(
+                    string.Format(S._("collisioncheck.mark_failed"), failed, attempted, firstError),
+                    S._("collisioncheck.title"), MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+
+        // The Z-height detail curves must be drawn at for this view to
+        // accept them, tried in order of reliability: a Floor/Ceiling
+        // Plan's own associated level (always present for that view type,
+        // unlike SketchPlane which may well be null), then SketchPlane
+        // (covers Section/Elevation/Drafting views, which don't have a
+        // GenLevel), then the view's own Origin as a last resort.
+        private static double? GetViewPlaneZ(View view)
+        {
+            try { if (view is ViewPlan vp && vp.GenLevel != null) return vp.GenLevel.Elevation; }
             catch { }
+            try
+            {
+                var plane = view.SketchPlane?.GetPlane();
+                if (plane != null) return plane.Origin.Z;
+            }
+            catch { }
+            try { return view.Origin.Z; }
+            catch { }
+            return null;
         }
 
         // Removes just the circle for one specific collision, immediately

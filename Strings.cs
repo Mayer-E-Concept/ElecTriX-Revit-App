@@ -949,6 +949,7 @@ namespace METools
             ["collisioncheck.time_days_ago"]  = "{0} d ago",
             ["collisioncheck.error_prefix"]   = "ERROR --",
             ["collisioncheck.rescan_to_refresh_marks"] = "Scan again to refresh the red marks.",
+            ["collisioncheck.mark_failed"]    = "{0}/{1} red mark(s) failed: {2}",
 
             // ── Statistics categories ─────────────────────────────────────
             ["stats.sockets"]           = "Sockets",
@@ -1895,6 +1896,7 @@ namespace METools
             ["collisioncheck.time_days_ago"]  = "vor {0} Tg.",
             ["collisioncheck.error_prefix"]   = "FEHLER --",
             ["collisioncheck.rescan_to_refresh_marks"] = "Erneut scannen, um die roten Markierungen zu aktualisieren.",
+            ["collisioncheck.mark_failed"]    = "{0}/{1} rote Markierung(en) fehlgeschlagen: {2}",
 
             ["stats.sockets"]           = "Steckdosen",
             ["stats.switches"]          = "Schalter",
@@ -2838,6 +2840,7 @@ namespace METools
             ["collisioncheck.time_days_ago"]  = "acum {0} z",
             ["collisioncheck.error_prefix"]   = "EROARE --",
             ["collisioncheck.rescan_to_refresh_marks"] = "Scanati din nou pentru a actualiza marcajele rosii.",
+            ["collisioncheck.mark_failed"]    = "{0}/{1} marcaj(e) rosii au esuat: {2}",
 
             ["stats.sockets"]           = "Prize",
             ["stats.switches"]          = "Intrerupatoare",
