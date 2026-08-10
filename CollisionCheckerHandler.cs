@@ -32,6 +32,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Autodesk.Revit.DB;
+using Autodesk.Revit.DB.Electrical;
 using Autodesk.Revit.DB.ExtensibleStorage;
 using Autodesk.Revit.DB.Structure;
 using Autodesk.Revit.UI;
@@ -375,6 +376,7 @@ namespace METools.CollisionChecker
                             }
 
                             FamilyInstance instance = null;
+                            bool placedWithExplicitDirection = false;
 
                             // Tried in order regardless of the family's
                             // reported FamilyPlacementType -- that enum's
@@ -385,10 +387,12 @@ namespace METools.CollisionChecker
 
                             // 1) Face-hosted (WorkPlaneBased-style families)
                             // -- hosted BY THE WALL, at the exact collision
-                            // point (c.Point). The run itself is never
-                            // passed as a host anywhere in this method; it's
-                            // only ever used to compute where the crossing
-                            // point is, upstream in ScanForCollisions.
+                            // point (c.Point), oriented via `direction`
+                            // (the wall's own direction, set above) at
+                            // creation time. The run itself is never passed
+                            // as a host anywhere in this method; it's only
+                            // ever used to compute where the crossing point
+                            // is, upstream in ScanForCollisions.
                             if (instance == null)
                             {
                                 try
@@ -398,7 +402,10 @@ namespace METools.CollisionChecker
                                     {
                                         var face = wall.GetGeometryObjectFromReference(faceRef) as Face;
                                         if (face != null)
+                                        {
                                             instance = doc.Create.NewFamilyInstance(face, c.Point, direction, symbol);
+                                            placedWithExplicitDirection = true;
+                                        }
                                     }
                                 }
                                 catch (Exception ex) { attempts.Add("face-hosted: " + ex.Message); }
@@ -440,6 +447,47 @@ namespace METools.CollisionChecker
                                 continue;
                             }
 
+                            // Methods 2/3/4 place at the family's own default
+                            // rotation, since none of those overloads accept
+                            // a direction the way the face-hosted one does --
+                            // rotate explicitly to match the wall afterward.
+                            // Assumes the default (unrotated) orientation
+                            // aligns with global X, the common Family Editor
+                            // convention -- flag this assumption if the
+                            // rotation still looks off after this.
+                            if (!placedWithExplicitDirection)
+                            {
+                                try
+                                {
+                                    double angle = Math.Atan2(direction.Y, direction.X);
+                                    if (Math.Abs(angle) > 1e-6)
+                                    {
+                                        var axis = Line.CreateBound(c.Point, c.Point + XYZ.BasisZ);
+                                        ElementTransformUtils.RotateElement(doc, instance.Id, axis, angle);
+                                    }
+                                }
+                                catch (Exception ex) { attempts.Add("rotate: " + ex.Message); }
+                            }
+
+                            // Length = the run's own cross-section dimension
+                            // (cable tray width, or conduit diameter), Width
+                            // = the wall's thickness -- per the family's own
+                            // documented convention. Only the base dimension
+                            // is set; any "extra per side" clearance is
+                            // assumed to already be handled inside the
+                            // family's own formula, per how this was
+                            // described -- if it isn't, the visible result
+                            // will be short by that amount on each side.
+                            var dimAttempts = new List<string>();
+                            try { ApplyHoleDimensions(instance, run, wall, dimAttempts); }
+                            catch (Exception ex) { dimAttempts.Add("dimensions: " + ex.Message); }
+                            if (dimAttempts.Count > 0)
+                            {
+                                result.DimensionWarnings++;
+                                if (result.FirstDimensionWarning == null)
+                                    result.FirstDimensionWarning = string.Join(" | ", dimAttempts);
+                            }
+
                             LinkHoleToRunAndWall(doc, instance.UniqueId, run.UniqueId, wall.UniqueId);
                             result.Placed++;
                             result.PlacedHoleByRowId[c.Id] = instance.Id;
@@ -465,6 +513,7 @@ namespace METools.CollisionChecker
             var summary = $"Placed {result.Placed} hole(s)";
             if (result.Skipped > 0) summary += $", {result.Skipped} skipped";
             if (result.Errors  > 0) summary += $", {result.Errors} errors: " + result.ErrorMessages.FirstOrDefault();
+            if (result.DimensionWarnings > 0) summary += $", {result.DimensionWarnings} placed with a dimension parameter not found ({result.FirstDimensionWarning})";
             Report(summary);
             OnDone?.Invoke(result);
         }
@@ -539,6 +588,81 @@ namespace METools.CollisionChecker
                 catch { }
             }
             return best;
+        }
+
+        // Sets the placed hole's Length parameter to the run's own cross-
+        // section dimension (cable tray width, or conduit diameter) and its
+        // Width parameter to the wall's thickness, per how this was
+        // described: "same length as the cable tray width... width is the
+        // same as the wall width." Tries several plausible parameter names
+        // (German first, since the family itself is German-named) rather
+        // than a single hardcoded one, since the exact names weren't
+        // confirmed. Any "extra per side" clearance is assumed to already
+        // be handled inside the family's own formula from the base Length
+        // value, per how this was described -- if it isn't, the visible
+        // result will come out short by that amount on each side.
+        private static void ApplyHoleDimensions(Element instance, Element run, Wall wall, List<string> attempts)
+        {
+            var crossDim = GetRunCrossDimension(run);
+            if (crossDim.HasValue)
+            {
+                var lengthParam = FindParameterByNames(instance, "Länge", "Length", "L");
+                if (lengthParam != null && !lengthParam.IsReadOnly && lengthParam.StorageType == StorageType.Double)
+                    lengthParam.Set(crossDim.Value);
+                else
+                    attempts.Add("no writable Length-like parameter found (tried Länge/Length/L)");
+            }
+            else
+            {
+                attempts.Add("couldn't read the run's own width/diameter to size Length from");
+            }
+
+            var widthParam = FindParameterByNames(instance, "Breite", "Width", "B");
+            if (widthParam != null && !widthParam.IsReadOnly && widthParam.StorageType == StorageType.Double)
+                widthParam.Set(wall.Width);
+            else
+                attempts.Add("no writable Width-like parameter found (tried Breite/Width/B)");
+        }
+
+        private static Parameter FindParameterByNames(Element el, params string[] names)
+        {
+            foreach (var name in names)
+            {
+                try
+                {
+                    var p = el.LookupParameter(name);
+                    if (p != null) return p;
+                }
+                catch { }
+            }
+            return null;
+        }
+
+        // Cable tray width comes from the confirmed BuiltInParameter
+        // (RBS_CABLETRAY_WIDTH_PARAM). Conduit diameter is read by name
+        // instead of a BuiltInParameter, since that specific enum member
+        // wasn't independently confirmed and a wrong enum name is a
+        // compile-time error, not a recoverable runtime one -- LookupParameter
+        // by name degrades safely if none of the candidates match.
+        private static double? GetRunCrossDimension(Element run)
+        {
+            try
+            {
+                if (run is CableTray tray)
+                {
+                    var p = tray.get_Parameter(BuiltInParameter.RBS_CABLETRAY_WIDTH_PARAM);
+                    if (p != null && p.HasValue) return p.AsDouble();
+                }
+                string[] candidates = { "Diameter", "Outside Diameter", "Außendurchmesser", "Durchmesser", "Width", "Breite" };
+                foreach (var name in candidates)
+                {
+                    var p = run.LookupParameter(name);
+                    if (p != null && p.HasValue && p.StorageType == StorageType.Double)
+                        return p.AsDouble();
+                }
+            }
+            catch { }
+            return null;
         }
 
         private void Report(string msg) => OnStatus?.Invoke(msg);

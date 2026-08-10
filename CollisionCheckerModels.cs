@@ -70,6 +70,12 @@ namespace METools.CollisionChecker
         // result list can show exactly why each failed row failed, not
         // just a total count.
         public Dictionary<string, string> ErrorByRowId { get; set; } = new Dictionary<string, string>();
+        // A hole was placed successfully but a Length/Width-like parameter
+        // wasn't found on it by any of the guessed names -- not a failure
+        // (the hole IS there), so it's tracked separately from Errors
+        // rather than making a successful row look like it failed.
+        public int DimensionWarnings { get; set; }
+        public string FirstDimensionWarning { get; set; }
     }
 
     // One loaded family/type the user can pick as the hole marker.
