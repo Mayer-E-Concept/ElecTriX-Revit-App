@@ -41,6 +41,28 @@ namespace METools.CollisionChecker
         private static readonly Dictionary<Document, Dictionary<string, List<(string HoleUniqueId, string WallUniqueId)>>> _cache
             = new Dictionary<Document, Dictionary<string, List<(string HoleUniqueId, string WallUniqueId)>>>();
 
+        // Last scan results per document, so closing and reopening the
+        // Collision Checker window (without closing the document itself)
+        // doesn't lose what was already found -- session-level only, not
+        // persisted to disk, since it's just a convenience cache of
+        // something a fresh Scan can always reproduce. Shares this file's
+        // existing DocumentClosing hook for cleanup rather than adding a
+        // second one.
+        private static readonly Dictionary<Document, (List<CollisionInfo> Collisions, DateTime ScannedAt)> _scanCache
+            = new Dictionary<Document, (List<CollisionInfo> Collisions, DateTime ScannedAt)>();
+
+        public static void SaveScanResults(Document doc, List<CollisionInfo> collisions)
+        {
+            try { _scanCache[doc] = (collisions, DateTime.Now); } catch { }
+        }
+
+        public static (List<CollisionInfo> Collisions, DateTime ScannedAt)? GetScanResults(Document doc)
+        {
+            try { if (doc != null && _scanCache.TryGetValue(doc, out var entry)) return entry; }
+            catch { }
+            return null;
+        }
+
         // Call once from App.OnStartup -- this is a valid API context, so
         // the ExternalEvent can be created proactively here rather than
         // lazily on first use from a context that isn't valid (see
@@ -63,6 +85,7 @@ namespace METools.CollisionChecker
         private static void OnDocumentClosing(object sender, DocumentClosingEventArgs e)
         {
             try { _cache.Remove(e.Document); } catch { }
+            try { _scanCache.Remove(e.Document); } catch { }
         }
 
         private static void OnDocumentOpened(object sender, DocumentOpenedEventArgs e)

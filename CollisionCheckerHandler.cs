@@ -590,79 +590,77 @@ namespace METools.CollisionChecker
             return best;
         }
 
-        // Sets the placed hole's Length parameter to the run's own cross-
-        // section dimension (cable tray width, or conduit diameter) and its
-        // Width parameter to the wall's thickness, per how this was
-        // described: "same length as the cable tray width... width is the
-        // same as the wall width." Tries several plausible parameter names
-        // (German first, since the family itself is German-named) rather
-        // than a single hardcoded one, since the exact names weren't
-        // confirmed. Any "extra per side" clearance is assumed to already
-        // be handled inside the family's own formula from the base Length
-        // value, per how this was described -- if it isn't, the visible
-        // result will come out short by that amount on each side.
+        // Sets the placed hole's dimensional parameters -- exact names
+        // confirmed directly from the family's own Properties panel:
+        //   Tiefe            = how far the opening penetrates = the wall's
+        //                      own thickness
+        //   Trassenbreite    = the run's cross-section width (cable tray
+        //                      width, or conduit diameter)
+        //   Trassenhöhe      = the run's cross-section height (cable tray
+        //                      height, or conduit diameter again for a
+        //                      round conduit -- no separate width/height)
+        //
+        // Deliberately NOT touched: the X_Überstand_*_User / Z_Überstand_*_User
+        // clearance parameters -- those are already set correctly on the
+        // family itself and must stay exactly as configured there.
         private static void ApplyHoleDimensions(Element instance, Element run, Wall wall, List<string> attempts)
         {
-            var crossDim = GetRunCrossDimension(run);
-            if (crossDim.HasValue)
+            SetDoubleParam(instance, "Tiefe", wall.Width, attempts);
+
+            GetRunCrossDimensions(run, out var crossWidth, out var crossHeight);
+            if (crossWidth.HasValue)  SetDoubleParam(instance, "Trassenbreite", crossWidth.Value, attempts);
+            else attempts.Add("couldn't read the run's own width to set Trassenbreite from");
+            if (crossHeight.HasValue) SetDoubleParam(instance, "Trassenhöhe", crossHeight.Value, attempts);
+            else attempts.Add("couldn't read the run's own height to set Trassenhöhe from");
+        }
+
+        private static void SetDoubleParam(Element el, string name, double value, List<string> attempts)
+        {
+            try
             {
-                var lengthParam = FindParameterByNames(instance, "Länge", "Length", "L");
-                if (lengthParam != null && !lengthParam.IsReadOnly && lengthParam.StorageType == StorageType.Double)
-                    lengthParam.Set(crossDim.Value);
+                var p = el.LookupParameter(name);
+                if (p != null && !p.IsReadOnly && p.StorageType == StorageType.Double)
+                    p.Set(value);
                 else
-                    attempts.Add("no writable Length-like parameter found (tried Länge/Length/L)");
+                    attempts.Add($"no writable '{name}' parameter found on the hole family");
             }
-            else
-            {
-                attempts.Add("couldn't read the run's own width/diameter to size Length from");
-            }
-
-            var widthParam = FindParameterByNames(instance, "Breite", "Width", "B");
-            if (widthParam != null && !widthParam.IsReadOnly && widthParam.StorageType == StorageType.Double)
-                widthParam.Set(wall.Width);
-            else
-                attempts.Add("no writable Width-like parameter found (tried Breite/Width/B)");
+            catch (Exception ex) { attempts.Add($"'{name}': {ex.Message}"); }
         }
 
-        private static Parameter FindParameterByNames(Element el, params string[] names)
+        // Cable tray width/height come from the confirmed BuiltInParameters
+        // (RBS_CABLETRAY_WIDTH_PARAM / RBS_CABLETRAY_HEIGHT_PARAM). Conduit
+        // diameter is read by name instead of a BuiltInParameter, since
+        // that specific enum member wasn't independently confirmed and a
+        // wrong enum name is a compile-time error, not a recoverable
+        // runtime one -- LookupParameter by name degrades safely if none of
+        // the candidates match. A round conduit has no separate width vs
+        // height, so both come out equal to its diameter.
+        private static void GetRunCrossDimensions(Element run, out double? width, out double? height)
         {
-            foreach (var name in names)
-            {
-                try
-                {
-                    var p = el.LookupParameter(name);
-                    if (p != null) return p;
-                }
-                catch { }
-            }
-            return null;
-        }
-
-        // Cable tray width comes from the confirmed BuiltInParameter
-        // (RBS_CABLETRAY_WIDTH_PARAM). Conduit diameter is read by name
-        // instead of a BuiltInParameter, since that specific enum member
-        // wasn't independently confirmed and a wrong enum name is a
-        // compile-time error, not a recoverable runtime one -- LookupParameter
-        // by name degrades safely if none of the candidates match.
-        private static double? GetRunCrossDimension(Element run)
-        {
+            width = null; height = null;
             try
             {
                 if (run is CableTray tray)
                 {
-                    var p = tray.get_Parameter(BuiltInParameter.RBS_CABLETRAY_WIDTH_PARAM);
-                    if (p != null && p.HasValue) return p.AsDouble();
+                    var wp = tray.get_Parameter(BuiltInParameter.RBS_CABLETRAY_WIDTH_PARAM);
+                    if (wp != null && wp.HasValue) width = wp.AsDouble();
+                    var hp = tray.get_Parameter(BuiltInParameter.RBS_CABLETRAY_HEIGHT_PARAM);
+                    if (hp != null && hp.HasValue) height = hp.AsDouble();
+                    return;
                 }
-                string[] candidates = { "Diameter", "Outside Diameter", "Außendurchmesser", "Durchmesser", "Width", "Breite" };
+                string[] candidates = { "Diameter", "Outside Diameter", "Außendurchmesser", "Durchmesser" };
                 foreach (var name in candidates)
                 {
                     var p = run.LookupParameter(name);
                     if (p != null && p.HasValue && p.StorageType == StorageType.Double)
-                        return p.AsDouble();
+                    {
+                        width = p.AsDouble();
+                        height = p.AsDouble();
+                        return;
+                    }
                 }
             }
             catch { }
-            return null;
         }
 
         private void Report(string msg) => OnStatus?.Invoke(msg);

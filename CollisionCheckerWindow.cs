@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Media;
 using Autodesk.Revit.DB;
 using Autodesk.Revit.UI;
@@ -27,17 +28,21 @@ namespace METools.CollisionChecker
         private ScanScope _scope = ScanScope.WholeModel;
         private Button _btnScopeModel, _btnScopeView, _btnScopeSel;
         private TextBlock _lblSummary;
+        private TextBlock _lblLastScanned;
 
         private ComboBox _cbHoleSymbol;
+        private CollisionCheckerSettingsData _settingsData;
         private TextBox  _tbHoleSearch;
         private List<HoleSymbolOption> _holeSymbols = new List<HoleSymbolOption>();
 
         private List<CollisionInfo> _collisions = new List<CollisionInfo>();
         private readonly List<ElementId> _markerIds = new List<ElementId>();
+        private readonly Dictionary<string, List<ElementId>> _markersByCollisionId = new Dictionary<string, List<ElementId>>();
         private StackPanel _resultList;
         private readonly HashSet<string> _checkedRowIds = new HashSet<string>();
         private readonly Dictionary<string, CheckBox>  _rowChecks = new Dictionary<string, CheckBox>();
         private readonly Dictionary<string, TextBlock> _rowStatus = new Dictionary<string, TextBlock>();
+        private readonly HashSet<string> _expandedGroups = new HashSet<string>();
 
         private Button _btnPlaceHoles;
 
@@ -45,6 +50,7 @@ namespace METools.CollisionChecker
         {
             _uiApp = uiApp; _extEvent = extEvent; _handler = handler;
             S.SetLanguage(SettingsStore.Language ?? "en");
+            _settingsData = CollisionCheckerSettings.Load();
             InitWindow(S._("collisioncheck.title"), 660);
             MaxHeight = Math.Min(780, SystemParameters.WorkArea.Height - 60);
             WireHandler();
@@ -83,6 +89,49 @@ namespace METools.CollisionChecker
             scroll.Content = outer;
             contentGrid.Children.Add(scroll);
             RootDock.Children.Add(contentGrid);
+
+            TryRestoreCachedScan();
+        }
+
+        // If this document already has scan results from an earlier open
+        // of this window (this Revit session), show them again instead of
+        // starting empty -- closing the tool window shouldn't lose what was
+        // already found, only actually closing the document should (see
+        // CollisionCheckerWatcher's DocumentClosing cleanup).
+        private void TryRestoreCachedScan()
+        {
+            var doc = _uiApp?.ActiveUIDocument?.Document;
+            if (doc == null) return;
+            var cached = CollisionCheckerWatcher.GetScanResults(doc);
+            if (cached == null) return;
+
+            _collisions = cached.Value.Collisions;
+            _lblSummary.Text = _collisions.Count == 0
+                ? S._("collisioncheck.none_found")
+                : string.Format(S._("collisioncheck.n_found"), _collisions.Count);
+            RenderResultList();
+            UpdateLastScannedLabel(cached.Value.ScannedAt);
+        }
+
+        private void UpdateLastScannedLabel(DateTime scannedAt)
+        {
+            if (_lblLastScanned == null) return;
+            _lblLastScanned.Visibility = Visibility.Visible;
+            _lblLastScanned.Text = string.Format(S._("collisioncheck.last_scanned"), FormatRelativeTime(scannedAt));
+            // A gentle nudge, not a hard warning -- the model may well not
+            // have changed, but it's been long enough that it's worth a
+            // rescan before trusting this list or placing holes from it.
+            bool stale = (DateTime.Now - scannedAt) > TimeSpan.FromMinutes(30);
+            _lblLastScanned.Foreground = stale ? MeToolsTheme.Br(MeToolsTheme.COrange) : MeToolsTheme.BrMuted;
+        }
+
+        private static string FormatRelativeTime(DateTime when)
+        {
+            var span = DateTime.Now - when;
+            if (span.TotalSeconds < 60) return S._("collisioncheck.time_just_now");
+            if (span.TotalMinutes < 60) return string.Format(S._("collisioncheck.time_min_ago"), (int)span.TotalMinutes);
+            if (span.TotalHours < 24)   return string.Format(S._("collisioncheck.time_hours_ago"), (int)span.TotalHours);
+            return string.Format(S._("collisioncheck.time_days_ago"), (int)span.TotalDays);
         }
 
         // ── Scope ─────────────────────────────────────────────────────────
@@ -111,6 +160,10 @@ namespace METools.CollisionChecker
             Grid.SetColumn(btnScan, 1); scanRow.Children.Add(btnScan);
             sp.Children.Add(scanRow);
 
+            _lblLastScanned = new TextBlock { FontSize = 10, Foreground = MeToolsTheme.BrMuted,
+                Margin = new Thickness(0, 3, 0, 0), TextWrapping = TextWrapping.Wrap, Visibility = Visibility.Collapsed };
+            sp.Children.Add(_lblLastScanned);
+
             return sp;
         }
 
@@ -134,6 +187,15 @@ namespace METools.CollisionChecker
             _cbHoleSymbol = StyledCombo();
             _cbHoleSymbol.DisplayMemberPath = "DisplayName";
             _cbHoleSymbol.ToolTip = S._("collisioncheck.hole_family_hint");
+            _cbHoleSymbol.SelectionChanged += (s, e) =>
+            {
+                var chosen = _cbHoleSymbol.SelectedItem as HoleSymbolOption;
+                if (chosen == null) return;
+                _settingsData = _settingsData ?? new CollisionCheckerSettingsData();
+                _settingsData.HoleFamilyName = chosen.FamilyName;
+                _settingsData.HoleTypeName   = chosen.TypeName;
+                CollisionCheckerSettings.Save(_settingsData);
+            };
             sp.Children.Add(_cbHoleSymbol);
             RefreshHoleSymbols();
             return sp;
@@ -171,9 +233,17 @@ namespace METools.CollisionChecker
             _cbHoleSymbol.ItemsSource = null;
             _cbHoleSymbol.ItemsSource = _holeSymbols;
             if (_holeSymbols.Count == 0) return;
-            var match = prev != null
-                ? _holeSymbols.FirstOrDefault(o => o.FamilyName == prev.FamilyName && o.TypeName == prev.TypeName)
-                : null;
+
+            // Prefer: (1) whatever was already selected before this
+            // refresh, (2) the family/type remembered from a previous
+            // session, (3) the first one alphabetically.
+            HoleSymbolOption match = null;
+            if (prev != null)
+                match = _holeSymbols.FirstOrDefault(o => o.FamilyName == prev.FamilyName && o.TypeName == prev.TypeName);
+            if (match == null && _settingsData != null && !string.IsNullOrEmpty(_settingsData.HoleFamilyName))
+                match = _holeSymbols.FirstOrDefault(o =>
+                    string.Equals(o.FamilyName, _settingsData.HoleFamilyName, StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(o.TypeName, _settingsData.HoleTypeName, StringComparison.OrdinalIgnoreCase));
             _cbHoleSymbol.SelectedItem = match ?? _holeSymbols[0];
         }
 
@@ -226,6 +296,8 @@ namespace METools.CollisionChecker
             RenderResultList();
             HighlightCollisions(doc, uiDoc.ActiveView);
             UpdateStatusBar(_lblSummary.Text);
+            CollisionCheckerWatcher.SaveScanResults(doc, _collisions);
+            UpdateLastScannedLabel(DateTime.Now);
             Dispatcher.BeginInvoke(new Action(ResizeToFitContent), System.Windows.Threading.DispatcherPriority.Background);
         }
 
@@ -244,43 +316,99 @@ namespace METools.CollisionChecker
                 return;
             }
 
-            foreach (var c in _collisions)
+            var byLevel = _collisions
+                .GroupBy(c => string.IsNullOrEmpty(c.LevelName) ? S._("collisioncheck.no_level") : c.LevelName)
+                .OrderBy(g => g.Key, StringComparer.OrdinalIgnoreCase);
+
+            foreach (var levelGroup in byLevel)
             {
-                var row = new Grid { Margin = new Thickness(0, 3, 0, 3) };
-                row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-                row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-                row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-                row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                string levelKey = "L:" + levelGroup.Key;
+                bool levelExpanded = _expandedGroups.Contains(levelKey);
+                _resultList.Children.Add(BuildGroupHeader($"{levelGroup.Key}  ({levelGroup.Count()})", levelExpanded, () => ToggleGroup(levelKey)));
 
-                var cb = new CheckBox { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 0), IsEnabled = !c.HasHole };
-                cb.Checked   += (s, e) => _checkedRowIds.Add(c.Id);
-                cb.Unchecked += (s, e) => _checkedRowIds.Remove(c.Id);
-                Grid.SetColumn(cb, 0); row.Children.Add(cb);
-                _rowChecks[c.Id] = cb;
+                var levelContent = new StackPanel { Visibility = levelExpanded ? Visibility.Visible : Visibility.Collapsed, Margin = new Thickness(16, 2, 0, 4) };
 
-                var levelText = string.IsNullOrEmpty(c.LevelName) ? S._("collisioncheck.no_level") : c.LevelName;
-                var info = new TextBlock
+                var byCategory = levelGroup.GroupBy(c => c.ElementCategory).OrderBy(g => g.Key, StringComparer.OrdinalIgnoreCase);
+                foreach (var catGroup in byCategory)
                 {
-                    Text = $"{c.ElementCategory} \"{c.ElementTypeName}\"  \u2192  {c.WallTypeName}  \u2014  {levelText}",
-                    FontSize = 11, VerticalAlignment = VerticalAlignment.Center, TextWrapping = TextWrapping.Wrap,
-                };
-                Grid.SetColumn(info, 1); row.Children.Add(info);
+                    string catKey = levelKey + "|C:" + catGroup.Key;
+                    bool catExpanded = _expandedGroups.Contains(catKey);
+                    levelContent.Children.Add(BuildGroupHeader($"{catGroup.Key}  ({catGroup.Count()})", catExpanded, () => ToggleGroup(catKey)));
 
-                var status = new TextBlock
-                {
-                    Text = c.HasHole ? S._("collisioncheck.hole_placed") : "",
-                    FontSize = 10, Foreground = MeToolsTheme.BrPetrol, FontWeight = FontWeights.SemiBold,
-                    VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(6, 0, 6, 0),
-                };
-                Grid.SetColumn(status, 2); row.Children.Add(status);
-                _rowStatus[c.Id] = status;
+                    var catContent = new StackPanel { Visibility = catExpanded ? Visibility.Visible : Visibility.Collapsed, Margin = new Thickness(16, 2, 0, 4) };
+                    foreach (var c in catGroup)
+                        catContent.Children.Add(BuildCollisionRow(c));
+                    levelContent.Children.Add(catContent);
+                }
 
-                var btnGo = ActionBtn(S._("collisioncheck.go_to"), true, () => OnGoToClicked(c));
-                btnGo.Padding = new Thickness(10, 0, 10, 0);
-                Grid.SetColumn(btnGo, 3); row.Children.Add(btnGo);
-
-                _resultList.Children.Add(row);
+                _resultList.Children.Add(levelContent);
             }
+        }
+
+        // Expand state is keyed by a path string ("L:<level>" or
+        // "L:<level>|C:<category>") rather than an index, so it survives a
+        // full RenderResultList() rebuild (e.g. after a re-scan) as long as
+        // the same level/category names still exist.
+        private void ToggleGroup(string key)
+        {
+            if (!_expandedGroups.Remove(key)) _expandedGroups.Add(key);
+            RenderResultList();
+        }
+
+        private Border BuildGroupHeader(string text, bool expanded, Action onClick)
+        {
+            var border = new Border
+            {
+                Background = MeToolsTheme.BrSurface, CornerRadius = new CornerRadius(4),
+                Padding = new Thickness(8, 5, 8, 5), Margin = new Thickness(0, 2, 0, 2), Cursor = Cursors.Hand,
+            };
+            var row = new StackPanel { Orientation = Orientation.Horizontal };
+            row.Children.Add(new TextBlock { Text = expanded ? "\u25BC" : "\u25B6", FontSize = 9,
+                Foreground = MeToolsTheme.BrMuted, Margin = new Thickness(0, 0, 6, 0), VerticalAlignment = VerticalAlignment.Center });
+            row.Children.Add(new TextBlock { Text = text, FontSize = 12, FontWeight = FontWeights.SemiBold, Foreground = MeToolsTheme.BrText });
+            border.Child = row;
+            border.MouseLeftButtonUp += (s, e) => onClick();
+            return border;
+        }
+
+        private Grid BuildCollisionRow(CollisionInfo c)
+        {
+            var row = new Grid { Margin = new Thickness(0, 3, 0, 3) };
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var cb = new CheckBox { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 0), IsEnabled = !c.HasHole };
+            cb.Checked   += (s, e) => _checkedRowIds.Add(c.Id);
+            cb.Unchecked += (s, e) => _checkedRowIds.Remove(c.Id);
+            Grid.SetColumn(cb, 0); row.Children.Add(cb);
+            _rowChecks[c.Id] = cb;
+
+            // Level and category are now conveyed by the group headers
+            // above this row, so the row itself only needs to say which
+            // specific type crossed which specific wall.
+            var info = new TextBlock
+            {
+                Text = $"\"{c.ElementTypeName}\"  \u2192  {c.WallTypeName}",
+                FontSize = 11, VerticalAlignment = VerticalAlignment.Center, TextWrapping = TextWrapping.Wrap,
+            };
+            Grid.SetColumn(info, 1); row.Children.Add(info);
+
+            var status = new TextBlock
+            {
+                Text = c.HasHole ? S._("collisioncheck.hole_placed") : "",
+                FontSize = 10, Foreground = MeToolsTheme.BrPetrol, FontWeight = FontWeights.SemiBold,
+                VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(6, 0, 6, 0),
+            };
+            Grid.SetColumn(status, 2); row.Children.Add(status);
+            _rowStatus[c.Id] = status;
+
+            var btnGo = ActionBtn(S._("collisioncheck.go_to"), true, () => OnGoToClicked(c));
+            btnGo.Padding = new Thickness(10, 0, 10, 0);
+            Grid.SetColumn(btnGo, 3); row.Children.Add(btnGo);
+
+            return row;
         }
 
         private void SetAllChecked(bool value)
@@ -301,12 +429,28 @@ namespace METools.CollisionChecker
         private void OnGoToClicked(CollisionInfo c)
         {
             var uiDoc = _uiApp?.ActiveUIDocument;
-            if (uiDoc == null) return;
+            if (uiDoc == null || c.Point == null) return;
             try
             {
-                var ids = new List<ElementId> { c.ElementId };
-                uiDoc.Selection.SetElementIds(ids);
-                uiDoc.ShowElements(c.ElementId);
+                var idToSelect = c.HasHole ? c.HoleInstanceId : c.ElementId;
+                uiDoc.Selection.SetElementIds(new List<ElementId> { idToSelect });
+
+                // ShowElements() fits the WHOLE run element, which is why
+                // it used to jump out to show the entire cable tray/conduit
+                // instead of the specific spot. Zooming a tight box around
+                // the actual collision point instead keeps the crossing
+                // itself centered and legible regardless of how long the
+                // run is.
+                var view = uiDoc.ActiveView;
+                var uiView = uiDoc.GetOpenUIViews().FirstOrDefault(uv => uv.ViewId.Equals(view.Id));
+                if (uiView != null)
+                {
+                    double half = 3.0; // ~0.9m half-extent -- a tight, legible close-up
+                    var p = c.Point;
+                    uiView.ZoomAndCenterRectangle(
+                        new XYZ(p.X - half, p.Y - half, p.Z - half),
+                        new XYZ(p.X + half, p.Y + half, p.Z + half));
+                }
             }
             catch { }
         }
@@ -332,16 +476,7 @@ namespace METools.CollisionChecker
                     {
                         try { doc.Delete(_markerIds); } catch { }
                         _markerIds.Clear();
-                    }
-
-                    // Also clear any leftover element-level override from an
-                    // earlier version of this tool, in case one is still on
-                    // a run from before.
-                    var clear = new OverrideGraphicSettings();
-                    foreach (var c in _collisions)
-                    {
-                        try { view.SetElementOverrides(c.ElementId, clear); }
-                        catch { }
+                        _markersByCollisionId.Clear();
                     }
 
                     // Detail Lines are a 2D, view-specific annotation and
@@ -349,30 +484,68 @@ namespace METools.CollisionChecker
                     // there rather than throwing on every single one.
                     if (!(view is View3D))
                     {
+                        // The actual bug that made nothing ever appear:
+                        // NewDetailCurve throws "Curve must be in the
+                        // plane" (a documented, deliberate Revit behavior)
+                        // unless the curve lies EXACTLY on the view's own
+                        // sketch plane -- the collision point's real 3D
+                        // height essentially never matches that exactly, so
+                        // every single creation attempt was throwing and
+                        // being silently swallowed by the catch below.
+                        Plane viewPlane = null;
+                        try { viewPlane = view.SketchPlane?.GetPlane(); } catch { }
+
                         var red = new Autodesk.Revit.DB.Color(226, 42, 42);
                         var ogs = new OverrideGraphicSettings();
                         try { ogs.SetProjectionLineColor(red); ogs.SetProjectionLineWeight(7); } catch { }
 
-                        double armFt = 300.0 / 304.8; // ~300mm, a visible size regardless of view scale
-                        XYZ right = view.RightDirection;
-                        XYZ up    = view.UpDirection;
+                        double radiusFt = 250.0 / 304.8; // ~250mm radius -- visible regardless of view scale
 
                         foreach (var c in _collisions)
                         {
                             if (c.HasHole || c.Point == null) continue;
                             try
                             {
-                                var p = c.Point;
-                                var rightArm = right.Multiply(armFt);
-                                var upArm    = up.Multiply(armFt);
-                                var line1 = Line.CreateBound(p - rightArm - upArm, p + rightArm + upArm);
-                                var line2 = Line.CreateBound(p - rightArm + upArm, p + rightArm - upArm);
-                                var dc1 = doc.Create.NewDetailCurve(view, line1);
-                                var dc2 = doc.Create.NewDetailCurve(view, line2);
+                                XYZ center; XYZ xAxis, yAxis;
+                                if (viewPlane != null)
+                                {
+                                    // Project onto the view's plane: remove
+                                    // whatever component of the point sits
+                                    // along the plane's own normal.
+                                    var offset = c.Point - viewPlane.Origin;
+                                    var alongNormal = offset.DotProduct(viewPlane.Normal);
+                                    center = c.Point - viewPlane.Normal.Multiply(alongNormal);
+                                    xAxis = viewPlane.XVec;
+                                    yAxis = viewPlane.YVec;
+                                }
+                                else
+                                {
+                                    center = c.Point;
+                                    xAxis = view.RightDirection;
+                                    yAxis = view.UpDirection;
+                                }
+
+                                // A circle, as two half-circle arcs (Revit
+                                // detail curves can't be a single closed
+                                // loop) on a plane centered exactly at the
+                                // (projected) collision point.
+                                var centeredPlane = Plane.CreateByOriginAndBasis(center, xAxis, yAxis);
+                                var arc1 = Arc.Create(centeredPlane, radiusFt, 0, Math.PI);
+                                var arc2 = Arc.Create(centeredPlane, radiusFt, Math.PI, 2 * Math.PI);
+                                var dc1 = doc.Create.NewDetailCurve(view, arc1);
+                                var dc2 = doc.Create.NewDetailCurve(view, arc2);
                                 view.SetElementOverrides(dc1.Id, ogs);
                                 view.SetElementOverrides(dc2.Id, ogs);
+
                                 _markerIds.Add(dc1.Id);
                                 _markerIds.Add(dc2.Id);
+                                if (!_markersByCollisionId.TryGetValue(c.Id, out var list))
+                                {
+                                    list = new List<ElementId>();
+                                    _markersByCollisionId[c.Id] = list;
+                                }
+                                list.Add(dc1.Id);
+                                list.Add(dc2.Id);
                             }
                             catch { }
                         }
@@ -382,6 +555,32 @@ namespace METools.CollisionChecker
                 }
             }
             catch { }
+        }
+
+        // Removes just the circle for one specific collision, immediately
+        // after its hole is placed, rather than waiting for the next Scan
+        // to redraw everything. Runs in its own small transaction -- called
+        // from HandlePlaceResult, which itself runs via Dispatcher.Invoke
+        // from inside the ExternalEvent's Execute(), i.e. still within a
+        // valid API context on the same thread.
+        private void RemoveMarkerFor(Document doc, string collisionId)
+        {
+            if (doc == null || !_markersByCollisionId.TryGetValue(collisionId, out var ids) || ids.Count == 0) return;
+            try
+            {
+                using (var tx = new Transaction(doc, "ME-Tools: Clear resolved collision mark"))
+                {
+                    tx.Start();
+                    try { doc.Delete(ids); } catch { }
+                    if (tx.GetStatus() == TransactionStatus.Started) tx.Commit();
+                }
+            }
+            catch { }
+            finally
+            {
+                foreach (var id in ids) _markerIds.Remove(id);
+                _markersByCollisionId.Remove(collisionId);
+            }
         }
 
         // ── Place holes ───────────────────────────────────────────────────
@@ -440,6 +639,8 @@ namespace METools.CollisionChecker
                 if (_rowChecks.TryGetValue(c.Id, out var cb)) { cb.IsChecked = false; cb.IsEnabled = false; }
                 if (_rowStatus.TryGetValue(c.Id, out var st)) st.Text = S._("collisioncheck.hole_placed");
                 _checkedRowIds.Remove(c.Id);
+
+                RemoveMarkerFor(doc, c.Id);
             }
 
             // Rows that specifically failed (not just skipped) show their
@@ -459,7 +660,6 @@ namespace METools.CollisionChecker
             var summary = string.Format(S._("collisioncheck.placed_summary"), result.Placed);
             if (result.Skipped > 0) summary += string.Format(S._("collisioncheck.n_skipped"), result.Skipped);
             if (result.Errors  > 0) summary += string.Format(S._("collisioncheck.n_errors"), result.Errors);
-            if (result.Placed > 0) summary += " " + S._("collisioncheck.rescan_to_refresh_marks");
             UpdateStatusBar(summary);
         }
     }
