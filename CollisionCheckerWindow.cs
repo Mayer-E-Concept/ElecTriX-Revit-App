@@ -29,6 +29,7 @@ namespace METools.CollisionChecker
         private TextBlock _lblSummary;
 
         private ComboBox _cbHoleSymbol;
+        private TextBox  _tbHoleSearch;
         private List<HoleSymbolOption> _holeSymbols = new List<HoleSymbolOption>();
 
         private List<CollisionInfo> _collisions = new List<CollisionInfo>();
@@ -126,12 +127,39 @@ namespace METools.CollisionChecker
         {
             var sp = new StackPanel();
             sp.Children.Add(SecH(S._("collisioncheck.hole_family")));
+
+            sp.Children.Add(CompactField(S._("collisioncheck.search"), S._("collisioncheck.search_hint"), 220, out _tbHoleSearch));
+            _tbHoleSearch.TextChanged += (s, e) => FilterHoleSymbols(_tbHoleSearch.Text);
+
             _cbHoleSymbol = StyledCombo();
             _cbHoleSymbol.DisplayMemberPath = "DisplayName";
             _cbHoleSymbol.ToolTip = S._("collisioncheck.hole_family_hint");
             sp.Children.Add(_cbHoleSymbol);
             RefreshHoleSymbols();
             return sp;
+        }
+
+        // Filters the combo's list to families/types whose name contains
+        // the typed text (case-insensitive), keeping the current selection
+        // if it still matches, and picking the first match otherwise.
+        // Clearing the search box restores the full list.
+        private void FilterHoleSymbols(string search)
+        {
+            if (_cbHoleSymbol == null) return;
+            var prev = _cbHoleSymbol.SelectedItem as HoleSymbolOption;
+
+            var filtered = string.IsNullOrWhiteSpace(search)
+                ? _holeSymbols
+                : _holeSymbols.Where(o => o.DisplayName.IndexOf(search, StringComparison.OrdinalIgnoreCase) >= 0).ToList();
+
+            _cbHoleSymbol.ItemsSource = null;
+            _cbHoleSymbol.ItemsSource = filtered;
+            if (filtered.Count == 0) return;
+
+            var match = prev != null
+                ? filtered.FirstOrDefault(o => o.FamilyName == prev.FamilyName && o.TypeName == prev.TypeName)
+                : null;
+            _cbHoleSymbol.SelectedItem = match ?? filtered[0];
         }
 
         private void RefreshHoleSymbols()
@@ -198,6 +226,7 @@ namespace METools.CollisionChecker
             RenderResultList();
             HighlightCollisions(doc, uiDoc.ActiveView);
             UpdateStatusBar(_lblSummary.Text);
+            Dispatcher.BeginInvoke(new Action(ResizeToFitContent), System.Windows.Threading.DispatcherPriority.Background);
         }
 
         private void RenderResultList()

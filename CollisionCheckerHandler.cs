@@ -122,10 +122,17 @@ namespace METools.CollisionChecker
                     // ElementIntersectsElementFilter, deliberately not used
                     // here) doesn't require either element to have valid
                     // closed solid geometry, just narrows down which walls
-                    // are even worth a precise check.
+                    // are even worth a precise check. Tolerance is generous
+                    // (~600mm) on purpose: this is only a candidate filter
+                    // for performance, and too tight a tolerance here would
+                    // silently exclude a run before FindNearApproachPoint's
+                    // own (separately bounded) fallback ever got a chance to
+                    // run -- exactly what was hiding real collisions for a
+                    // run modeled to stop a little short of the wall face.
                     var runBox = run.get_BoundingBox(null);
                     if (runBox == null) continue;
                     var outline = new Outline(runBox.Min, runBox.Max);
+                    const double quickFilterToleranceFt = 600.0 / 304.8;
 
                     foreach (var wall in walls)
                     {
@@ -133,7 +140,7 @@ namespace METools.CollisionChecker
                         {
                             var wallBox = wall.get_BoundingBox(null);
                             if (wallBox == null) continue;
-                            if (!outline.Intersects(new Outline(wallBox.Min, wallBox.Max), 0.01)) continue;
+                            if (!outline.Intersects(new Outline(wallBox.Min, wallBox.Max), quickFilterToleranceFt)) continue;
 
                             var point = FindCrossingPoint(doc, wall, runCurve);
                             if (point == null) continue;
@@ -321,21 +328,10 @@ namespace METools.CollisionChecker
                     if (!symbol.IsActive) symbol.Activate();
 
                     var placementType = symbol.Family?.FamilyPlacementType ?? FamilyPlacementType.Invalid;
-                    var isFaceHosted = placementType == FamilyPlacementType.WorkPlaneBased;
-                    // The common placement type for "opening in a wall"-style
-                    // families authored like a Door/Window (i.e. requiring a
-                    // host element, but placed at a point rather than on a
-                    // Face reference the way WorkPlaneBased families are).
-                    // Confirmed against Autodesk's docs before adding this --
-                    // NewFamilyInstance(XYZ, FamilySymbol, StructuralType)
-                    // (the fallback below) throws for a family of this type,
-                    // since it has no host to satisfy the family's own
-                    // requirement; it needs the Element-host overload instead.
-                    var isWallHosted = placementType == FamilyPlacementType.OneLevelBasedHosted;
 
                     foreach (var c in req.Collisions)
                     {
-                        string lastError = null;
+                        var attempts = new List<string>();
                         try
                         {
                             var run  = doc.GetElement(c.ElementId);
@@ -346,14 +342,54 @@ namespace METools.CollisionChecker
                                 continue;
                             }
 
-                            var runCurve = (run.Location as LocationCurve)?.Curve;
-                            var direction = runCurve != null
-                                ? (runCurve.GetEndPoint(1) - runCurve.GetEndPoint(0)).Normalize()
+                            // Reference direction for face-hosted placement
+                            // (see case 1 below) -- deliberately the WALL's
+                            // own direction along its length, not the run's.
+                            // A run typically passes straight THROUGH a
+                            // wall, i.e. roughly perpendicular to its face,
+                            // which is a poor in-plane rotation reference
+                            // for that face and could visually read as "the
+                            // marker is oriented off the pipe" rather than
+                            // sitting naturally in the wall. The wall's own
+                            // direction is stable and correct regardless of
+                            // which way the run happens to be crossing it.
+                            var wallCurveForDir = (wall.Location as LocationCurve)?.Curve;
+                            var direction = wallCurveForDir != null
+                                ? (wallCurveForDir.GetEndPoint(1) - wallCurveForDir.GetEndPoint(0)).Normalize()
                                 : XYZ.BasisX;
+
+                            // Resolve a level up front -- several of the
+                            // overloads below need one regardless of which
+                            // placement type this turns out to actually be.
+                            Level level = null;
+                            try
+                            {
+                                var levelId = wall.LevelId != ElementId.InvalidElementId ? wall.LevelId : ResolveLevelId(doc, run);
+                                level = doc.GetElement(levelId) as Level;
+                            }
+                            catch { }
+                            if (level == null)
+                            {
+                                try { level = new FilteredElementCollector(doc).OfClass(typeof(Level)).Cast<Level>().FirstOrDefault(); }
+                                catch { }
+                            }
 
                             FamilyInstance instance = null;
 
-                            if (isFaceHosted)
+                            // Tried in order regardless of the family's
+                            // reported FamilyPlacementType -- that enum's
+                            // exact mapping to the right overload has been
+                            // wrong twice already for this specific family,
+                            // so runtime success/failure is more reliable
+                            // ground truth here than the enum value is.
+
+                            // 1) Face-hosted (WorkPlaneBased-style families)
+                            // -- hosted BY THE WALL, at the exact collision
+                            // point (c.Point). The run itself is never
+                            // passed as a host anywhere in this method; it's
+                            // only ever used to compute where the crossing
+                            // point is, upstream in ScanForCollisions.
+                            if (instance == null)
                             {
                                 try
                                 {
@@ -365,30 +401,42 @@ namespace METools.CollisionChecker
                                             instance = doc.Create.NewFamilyInstance(face, c.Point, direction, symbol);
                                     }
                                 }
-                                catch (Exception ex) { lastError = ex.Message; instance = null; }
-                            }
-                            else if (isWallHosted)
-                            {
-                                try { instance = doc.Create.NewFamilyInstance(c.Point, symbol, wall, StructuralType.NonStructural); }
-                                catch (Exception ex) { lastError = ex.Message; instance = null; }
+                                catch (Exception ex) { attempts.Add("face-hosted: " + ex.Message); }
                             }
 
-                            if (instance == null) // none of the above applied, or the attempt threw/returned null -- last resort: free-standing point placement
+                            // 2) Wall-hosted with an explicit level (Door/
+                            // Window-style families, e.g. OneLevelBasedHosted
+                            // -- confirmed via the actual Revit error message
+                            // that this family needs a level even with a host)
+                            if (instance == null && level != null)
+                            {
+                                try { instance = doc.Create.NewFamilyInstance(c.Point, symbol, wall, level, StructuralType.NonStructural); }
+                                catch (Exception ex) { attempts.Add("wall+level: " + ex.Message); }
+                            }
+
+                            // 3) Level only, no host (OneLevelBased, not hosted)
+                            if (instance == null && level != null)
+                            {
+                                try { instance = doc.Create.NewFamilyInstance(c.Point, symbol, level, StructuralType.NonStructural); }
+                                catch (Exception ex) { attempts.Add("level-only: " + ex.Message); }
+                            }
+
+                            // 4) Bare point placement -- genuinely free-
+                            // standing families only; throws for any
+                            // level-based family, which is the error seen
+                            // twice now, so this is deliberately last.
+                            if (instance == null)
                             {
                                 try { instance = doc.Create.NewFamilyInstance(c.Point, symbol, StructuralType.NonStructural); }
-                                catch (Exception ex) { lastError = ex.Message; instance = null; }
+                                catch (Exception ex) { attempts.Add("free-standing: " + ex.Message); }
                             }
 
                             if (instance == null)
                             {
-                                result.Skipped++;
-                                if (lastError != null)
-                                {
-                                    result.Errors++;
-                                    result.ErrorMessages.Add(lastError);
-                                    result.ErrorByRowId[c.Id] = lastError;
-                                    result.Skipped--; // counted as an error instead, not a plain skip
-                                }
+                                result.Errors++;
+                                var combined = $"[{placementType}] " + (attempts.Count > 0 ? string.Join(" | ", attempts) : "no applicable placement method found");
+                                result.ErrorMessages.Add(combined);
+                                result.ErrorByRowId[c.Id] = combined;
                                 continue;
                             }
 
