@@ -940,6 +940,7 @@ namespace METools
             ["collisioncheck.placed_summary"] = "Placed {0} hole(s).",
             ["collisioncheck.n_skipped"]      = " {0} skipped.",
             ["collisioncheck.n_errors"]       = " {0} errors.",
+            ["collisioncheck.error_prefix"]   = "ERROR --",
             ["collisioncheck.rescan_to_refresh_marks"] = "Scan again to refresh the red marks.",
 
             // ── Statistics categories ─────────────────────────────────────
@@ -1878,6 +1879,7 @@ namespace METools
             ["collisioncheck.placed_summary"] = "{0} Durchbruch/Durchbrüche platziert.",
             ["collisioncheck.n_skipped"]      = " {0} übersprungen.",
             ["collisioncheck.n_errors"]       = " {0} Fehler.",
+            ["collisioncheck.error_prefix"]   = "FEHLER --",
             ["collisioncheck.rescan_to_refresh_marks"] = "Erneut scannen, um die roten Markierungen zu aktualisieren.",
 
             ["stats.sockets"]           = "Steckdosen",
@@ -2813,6 +2815,7 @@ namespace METools
             ["collisioncheck.placed_summary"] = "{0} gaura/gauri plasate.",
             ["collisioncheck.n_skipped"]      = " {0} omise.",
             ["collisioncheck.n_errors"]       = " {0} erori.",
+            ["collisioncheck.error_prefix"]   = "EROARE --",
             ["collisioncheck.rescan_to_refresh_marks"] = "Scanati din nou pentru a actualiza marcajele rosii.",
 
             ["stats.sockets"]           = "Prize",

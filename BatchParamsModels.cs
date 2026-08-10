@@ -37,6 +37,7 @@ namespace METools.BatchParams
         public string Name       { get; set; } = "";
         public bool   IsInstance { get; set; } = true;
         public string DisplayName => IsInstance ? Name : $"{Name} (Type)";
+        public override string ToString() => DisplayName;
     }
 
     public enum RenumberOrderMode { Manual, Path }

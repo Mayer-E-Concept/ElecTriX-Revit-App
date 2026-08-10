@@ -1,27 +1,33 @@
 // CollisionCheckerHandler.cs -- ME-Tools | Collision Checker (conduits/cable trays vs walls)
 // Mayer E-Concept SRL
 //
-// Detection is two-phase, per the project's own established convention
-// (verify Revit API behavior, don't guess -- see NOTES.md) and confirmed
-// against Autodesk's own docs before writing this:
-//   1. FAST pass: ElementIntersectsElementFilter (a "slow filter" per its
-//      own doc page, but still far cheaper than per-pair face geometry)
-//      combined with a BoundingBoxIntersectsFilter-style quick outline
-//      check first, to find which conduit/wall PAIRS actually intersect.
-//   2. PRECISE pass, only for confirmed pairs: Face.Intersect(Curve, out
-//      IntersectionResultArray) against the wall's side faces, which
+// Detection is two-phase:
+//   1. FAST pass: a bounding-box overlap check (Outline.Intersects)
+//      between each run and each wall, to avoid running the precise check
+//      on every pair in the model. Deliberately NOT
+//      ElementIntersectsElementFilter -- that filter requires both
+//      elements to have valid closed solid geometry, and cable trays
+//      (depending on their fitting/shape) don't reliably have that,
+//      which silently dropped real cable-tray/wall collisions in testing
+//      even though conduits (always a simple cylinder) worked fine.
+//   2. PRECISE pass, only for boxes that overlap: Face.Intersect(Curve,
+//      out IntersectionResultArray) against the wall's side faces, which
 //      returns the exact 3D point(s) where the run's centerline crosses
 //      the wall -- needed for the list, the red highlight, "go to", and
-//      hole placement, none of which the fast filter alone can give.
+//      hole placement. This only needs the run's *curve* (always present
+//      via LocationCurve) and the wall's face geometry (always reliable),
+//      so it doesn't have the solid-geometry gap the fast filter had.
 //
 // The link between a placed hole and the run it belongs to (so the hole
 // can follow the run if it's later moved -- see CollisionCheckerWatcher)
 // is stored via Extensible Storage on a single per-document DataStorage
-// element, as a Map<string,string> of run UniqueId -> hole UniqueId. Not
-// on the hole instances themselves individually, because that would need
-// scanning every instance of a family whose category isn't known ahead of
-// time; a DataStorage element is trivial to find and cheap to read/write
-// regardless of what family the hole turns out to be.
+// element, as a Map<string,string> of hole UniqueId -> "runUniqueId|
+// wallUniqueId" (keyed by hole, not run, since one run can cross more
+// than one wall -- see the schema section below for why that matters).
+// Not on the hole instances themselves individually, because that would
+// need scanning every instance of a family whose category isn't known
+// ahead of time; a DataStorage element is trivial to find and cheap to
+// read/write regardless of what family the hole turns out to be.
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -112,14 +118,11 @@ namespace METools.CollisionChecker
                     catch { runCurve = null; }
                     if (runCurve == null) continue;
 
-                    ElementIntersectsElementFilter fastFilter;
-                    try { fastFilter = new ElementIntersectsElementFilter(run); }
-                    catch { continue; }
-
-                    // Quick bounding-box pass first, over just the walls
-                    // list (already small relative to a whole-model
-                    // collector) -- cuts down how many walls actually reach
-                    // the slow ElementIntersectsElementFilter check below.
+                    // Bounding-box pass first -- cheap, and (unlike
+                    // ElementIntersectsElementFilter, deliberately not used
+                    // here) doesn't require either element to have valid
+                    // closed solid geometry, just narrows down which walls
+                    // are even worth a precise check.
                     var runBox = run.get_BoundingBox(null);
                     if (runBox == null) continue;
                     var outline = new Outline(runBox.Min, runBox.Max);
@@ -131,7 +134,6 @@ namespace METools.CollisionChecker
                             var wallBox = wall.get_BoundingBox(null);
                             if (wallBox == null) continue;
                             if (!outline.Intersects(new Outline(wallBox.Min, wallBox.Max), 0.01)) continue;
-                            if (!fastFilter.PassesFilter(wall)) continue;
 
                             var point = FindCrossingPoint(doc, wall, runCurve);
                             if (point == null) continue;
@@ -185,7 +187,8 @@ namespace METools.CollisionChecker
                 }
                 catch { }
             }
-            if (points.Count == 0) return null;
+            if (points.Count == 0)
+                return FindNearApproachPoint(wall, runCurve); // fully missed both faces -- try the more forgiving fallback below
             if (points.Count == 1) return points[0];
 
             // Span the two points that are furthest apart (handles the rare
@@ -200,6 +203,66 @@ namespace METools.CollisionChecker
                     if (d > best) { best = d; a = points[i]; b = points[j]; }
                 }
             return (a + b) * 0.5;
+        }
+
+        // Fallback for a run that doesn't cleanly cross either of the
+        // wall's faces -- e.g. a cable tray explicitly routed to stop right
+        // at (or just short of) a wall rather than modeled straight through
+        // it, which is common practice and something the strict
+        // Face.Intersect check above can't see at all, since there's no
+        // actual face crossing to find in that case.
+        //
+        // Finds the closest-approach point between the run's centerline and
+        // the wall's own centerline (both treated as straight lines -- the
+        // dominant real-world case for conduit/tray runs and orthogonal
+        // walls; curved walls or non-linear runs just don't get this
+        // fallback and rely on the precise check above only). If that
+        // closest approach falls within roughly the wall's half-thickness
+        // plus a small clearance allowance, and within both curves' actual
+        // bounded extents (not off the end of either one), it's treated as
+        // a genuine collision using that closest-approach point.
+        private static XYZ FindNearApproachPoint(Wall wall, Curve runCurve)
+        {
+            try
+            {
+                if (!(runCurve is Line runLine)) return null;
+                var wallCurve = (wall.Location as LocationCurve)?.Curve;
+                if (!(wallCurve is Line wallLine)) return null;
+
+                XYZ p1 = runLine.GetEndPoint(0), d1 = runLine.GetEndPoint(1) - p1;
+                XYZ p2 = wallLine.GetEndPoint(0), d2 = wallLine.GetEndPoint(1) - p2;
+                double len1 = d1.GetLength(), len2 = d2.GetLength();
+                if (len1 < 1e-9 || len2 < 1e-9) return null;
+
+                var w0 = p1 - p2;
+                double a = d1.DotProduct(d1), b = d1.DotProduct(d2), c = d2.DotProduct(d2);
+                double d = d1.DotProduct(w0), e = d2.DotProduct(w0);
+                double denom = a * c - b * b;
+                if (Math.Abs(denom) < 1e-9) return null; // parallel (or nearly so) -- no single closest point, skip
+
+                double t = (b * e - c * d) / denom;
+                double s = (a * e - b * d) / denom;
+                // Clamp to each curve's own bounded extent (t/s are in
+                // "d1"/"d2" units here, i.e. already 0-1 across each curve's
+                // actual length) -- a closest approach off the end of either
+                // curve isn't a real collision.
+                double tClamped = Math.Max(0, Math.Min(1, t));
+                double sClamped = Math.Max(0, Math.Min(1, s));
+                if (Math.Abs(tClamped - t) > 1e-6 || Math.Abs(sClamped - s) > 1e-6) return null;
+
+                XYZ closest1 = p1 + d1.Multiply(tClamped);
+                XYZ closest2 = p2 + d2.Multiply(sClamped);
+                double dist = closest1.DistanceTo(closest2);
+
+                // Half the wall's thickness, plus ~50mm clearance allowance
+                // for a run that was modeled to stop just short of the wall
+                // face rather than exactly at it.
+                double toleranceFt = wall.Width / 2.0 + (50.0 / 304.8);
+                if (dist > toleranceFt) return null;
+
+                return (closest1 + closest2) * 0.5;
+            }
+            catch { return null; }
         }
 
         private static string TypeNameOf(Document doc, Element el)
@@ -258,10 +321,21 @@ namespace METools.CollisionChecker
                     if (!symbol.IsActive) symbol.Activate();
 
                     var placementType = symbol.Family?.FamilyPlacementType ?? FamilyPlacementType.Invalid;
-                    var isFaceHosted  = placementType == FamilyPlacementType.WorkPlaneBased;
+                    var isFaceHosted = placementType == FamilyPlacementType.WorkPlaneBased;
+                    // The common placement type for "opening in a wall"-style
+                    // families authored like a Door/Window (i.e. requiring a
+                    // host element, but placed at a point rather than on a
+                    // Face reference the way WorkPlaneBased families are).
+                    // Confirmed against Autodesk's docs before adding this --
+                    // NewFamilyInstance(XYZ, FamilySymbol, StructuralType)
+                    // (the fallback below) throws for a family of this type,
+                    // since it has no host to satisfy the family's own
+                    // requirement; it needs the Element-host overload instead.
+                    var isWallHosted = placementType == FamilyPlacementType.OneLevelBasedHosted;
 
                     foreach (var c in req.Collisions)
                     {
+                        string lastError = null;
                         try
                         {
                             var run  = doc.GetElement(c.ElementId);
@@ -281,21 +355,40 @@ namespace METools.CollisionChecker
 
                             if (isFaceHosted)
                             {
-                                var faceRef = FindNearestFaceReference(wall, c.Point);
-                                if (faceRef != null)
+                                try
                                 {
-                                    var face = wall.GetGeometryObjectFromReference(faceRef) as Face;
-                                    if (face != null)
-                                        instance = doc.Create.NewFamilyInstance(face, c.Point, direction, symbol);
+                                    var faceRef = FindNearestFaceReference(wall, c.Point);
+                                    if (faceRef != null)
+                                    {
+                                        var face = wall.GetGeometryObjectFromReference(faceRef) as Face;
+                                        if (face != null)
+                                            instance = doc.Create.NewFamilyInstance(face, c.Point, direction, symbol);
+                                    }
                                 }
+                                catch (Exception ex) { lastError = ex.Message; instance = null; }
+                            }
+                            else if (isWallHosted)
+                            {
+                                try { instance = doc.Create.NewFamilyInstance(c.Point, symbol, wall, StructuralType.NonStructural); }
+                                catch (Exception ex) { lastError = ex.Message; instance = null; }
                             }
 
-                            if (instance == null) // WorkPlaneBased placement failed, or family isn't hosted at all
-                                instance = doc.Create.NewFamilyInstance(c.Point, symbol, StructuralType.NonStructural);
+                            if (instance == null) // none of the above applied, or the attempt threw/returned null -- last resort: free-standing point placement
+                            {
+                                try { instance = doc.Create.NewFamilyInstance(c.Point, symbol, StructuralType.NonStructural); }
+                                catch (Exception ex) { lastError = ex.Message; instance = null; }
+                            }
 
                             if (instance == null)
                             {
                                 result.Skipped++;
+                                if (lastError != null)
+                                {
+                                    result.Errors++;
+                                    result.ErrorMessages.Add(lastError);
+                                    result.ErrorByRowId[c.Id] = lastError;
+                                    result.Skipped--; // counted as an error instead, not a plain skip
+                                }
                                 continue;
                             }
 
@@ -307,6 +400,7 @@ namespace METools.CollisionChecker
                         {
                             result.Errors++;
                             result.ErrorMessages.Add(ex.Message);
+                            result.ErrorByRowId[c.Id] = ex.Message;
                         }
                     }
 

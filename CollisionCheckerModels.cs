@@ -66,6 +66,10 @@ namespace METools.CollisionChecker
         // Row id -> the hole instance that got placed for it, so the window
         // can update HasHole on the matching rows without re-scanning.
         public Dictionary<string, Autodesk.Revit.DB.ElementId> PlacedHoleByRowId { get; set; } = new Dictionary<string, Autodesk.Revit.DB.ElementId>();
+        // Row id -> the specific exception message for THAT row, so the
+        // result list can show exactly why each failed row failed, not
+        // just a total count.
+        public Dictionary<string, string> ErrorByRowId { get; set; } = new Dictionary<string, string>();
     }
 
     // One loaded family/type the user can pick as the hole marker.
@@ -77,5 +81,6 @@ namespace METools.CollisionChecker
         public string DisplayName =>
             string.IsNullOrEmpty(TypeName) || string.Equals(TypeName, FamilyName, StringComparison.OrdinalIgnoreCase)
                 ? FamilyName : $"{FamilyName} : {TypeName}";
+        public override string ToString() => DisplayName;
     }
 }

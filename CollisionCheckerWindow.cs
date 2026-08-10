@@ -32,6 +32,7 @@ namespace METools.CollisionChecker
         private List<HoleSymbolOption> _holeSymbols = new List<HoleSymbolOption>();
 
         private List<CollisionInfo> _collisions = new List<CollisionInfo>();
+        private readonly List<ElementId> _markerIds = new List<ElementId>();
         private StackPanel _resultList;
         private readonly HashSet<string> _checkedRowIds = new HashSet<string>();
         private readonly Dictionary<string, CheckBox>  _rowChecks = new Dictionary<string, CheckBox>();
@@ -296,30 +297,58 @@ namespace METools.CollisionChecker
                 using (var tx = new Transaction(doc, "ME-Tools: Mark collisions"))
                 {
                     tx.Start();
-                    var red = new Autodesk.Revit.DB.Color(226, 42, 42);
-                    var flagged = new OverrideGraphicSettings();
-                    try
-                    {
-                        flagged.SetProjectionLineColor(red);
-                        flagged.SetProjectionLineWeight(6);
-                        var solidFill = new FilteredElementCollector(doc).OfClass(typeof(FillPatternElement))
-                            .Cast<FillPatternElement>().FirstOrDefault(f => f.GetFillPattern()?.IsSolidFill == true);
-                        if (solidFill != null)
-                        {
-                            flagged.SetSurfaceForegroundPatternColor(red);
-                            flagged.SetSurfaceForegroundPatternId(solidFill.Id);
-                            flagged.SetCutForegroundPatternColor(red);
-                            flagged.SetCutForegroundPatternId(solidFill.Id);
-                        }
-                    }
-                    catch { }
-                    var clear = new OverrideGraphicSettings(); // no override -- for rows that already have a hole
 
+                    // Clear this window's own markers from a previous Scan.
+                    if (_markerIds.Count > 0)
+                    {
+                        try { doc.Delete(_markerIds); } catch { }
+                        _markerIds.Clear();
+                    }
+
+                    // Also clear any leftover element-level override from an
+                    // earlier version of this tool, in case one is still on
+                    // a run from before.
+                    var clear = new OverrideGraphicSettings();
                     foreach (var c in _collisions)
                     {
-                        try { view.SetElementOverrides(c.ElementId, c.HasHole ? clear : flagged); }
+                        try { view.SetElementOverrides(c.ElementId, clear); }
                         catch { }
                     }
+
+                    // Detail Lines are a 2D, view-specific annotation and
+                    // aren't supported in 3D views -- skip drawing marks
+                    // there rather than throwing on every single one.
+                    if (!(view is View3D))
+                    {
+                        var red = new Autodesk.Revit.DB.Color(226, 42, 42);
+                        var ogs = new OverrideGraphicSettings();
+                        try { ogs.SetProjectionLineColor(red); ogs.SetProjectionLineWeight(7); } catch { }
+
+                        double armFt = 300.0 / 304.8; // ~300mm, a visible size regardless of view scale
+                        XYZ right = view.RightDirection;
+                        XYZ up    = view.UpDirection;
+
+                        foreach (var c in _collisions)
+                        {
+                            if (c.HasHole || c.Point == null) continue;
+                            try
+                            {
+                                var p = c.Point;
+                                var rightArm = right.Multiply(armFt);
+                                var upArm    = up.Multiply(armFt);
+                                var line1 = Line.CreateBound(p - rightArm - upArm, p + rightArm + upArm);
+                                var line2 = Line.CreateBound(p - rightArm + upArm, p + rightArm - upArm);
+                                var dc1 = doc.Create.NewDetailCurve(view, line1);
+                                var dc2 = doc.Create.NewDetailCurve(view, line2);
+                                view.SetElementOverrides(dc1.Id, ogs);
+                                view.SetElementOverrides(dc2.Id, ogs);
+                                _markerIds.Add(dc1.Id);
+                                _markerIds.Add(dc2.Id);
+                            }
+                            catch { }
+                        }
+                    }
+
                     if (tx.GetStatus() == TransactionStatus.Started) tx.Commit();
                 }
             }
@@ -382,6 +411,20 @@ namespace METools.CollisionChecker
                 if (_rowChecks.TryGetValue(c.Id, out var cb)) { cb.IsChecked = false; cb.IsEnabled = false; }
                 if (_rowStatus.TryGetValue(c.Id, out var st)) st.Text = S._("collisioncheck.hole_placed");
                 _checkedRowIds.Remove(c.Id);
+            }
+
+            // Rows that specifically failed (not just skipped) show their
+            // exact error message right in the list, not just a total
+            // count -- needed to actually diagnose a placement failure
+            // instead of guessing at it blind.
+            foreach (var kv in result.ErrorByRowId)
+            {
+                if (_rowStatus.TryGetValue(kv.Key, out var st))
+                {
+                    st.Text = S._("collisioncheck.error_prefix") + " " + kv.Value;
+                    st.Foreground = MeToolsTheme.Br(MeToolsTheme.CRed);
+                    st.ToolTip = kv.Value;
+                }
             }
 
             var summary = string.Format(S._("collisioncheck.placed_summary"), result.Placed);
