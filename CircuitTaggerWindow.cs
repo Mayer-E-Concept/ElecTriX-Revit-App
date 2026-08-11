@@ -1876,14 +1876,12 @@ namespace METools.FamilyPlacer
 
     public class ElectricalElementFilter : Autodesk.Revit.UI.Selection.ISelectionFilter
     {
-        private static readonly BuiltInCategory[] Allowed = new[]
-        {
-            BuiltInCategory.OST_ElectricalFixtures, BuiltInCategory.OST_LightingFixtures,
-            BuiltInCategory.OST_LightingDevices,    BuiltInCategory.OST_ElectricalEquipment,
-            BuiltInCategory.OST_DataDevices,        BuiltInCategory.OST_FireAlarmDevices,
-            BuiltInCategory.OST_CommunicationDevices, BuiltInCategory.OST_SecurityDevices,
-            BuiltInCategory.OST_NurseCallDevices,   BuiltInCategory.OST_TelephoneDevices,
-        };
+        // Same source of truth as CircuitTaggerHandler.GetElectricalCategories
+        // (METools.ProjectHealthCheckCollector.RequiredCategories) -- kept as
+        // a HashSet, built once, rather than re-materializing the LINQ query
+        // on every AllowElement call during an active PickObject loop.
+        private static readonly HashSet<BuiltInCategory> Allowed =
+            new HashSet<BuiltInCategory>(CircuitTaggerHandler.GetElectricalCategories());
         public bool AllowElement(Element elem)
         {
             if (elem?.Category == null) return false;

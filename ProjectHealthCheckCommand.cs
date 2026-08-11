@@ -70,18 +70,23 @@ namespace METools
     {
         internal const string TAG_FAMILY_NAME = "ME-Tools_CircuitTag";
 
-        // The exact 6 shared parameters Circuit Tagger writes, and the exact
-        // 8 categories it reads/tags across (GetElectricalCategories() in
-        // CircuitTaggerHandler.cs) -- kept in sync with that file by hand,
-        // since there's no single shared source for both yet.
-        // internal, not private: ProjectHealthCheckFixer.FixSharedParameters
-        // below reuses these instead of keeping its own second copy, so the
-        // two can never drift apart the way they used to.
+        // The exact 6 shared parameters Circuit Tagger writes -- internal,
+        // not private, since ProjectHealthCheckFixer.FixSharedParameters
+        // below reuses this instead of keeping its own second copy.
         internal static readonly string[] RequiredParams =
         {
             "Vorsicherung", "FI-Kreis", "Stromkreis Tag", "Schaltkreis", "CAx_Apartment", "CAx_Building",
         };
 
+        // The exact categories Circuit Tagger reads/tags across. This is
+        // the SINGLE source of truth for that list -- CircuitTaggerHandler.
+        // GetElectricalCategories(), CircuitTaggerHandler.ReadAllTaggedElements,
+        // and CircuitTaggerWindow.ElectricalElementFilter all reference this
+        // array directly instead of keeping their own copies, specifically
+        // so the four can never drift apart the way they used to (this list
+        // used to be hand-copied into three other places, at three
+        // different category counts, before someone eventually needed to
+        // pick a category none of them agreed on).
         internal static readonly (BuiltInCategory Cat, string Label)[] RequiredCategories =
         {
             (BuiltInCategory.OST_ElectricalFixtures,   "Electrical Fixtures"),
@@ -92,6 +97,16 @@ namespace METools
             (BuiltInCategory.OST_FireAlarmDevices,      "Fire Alarm Devices"),
             (BuiltInCategory.OST_CommunicationDevices,  "Communication Devices"),
             (BuiltInCategory.OST_SecurityDevices,       "Security Devices"),
+            (BuiltInCategory.OST_NurseCallDevices,      "Nurse Call Devices"),
+            (BuiltInCategory.OST_TelephoneDevices,      "Telephone Devices"),
+            // Detail Items -- for the case where the thing being circuited
+            // is drawn as a 2D detail component rather than placed as a
+            // real hosted electrical family (e.g. a symbol on a legend/
+            // schematic, or a device whose real model family isn't loaded
+            // yet). Everything downstream (WriteParam, tag placement,
+            // room/level lookup) already degrades gracefully for a
+            // non-MEP element -- this category just needed to be let in.
+            (BuiltInCategory.OST_DetailComponents,      "Detail Items"),
         };
 
         public static HealthCheckResult Run(Document doc)

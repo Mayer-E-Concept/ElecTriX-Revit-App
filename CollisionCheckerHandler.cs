@@ -99,20 +99,212 @@ namespace METools.CollisionChecker
             catch { return new List<Element>(); }
         }
 
+        // ═════════════════════════════════════════════════════════════════
+        // READ-ONLY: imported IFC/CAD architecture (Insert > Import CAD,
+        // not Link) -- an ImportInstance has no Wall category and no
+        // per-entity IFC semantics at all once inside Revit (a well-known,
+        // widely-reported IFC-import limitation, not something this add-in
+        // can fix), so "which of these solids are walls" can't be answered
+        // by category the way it can for a real Wall. This uses a
+        // geometric heuristic instead: find pairs of large, roughly
+        // vertical, anti-parallel planar faces on the same solid, spaced
+        // apart by something in a plausible wall-thickness range -- i.e.
+        // "the two broad sides of a slab" -- and treat that pair the same
+        // way a real wall's own two side faces are already treated above.
+        //
+        // Deliberately NOT also checking overall height: a solid's own
+        // GetBoundingBox() is in ITS OWN local frame plus a Transform, and
+        // re-deriving true world-space extents from that under an arbitrary
+        // rotation needs all 8 corners transformed, not just Min/Max --
+        // skipped here to avoid getting that subtly wrong with no way to
+        // test it live. Thickness + face size alone is already a fairly
+        // specific signal; if this starts flagging something that clearly
+        // isn't a wall (a thick countertop, say), a height check can be
+        // added once that's confirmed against a real project.
+        // ═════════════════════════════════════════════════════════════════
+
+        private const double ImportedWallMinThicknessFt = 40.0 / 304.8;   // ~40mm -- thin partition
+        private const double ImportedWallMaxThicknessFt = 600.0 / 304.8;  // ~600mm -- generous upper bound
+        private const double ImportedWallMinFaceAreaSqFt = 0.5 / (0.3048 * 0.3048); // ~0.5 m^2 -- excludes trim/reveal-sized faces
+
+        internal class ImportedWallCandidate
+        {
+            public ElementId ImportInstanceId { get; set; }
+            public string    ImportDisplayName { get; set; } = "";
+            public PlanarFace FaceA { get; set; }
+            public PlanarFace FaceB { get; set; }
+            public double    ThicknessFt { get; set; }
+        }
+
+        // Finds every ImportInstance whose name mentions ".ifc" -- same
+        // name-matching convention LevelManagerCommand.DetectLinkedIfcFiles
+        // already uses (there for a linked IFC's generated cache file; here
+        // for an imported one, which is what actually shows up as an
+        // ImportInstance -- a genuine Link IFC produces DirectShapes in a
+        // separate linked document instead, a different scenario this
+        // doesn't cover).
+        internal static List<ImportInstance> GetImportedIfcInstances(Document doc)
+        {
+            try
+            {
+                return new FilteredElementCollector(doc)
+                    .OfClass(typeof(ImportInstance))
+                    .Cast<ImportInstance>()
+                    .Where(ii => (ii.Name ?? "").IndexOf(".ifc", StringComparison.OrdinalIgnoreCase) >= 0)
+                    .ToList();
+            }
+            catch { return new List<ImportInstance>(); }
+        }
+
+        internal static List<ImportedWallCandidate> FindWallLikeSolidsInImport(ImportInstance inst)
+        {
+            var result = new List<ImportedWallCandidate>();
+            string displayName = (inst.Name ?? "").TrimEnd();
+            try
+            {
+                var options = new Options { ComputeReferences = false, IncludeNonVisibleObjects = false };
+                var geomElem = inst.get_Geometry(options);
+                if (geomElem == null) return result;
+
+                foreach (var solid in FlattenToSolids(geomElem))
+                {
+                    try
+                    {
+                        if (solid == null || solid.Volume < 1e-6 || solid.Faces == null) continue;
+
+                        // Large, roughly-vertical planar faces only -- these
+                        // are candidate "broad sides of a slab"; small faces
+                        // (trim, reveals, bolt holes) and near-horizontal
+                        // faces (floors, soffits, tops of low walls) are
+                        // never useful here.
+                        var candidates = new List<PlanarFace>();
+                        foreach (Face f in solid.Faces)
+                        {
+                            if (f is PlanarFace pf && pf.Area >= ImportedWallMinFaceAreaSqFt
+                                && Math.Abs(pf.FaceNormal.Z) < 0.3)
+                                candidates.Add(pf);
+                        }
+                        if (candidates.Count < 2) continue;
+
+                        for (int i = 0; i < candidates.Count; i++)
+                        {
+                            for (int j = i + 1; j < candidates.Count; j++)
+                            {
+                                var nA = candidates[i].FaceNormal;
+                                var nB = candidates[j].FaceNormal;
+                                if (nA.DotProduct(nB) > -0.9) continue; // not close enough to opposite-facing
+
+                                double thickness = Math.Abs(
+                                    (candidates[j].Origin - candidates[i].Origin).DotProduct(nA));
+                                if (thickness < ImportedWallMinThicknessFt || thickness > ImportedWallMaxThicknessFt)
+                                    continue;
+
+                                result.Add(new ImportedWallCandidate
+                                {
+                                    ImportInstanceId  = inst.Id,
+                                    ImportDisplayName = displayName,
+                                    FaceA = candidates[i],
+                                    FaceB = candidates[j],
+                                    ThicknessFt = thickness,
+                                });
+                                goto nextSolid; // one wall-slab reading per solid is enough; move on
+                            }
+                        }
+                        nextSolid: ;
+                    }
+                    catch { }
+                }
+            }
+            catch { }
+            return result;
+        }
+
+        // GetInstanceGeometry() (used here, not GetSymbolGeometry()) returns
+        // geometry already in the project's own coordinate system -- exactly
+        // what's needed to compare directly against host-document run
+        // curves with no extra transform. Confirmed against Autodesk's own
+        // API remarks: its one real caveat is that the References inside
+        // this copy can't be used to create new elements that reference the
+        // original (e.g. dimensions) -- irrelevant here, since Face.Intersect
+        // for a crossing POINT doesn't need a persisted Reference at all.
+        private static IEnumerable<Solid> FlattenToSolids(GeometryElement geomElem)
+        {
+            foreach (GeometryObject obj in geomElem)
+            {
+                if (obj is Solid s && s.Volume > 1e-9)
+                {
+                    yield return s;
+                }
+                else if (obj is GeometryInstance gi)
+                {
+                    GeometryElement inner = null;
+                    try { inner = gi.GetInstanceGeometry(); } catch { }
+                    if (inner != null)
+                        foreach (var s2 in FlattenToSolids(inner))
+                            yield return s2;
+                }
+            }
+        }
+
+        // Same shape as FindCrossingPoint below, but against an arbitrary
+        // face pair instead of a real Wall's own side faces -- there's no
+        // FindNearApproachPoint-style fallback here (that one leans on
+        // Wall.Location/Wall.Width, neither of which exist for an imported
+        // solid); a run that stops just short of imported architecture
+        // rather than crossing it isn't caught by this path yet.
+        internal static XYZ FindCrossingPointOnFacePair(Face faceA, Face faceB, Curve runCurve)
+        {
+            var points = new List<XYZ>();
+            foreach (var face in new[] { faceA, faceB })
+            {
+                try
+                {
+                    var faceResult = face.Intersect(runCurve, out IntersectionResultArray hits);
+                    if (faceResult != SetComparisonResult.Overlap || hits == null) continue;
+                    foreach (IntersectionResult hit in hits) points.Add(hit.XYZPoint);
+                }
+                catch { }
+            }
+            if (points.Count == 0) return null;
+            if (points.Count == 1) return points[0];
+
+            XYZ a = points[0], b = points[0];
+            double best = -1;
+            for (int i = 0; i < points.Count; i++)
+                for (int j = i + 1; j < points.Count; j++)
+                {
+                    var d = points[i].DistanceTo(points[j]);
+                    if (d > best) { best = d; a = points[i]; b = points[j]; }
+                }
+            return (a + b) * 0.5;
+        }
+
         // Runs the two-phase detection described at the top of this file and
         // returns one CollisionInfo per point where a run's centerline
         // crosses a wall. scope applies to the runs being checked; every
         // wall in the whole model is always considered as a potential
         // obstacle regardless of scope, since a run in view/selection scope
         // can still be crossing a wall that itself isn't in that scope.
-        public static List<CollisionInfo> ScanForCollisions(Document doc, UIDocument uiDoc, ScanScope scope)
+        public static List<CollisionInfo> ScanForCollisions(Document doc, UIDocument uiDoc, ScanScope scope, bool includeImportedArchitecture = false)
         {
             var result = new List<CollisionInfo>();
             try
             {
                 var runs  = GetScopedElements(doc, uiDoc, scope, RunCategories);
                 var walls = new FilteredElementCollector(doc).OfClass(typeof(Wall)).WhereElementIsNotElementType().Cast<Wall>().ToList();
-                if (runs.Count == 0 || walls.Count == 0) return result;
+
+                // Built once per scan, not per run -- geometry parsing on an
+                // imported architectural file can be nontrivial, and every
+                // run needs to check against the same fixed set of
+                // candidates regardless.
+                var importedCandidates = new List<ImportedWallCandidate>();
+                if (includeImportedArchitecture)
+                {
+                    foreach (var inst in GetImportedIfcInstances(doc))
+                        importedCandidates.AddRange(FindWallLikeSolidsInImport(inst));
+                }
+
+                if (runs.Count == 0 || (walls.Count == 0 && importedCandidates.Count == 0)) return result;
 
                 // Existing hole links, re-keyed by (run, wall) instead of
                 // by hole, so a fresh scan can recognize "this crossing
@@ -213,6 +405,72 @@ namespace METools.CollisionChecker
                                     }
                                     catch { }
                                 }
+                            }
+
+                            result.Add(info);
+                        }
+                        catch { }
+                    }
+
+                    // Imported IFC architecture: no cheap bounding-box
+                    // pre-filter here (a Face doesn't expose one in the
+                    // same 3D-Outline shape the wall/run check above uses),
+                    // but importedCandidates is normally a short list --
+                    // one entry per detected wall-slab in the import, not
+                    // per wall times per run -- so checking all of them
+                    // directly is fine.
+                    foreach (var cand in importedCandidates)
+                    {
+                        try
+                        {
+                            var point = FindCrossingPointOnFacePair(cand.FaceA, cand.FaceB, runCurve);
+                            if (point == null) continue;
+
+                            // "Wall direction" for hole rotation, derived the
+                            // same way a real wall's own centerline direction
+                            // is used elsewhere -- here there's no centerline,
+                            // only the face normal, so this rotates that
+                            // normal's horizontal component 90 degrees to get
+                            // a horizontal vector running ALONG the slab
+                            // instead of through it (matching how the
+                            // rotation logic in ExecutePlaceHoles is already
+                            // used for the native-wall case).
+                            var n = cand.FaceA.FaceNormal;
+                            var horiz = new XYZ(n.X, n.Y, 0);
+                            var wallDir = horiz.GetLength() > 1e-6
+                                ? new XYZ(-horiz.Y, horiz.X, 0).Normalize()
+                                : XYZ.BasisX;
+
+                            var info = new CollisionInfo
+                            {
+                                ElementId         = run.Id,
+                                WallId            = cand.ImportInstanceId,
+                                ElementCategory   = run.Category?.Name ?? "",
+                                ElementTypeName   = TypeNameOf(doc, run),
+                                WallTypeName      = string.IsNullOrEmpty(cand.ImportDisplayName)
+                                                        ? "Imported architecture" : cand.ImportDisplayName,
+                                Point             = point,
+                                LevelId           = ResolveLevelIdByElevation(doc, point.Z),
+                                LevelName         = ResolveLevelName(doc, ResolveLevelIdByElevation(doc, point.Z)),
+                                IsImportedGeometry = true,
+                                ImportedWallThicknessFt = cand.ThicknessFt,
+                                ImportedWallDirection   = wallDir,
+                            };
+
+                            // Same two lookups as the native-wall case above
+                            // -- ImportInstance.UniqueId works the same way
+                            // as any other element's for this purpose, even
+                            // though hole placement isn't wired up for this
+                            // case yet (see ExecutePlaceHoles), so this is
+                            // future-ready for whenever it is.
+                            if (linkByRunAndWall.TryGetValue((run.UniqueId, doc.GetElement(cand.ImportInstanceId)?.UniqueId ?? ""), out var impHoleUid))
+                            {
+                                try
+                                {
+                                    var holeEl = doc.GetElement(impHoleUid);
+                                    if (holeEl != null) info.HoleInstanceId = holeEl.Id;
+                                }
+                                catch { }
                             }
 
                             result.Add(info);
@@ -425,6 +683,85 @@ namespace METools.CollisionChecker
                         var attempts = new List<string>();
                         try
                         {
+                            // No real Wall to host on -- an ImportInstance
+                            // has no per-entity geometry the way a real
+                            // wall's own faces do, so this skips straight to
+                            // the same non-hosted tiers (3/4) the native-wall
+                            // path below falls back to only as a last
+                            // resort. Direction/thickness come from what was
+                            // captured at scan time (see ScanForCollisions),
+                            // not re-derived here.
+                            if (c.IsImportedGeometry)
+                            {
+                                var impRun = doc.GetElement(c.ElementId);
+                                var importEl = doc.GetElement(c.WallId);
+                                if (impRun == null || importEl == null || c.Point == null)
+                                {
+                                    result.Skipped++;
+                                    continue;
+                                }
+
+                                Level impLevel = null;
+                                try { impLevel = doc.GetElement(c.LevelId) as Level; } catch { }
+                                if (impLevel == null)
+                                {
+                                    try { impLevel = new FilteredElementCollector(doc).OfClass(typeof(Level)).Cast<Level>().FirstOrDefault(); }
+                                    catch { }
+                                }
+
+                                FamilyInstance impInstance = null;
+                                if (impLevel != null)
+                                {
+                                    try { impInstance = doc.Create.NewFamilyInstance(c.Point, symbol, impLevel, StructuralType.NonStructural); }
+                                    catch (Exception ex) { attempts.Add("imported-level-only: " + ex.Message); }
+                                }
+                                if (impInstance == null)
+                                {
+                                    try { impInstance = doc.Create.NewFamilyInstance(c.Point, symbol, StructuralType.NonStructural); }
+                                    catch (Exception ex) { attempts.Add("imported-free-standing: " + ex.Message); }
+                                }
+
+                                if (impInstance == null)
+                                {
+                                    result.Errors++;
+                                    var combined = $"[{placementType}, imported architecture] " + (attempts.Count > 0 ? string.Join(" | ", attempts) : "no applicable placement method found");
+                                    result.ErrorMessages.Add(combined);
+                                    result.ErrorByRowId[c.Id] = combined;
+                                    continue;
+                                }
+
+                                // Both tiers used here place at the family's
+                                // default rotation -- rotate explicitly to
+                                // match the imported slab's own orientation,
+                                // same idea as the native-wall path below.
+                                try
+                                {
+                                    var dir = c.ImportedWallDirection ?? XYZ.BasisX;
+                                    double angle = Math.Atan2(dir.Y, dir.X);
+                                    if (Math.Abs(angle) > 1e-6)
+                                    {
+                                        var axis = Line.CreateBound(c.Point, c.Point + XYZ.BasisZ);
+                                        ElementTransformUtils.RotateElement(doc, impInstance.Id, axis, angle);
+                                    }
+                                }
+                                catch (Exception ex) { attempts.Add("imported-rotate: " + ex.Message); }
+
+                                var impDimAttempts = new List<string>();
+                                try { ApplyHoleDimensions(impInstance, impRun, c.ImportedWallThicknessFt, impDimAttempts); }
+                                catch (Exception ex) { impDimAttempts.Add("dimensions: " + ex.Message); }
+                                if (impDimAttempts.Count > 0)
+                                {
+                                    result.DimensionWarnings++;
+                                    if (result.FirstDimensionWarning == null)
+                                        result.FirstDimensionWarning = string.Join(" | ", impDimAttempts);
+                                }
+
+                                LinkHoleToRunAndWall(doc, impInstance.UniqueId, impRun.UniqueId, importEl.UniqueId);
+                                result.Placed++;
+                                result.PlacedHoleByRowId[c.Id] = impInstance.Id;
+                                continue;
+                            }
+
                             var run  = doc.GetElement(c.ElementId);
                             var wall = doc.GetElement(c.WallId) as Wall;
                             if (run == null || wall == null || c.Point == null)
@@ -852,8 +1189,15 @@ namespace METools.CollisionChecker
         // clearance parameters -- those are already set correctly on the
         // family itself and must stay exactly as configured there.
         private static void ApplyHoleDimensions(Element instance, Element run, Wall wall, List<string> attempts)
+            => ApplyHoleDimensions(instance, run, wall.Width, attempts);
+
+        // Shared by both the native-Wall path above and the imported-
+        // architecture path in ExecutePlaceHoles -- takes the thickness as
+        // a plain double instead of requiring a real Wall to read Width
+        // from, since an ImportInstance has no Width property at all.
+        private static void ApplyHoleDimensions(Element instance, Element run, double wallThicknessFt, List<string> attempts)
         {
-            SetDoubleParam(instance, "Tiefe", wall.Width, attempts);
+            SetDoubleParam(instance, "Tiefe", wallThicknessFt, attempts);
 
             GetRunCrossDimensions(run, out var crossWidth, out var crossHeight);
             if (crossWidth.HasValue)  SetDoubleParam(instance, "Trassenbreite", crossWidth.Value, attempts);

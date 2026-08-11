@@ -28,6 +28,21 @@ namespace METools.CollisionChecker
         // live-follow watcher knows which hole belongs to which run.
         public Autodesk.Revit.DB.ElementId HoleInstanceId { get; set; } = Autodesk.Revit.DB.ElementId.InvalidElementId;
         public bool HasHole => HoleInstanceId != null && HoleInstanceId != Autodesk.Revit.DB.ElementId.InvalidElementId;
+
+        // True when WallId actually points at an ImportInstance (an
+        // imported IFC/CAD architectural file) rather than a real Wall --
+        // see CollisionCheckerHandler.FindWallLikeSolidsInImport. The crossing
+        // point/level still resolve the same way either way; only hole
+        // placement currently treats this differently (there's no real Wall
+        // to host on yet -- see ExecutePlaceHoles).
+        public bool IsImportedGeometry { get; set; } = false;
+
+        // Only meaningful when IsImportedGeometry is true -- captured at
+        // scan time (from the detected face pair) so hole placement doesn't
+        // need to re-parse the import's geometry to recover the thickness/
+        // orientation a real Wall would otherwise supply directly.
+        public double ImportedWallThicknessFt { get; set; } = 0;
+        public Autodesk.Revit.DB.XYZ ImportedWallDirection { get; set; } = null;
     }
 
     public enum CollisionCheckerAction { None, PlaceHoles, MoveHoles, MarkCollisions }

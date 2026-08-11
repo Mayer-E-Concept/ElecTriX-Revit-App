@@ -616,17 +616,15 @@ namespace METools.FamilyPlacer
             try { var p = el.get_Parameter(bip); if (p != null && !p.IsReadOnly) p.Set(val); } catch { }
         }
 
-        private static IEnumerable<BuiltInCategory> GetElectricalCategories() => new[]
-        {
-            BuiltInCategory.OST_ElectricalFixtures,
-            BuiltInCategory.OST_LightingFixtures,
-            BuiltInCategory.OST_LightingDevices,
-            BuiltInCategory.OST_ElectricalEquipment,
-            BuiltInCategory.OST_DataDevices,
-            BuiltInCategory.OST_FireAlarmDevices,
-            BuiltInCategory.OST_CommunicationDevices,
-            BuiltInCategory.OST_SecurityDevices,
-        };
+        // Single source of truth is METools.ProjectHealthCheckCollector.
+        // RequiredCategories -- Project Health Check needs this same list
+        // to know which categories to bind the 6 shared params to, so it
+        // owns the canonical copy. Extracting just the BuiltInCategory here
+        // keeps every caller in this file (and ElectricalElementFilter in
+        // CircuitTaggerWindow.cs) in permanent agreement with what
+        // Project Health Check actually bound.
+        internal static IEnumerable<BuiltInCategory> GetElectricalCategories()
+            => METools.ProjectHealthCheckCollector.RequiredCategories.Select(rc => rc.Cat);
 
         public static List<ExportRow> ReadAllTaggedElements(Document doc)
         {
@@ -634,13 +632,7 @@ namespace METools.FamilyPlacer
             Phase phase = null;
             try { phase = new FilteredElementCollector(doc).OfClass(typeof(Phase)).Cast<Phase>().LastOrDefault(); } catch { }
 
-            foreach (var cat in new[]
-            {
-                BuiltInCategory.OST_ElectricalFixtures, BuiltInCategory.OST_LightingFixtures,
-                BuiltInCategory.OST_LightingDevices,    BuiltInCategory.OST_ElectricalEquipment,
-                BuiltInCategory.OST_DataDevices,        BuiltInCategory.OST_FireAlarmDevices,
-                BuiltInCategory.OST_CommunicationDevices, BuiltInCategory.OST_SecurityDevices,
-            })
+            foreach (var cat in GetElectricalCategories())
             {
                 try
                 {
