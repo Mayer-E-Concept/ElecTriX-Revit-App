@@ -529,6 +529,7 @@ namespace METools
                     .OfClass(typeof(FamilySymbol)).Cast<FamilySymbol>()
                     .FirstOrDefault(fs => fs.Family?.Name == capturedFam.Name);
                 if (sym == null) { if (StatusLeft != null) StatusLeft.Text = "Family not found in project."; return; }
+                _placer.FilePathsToLoad = null; // defensive: this is the placement path, not a load
                 _placer.SymbolId = sym.Id;
                 _placer.OnDone   = msg => Dispatcher.Invoke(() => { if (StatusLeft != null) StatusLeft.Text = msg; });
                 _placeEv.Raise();
@@ -655,35 +656,22 @@ namespace METools
 
             var doc = _doc;
             if (doc == null) { if (StatusLeft != null) StatusLeft.Text = S.Get("browser.no_document"); return; }
+            if (_placer == null || _placeEv == null) return;
 
-            int loaded = 0, skipped = 0, failed = 0;
-            foreach (var path in dlg.FileNames)
+            if (StatusLeft != null) StatusLeft.Text = "Loading...";
+
+            // doc.LoadFamily needs a Transaction, which this button-click
+            // handler (a genuinely modeless window) has no valid API
+            // context to start directly -- routed through the same
+            // ExternalEvent this window already uses for placement.
+            _placer.FilePathsToLoad = dlg.FileNames.ToList();
+            _placer.OnLoadDone = (loaded, skipped, failed) => Dispatcher.Invoke(() =>
             {
-                try
-                {
-                    string famName = Path.GetFileNameWithoutExtension(path);
-                    // Check if already loaded
-                    bool exists = new FilteredElementCollector(doc)
-                        .OfClass(typeof(Family))
-                        .Cast<Family>()
-                        .Any(f => string.Equals(f.Name, famName, StringComparison.OrdinalIgnoreCase));
-
-                    if (exists) { skipped++; continue; }
-
-                    using (var tx = new Transaction(doc, $"ME-Tools: Load family {famName}"))
-                    {
-                        tx.Start();
-                        Family fam;
-                        bool ok = doc.LoadFamily(path, out fam);
-                        if (ok) { tx.Commit(); loaded++; }
-                        else    { tx.RollBack(); failed++; }
-                    }
-                }
-                catch { failed++; }
-            }
-
-            if (StatusLeft != null) StatusLeft.Text = $"Loaded: {loaded}  |  Already in project: {skipped}  |  Failed: {failed}";
-            if (loaded > 0) LoadFamilies();
+                if (StatusLeft != null)
+                    StatusLeft.Text = $"Loaded: {loaded}  |  Already in project: {skipped}  |  Failed: {failed}";
+                if (loaded > 0) LoadFamilies();
+            });
+            _placeEv.Raise();
         }
     }
 
@@ -712,13 +700,29 @@ namespace METools
         public ElementId       SymbolId { get; set; }
         public Action<string>  OnDone   { get; set; }
 
+        // Set instead of SymbolId to load .rfa files from disk rather than
+        // place one -- kept as a separate property/callback pair rather
+        // than overloading SymbolId/OnDone, so a stray leftover SymbolId
+        // from a previous placement can never accidentally trigger a
+        // placement attempt on a load request or vice versa.
+        public List<string>              FilePathsToLoad { get; set; }
+        public Action<int, int, int>     OnLoadDone       { get; set; } // loaded, skipped, failed
+
         public void Execute(UIApplication app)
         {
             try
             {
                 var uidoc = app.ActiveUIDocument;
                 var doc   = uidoc?.Document;
-                if (doc == null || SymbolId == null) return;
+                if (doc == null) return;
+
+                if (FilePathsToLoad != null)
+                {
+                    ExecuteLoadFromDisk(doc);
+                    return;
+                }
+
+                if (SymbolId == null) return;
 
                 var sym = doc.GetElement(SymbolId) as FamilySymbol;
                 if (sym == null) { OnDone?.Invoke("Symbol not found."); return; }
@@ -745,6 +749,48 @@ namespace METools
             {
                 OnDone?.Invoke("Placement error: " + ex.Message);
             }
+        }
+
+        // Moved here from FamilyBrowserWindow.LoadFromDisk -- doc.LoadFamily
+        // needs a Transaction, and a WPF button-click handler on a
+        // genuinely modeless window (this one is shown via .Show(), not
+        // ShowDialog()) has no valid Revit API context for that. Confirmed
+        // against Autodesk's own forum answer: "calling into the Revit API
+        // from outside threads (which include calls from modeless dialogs,
+        // for they too run on their own threads) is not permitted." The
+        // old code's outer try/catch just swallowed the resulting exception
+        // per file and counted it as "Failed" with no visible reason why --
+        // routed through the ExternalEvent instead, the same way this
+        // class's own placement flow already is.
+        private void ExecuteLoadFromDisk(Document doc)
+        {
+            int loaded = 0, skipped = 0, failed = 0;
+            foreach (var path in FilePathsToLoad)
+            {
+                try
+                {
+                    string famName = Path.GetFileNameWithoutExtension(path);
+                    bool exists = new FilteredElementCollector(doc)
+                        .OfClass(typeof(Family))
+                        .Cast<Family>()
+                        .Any(f => string.Equals(f.Name, famName, StringComparison.OrdinalIgnoreCase));
+
+                    if (exists) { skipped++; continue; }
+
+                    using (var tx = new Transaction(doc, $"ME-Tools: Load family {famName}"))
+                    {
+                        tx.Start();
+                        Family fam;
+                        bool ok = doc.LoadFamily(path, out fam);
+                        if (ok) { tx.Commit(); loaded++; }
+                        else    { tx.RollBack(); failed++; }
+                    }
+                }
+                catch { failed++; }
+            }
+
+            FilePathsToLoad = null; // clear so a later placement-only Raise() can't re-trigger this
+            OnLoadDone?.Invoke(loaded, skipped, failed);
         }
 
         public string GetName() => "ME-Tools Family Browser Placer";

@@ -92,6 +92,11 @@ namespace METools.CollisionChecker
         public int MarksAttempted { get; set; }
         public int MarksFailed { get; set; }
         public string FirstMarkError { get; set; }
+        // Collisions whose own level has no Floor Plan (or other plan)
+        // view to draw into -- e.g. a level nobody ever created a plan
+        // view for. Tracked separately from MarksFailed since nothing
+        // actually went wrong; there's just nowhere to put the mark.
+        public int MarksSkippedNoView { get; set; }
         // Row id -> the detail-curve element IDs drawn for it, so the
         // window can track them for later removal (RemoveMarkerFor) the
         // same way it did when it drew them directly.

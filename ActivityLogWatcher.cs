@@ -152,7 +152,14 @@ namespace METools.ActivityLog
                     foreach (var id in deletedIds)  { if (map.ContainsKey(id.IntegerValue)) { anyRelevant = true; break; } }
                 if (!anyRelevant) return;
 
-                var projectId = ActivityLogStorage.GetProjectId(doc);
+                // Read-only on purpose -- this whole method runs inside
+                // DocumentChanged, which can't start a Transaction, and
+                // GetProjectId's write path (GetOrCreateProjectId) needs
+                // one on a document that's never been stamped yet. If
+                // this comes back null, the project just hasn't been
+                // stamped yet; skip this one log entry rather than risk
+                // silently minting an id that never actually gets saved.
+                var projectId = ActivityLogStorage.TryGetCachedOrExistingProjectId(doc);
                 if (string.IsNullOrWhiteSpace(projectId)) return;
 
                 string user = "";

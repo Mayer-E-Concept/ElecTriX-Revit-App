@@ -92,8 +92,8 @@ namespace METools.FamilyPlacer
         }
 
         // Same logic as above, but against an already-fetched room list — avoids a
-        // second full Rooms+MEPSpaces scan when a caller (e.g. KonfigViewModel.LadeDaten)
-        // already needs the raw room list for something else too.
+        // second full Rooms+MEPSpaces scan when a caller already needs the raw room
+        // list for something else too.
         public static List<string> LeseAlleRaumnummern(List<(string Nummer, string Name)> raeume)
         {
             return raeume
@@ -115,8 +115,8 @@ namespace METools.FamilyPlacer
             public string DetailText        { get; set; } = "";
         }
 
-        // raeumeVorgefetcht: optional pre-fetched room list (see KonfigViewModel.LadeDaten,
-        // which already needs this same data right after calling this method) -- avoids
+        // raeumeVorgefetcht: optional pre-fetched room list, for a caller that already
+        // needs this same data right after calling this method -- avoids
         // this method also calling LeseAlleRaeume internally, which would otherwise be a
         // second full Rooms+MEPSpaces scan on top of the counting scan just above it.
         // The counting scan itself (rooms/spaces below) stays separate regardless, since

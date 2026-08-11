@@ -46,6 +46,11 @@ namespace METools.ActivityLog
         private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<Document, string> _projectIdCache
             = new System.Runtime.CompilerServices.ConditionalWeakTable<Document, string>();
 
+        // Write-capable: mints and stamps a new id if this document has
+        // never been stamped yet. Only safe from a context that actually
+        // permits starting a Transaction (an ExternalEvent's Execute, an
+        // IExternalCommand's Execute, ViewActivated, etc.) -- used by
+        // ActivityLogCommand, which runs from exactly that kind of context.
         public static string GetProjectId(Document doc)
         {
             if (doc == null) return null;
@@ -60,6 +65,36 @@ namespace METools.ActivityLog
                 try { _projectIdCache.Add(doc, id); } catch { }
             }
             return id;
+        }
+
+        // Read-only twin of GetProjectId, for contexts that can't start a
+        // Transaction -- specifically ActivityLogWatcher.OnDocumentChanged.
+        // GetOrCreateProjectId's own Transaction.Start() would throw
+        // InvalidOperationException there (DocumentChanged is explicitly
+        // read-only per Autodesk's docs), and its outer try/catch used to
+        // swallow that silently: the freshly-minted id it fell back to
+        // returning was never actually persisted, so it looked fine for
+        // the rest of THIS session but a fresh Revit session opening the
+        // same never-actually-stamped project would mint yet another new
+        // one -- silently fragmenting that project's log/comments history
+        // across sessions with no visible error anywhere.
+        //
+        // Returns null (never caches null) if this document hasn't been
+        // stamped yet -- the caller should just skip that one log entry.
+        // The id gets stamped for real the moment anyone opens Activity
+        // Log, Comments, or (if the Comments shared folder is configured)
+        // the very next ViewActivated -- all genuinely valid contexts.
+        public static string TryGetCachedOrExistingProjectId(Document doc)
+        {
+            if (doc == null) return null;
+            if (_projectIdCache.TryGetValue(doc, out var cached)) return cached;
+
+            var id = METools.Comments.CommentsStorage.TryGetExistingProjectId(doc);
+            if (!string.IsNullOrWhiteSpace(id))
+            {
+                try { _projectIdCache.Add(doc, id); } catch { }
+            }
+            return id; // null if not stamped yet -- deliberately not cached
         }
 
         // Appends one entry. Safe to call often -- failures (folder not

@@ -950,6 +950,7 @@ namespace METools
             ["collisioncheck.error_prefix"]   = "ERROR --",
             ["collisioncheck.rescan_to_refresh_marks"] = "Scan again to refresh the red marks.",
             ["collisioncheck.mark_failed"]    = "{0}/{1} red mark(s) failed: {2}",
+            ["collisioncheck.mark_skipped_no_view"] = "{0} red mark(s) skipped -- no Floor Plan view exists yet for their level. Create one, then Scan again.",
 
             // ── Statistics categories ─────────────────────────────────────
             ["stats.sockets"]           = "Sockets",
@@ -1897,6 +1898,7 @@ namespace METools
             ["collisioncheck.error_prefix"]   = "FEHLER --",
             ["collisioncheck.rescan_to_refresh_marks"] = "Erneut scannen, um die roten Markierungen zu aktualisieren.",
             ["collisioncheck.mark_failed"]    = "{0}/{1} rote Markierung(en) fehlgeschlagen: {2}",
+            ["collisioncheck.mark_skipped_no_view"] = "{0} rote Markierung(en) übersprungen -- für diese Ebene gibt es noch keinen Grundriss. Erst einen anlegen, dann erneut scannen.",
 
             ["stats.sockets"]           = "Steckdosen",
             ["stats.switches"]          = "Schalter",
@@ -2841,6 +2843,7 @@ namespace METools
             ["collisioncheck.error_prefix"]   = "EROARE --",
             ["collisioncheck.rescan_to_refresh_marks"] = "Scanati din nou pentru a actualiza marcajele rosii.",
             ["collisioncheck.mark_failed"]    = "{0}/{1} marcaj(e) rosii au esuat: {2}",
+            ["collisioncheck.mark_skipped_no_view"] = "{0} marcaj(e) rosii omise -- nu exista inca o vedere de plan pentru nivelul lor. Creati una, apoi scanati din nou.",
 
             ["stats.sockets"]           = "Prize",
             ["stats.switches"]          = "Intrerupatoare",

@@ -58,7 +58,7 @@ namespace METools.CollisionChecker
             else if (req.Action == CollisionCheckerAction.MoveHoles)
                 ExecuteMoveHoles(doc, req);
             else if (req.Action == CollisionCheckerAction.MarkCollisions)
-                ExecuteMarkCollisions(doc, app.ActiveUIDocument?.ActiveView, req);
+                ExecuteMarkCollisions(doc, req);
         }
 
         // ═════════════════════════════════════════════════════════════════
@@ -655,8 +655,19 @@ namespace METools.CollisionChecker
             }
         }
 
-        // Draws a red circle at every unresolved collision point, in
-        // whatever view the person had active when Scan was clicked.
+        // Draws a red circle at every unresolved collision point, in EACH
+        // collision's OWN physical level's plan view -- resolved via
+        // FindPlanViewForLevel below, the same lookup "Go To" uses --
+        // rather than whichever single view happened to be active when
+        // Scan was clicked. That used to mean a Whole Model scan (which
+        // routinely spans several levels) silently projected every
+        // collision's mark onto the CURRENT view's plane regardless of
+        // which level it actually belonged to: a real, visible circle,
+        // just floating at the wrong level's Z, at X/Y coordinates that
+        // meant nothing there -- and nothing at all drawn on the level the
+        // collision was actually on unless the person happened to already
+        // be looking at it when they pressed Scan.
+        //
         // Confirmed via the actual Revit error message that a plain
         // button-click handler is not a valid context for starting a
         // transaction ("Starting a transaction from an external
@@ -664,10 +675,10 @@ namespace METools.CollisionChecker
         // this used to run directly from the window's OnScanClicked, which
         // is exactly that invalid context. Routed through the ExternalEvent
         // instead, the same way every other write in this file already is.
-        private void ExecuteMarkCollisions(Document doc, View view, CollisionCheckerRequest req)
+        private void ExecuteMarkCollisions(Document doc, CollisionCheckerRequest req)
         {
             var result = new PlaceHolesResult { ResultAction = CollisionCheckerAction.MarkCollisions };
-            if (view == null || req.Collisions == null) { OnDone?.Invoke(result); return; }
+            if (doc == null || req.Collisions == null) { OnDone?.Invoke(result); return; }
 
             using (var tx = new Transaction(doc, "ME-Tools: Mark collisions"))
             {
@@ -679,25 +690,40 @@ namespace METools.CollisionChecker
                         try { doc.Delete(req.OldMarkerIds); } catch { }
                     }
 
-                    // Detail Lines are a 2D, view-specific annotation and
-                    // aren't supported in 3D views -- skip drawing marks
-                    // there rather than throwing on every single one.
-                    if (!(view is View3D))
+                    var red = new Autodesk.Revit.DB.Color(226, 42, 42);
+                    var ogs = new OverrideGraphicSettings();
+                    try { ogs.SetProjectionLineColor(red); ogs.SetProjectionLineWeight(7); } catch { }
+                    double radiusFt = 250.0 / 304.8; // ~250mm radius -- visible regardless of view scale
+
+                    var toMark = req.Collisions.Where(c => !c.HasHole && c.Point != null).ToList();
+                    result.MarksAttempted = toMark.Count;
+
+                    // Grouped by the collision's own LevelId (resolved by
+                    // physical Z-elevation upstream in ScanForCollisions --
+                    // see lesson on Reference Level not being trustworthy
+                    // for MEP elements), NOT by whatever view is active.
+                    foreach (var group in toMark.GroupBy(c => c.LevelId))
                     {
-                        double? planeZ = GetViewPlaneZ(view);
+                        var targetView = FindPlanViewForLevel(doc, group.Key);
 
-                        var red = new Autodesk.Revit.DB.Color(226, 42, 42);
-                        var ogs = new OverrideGraphicSettings();
-                        try { ogs.SetProjectionLineColor(red); ogs.SetProjectionLineWeight(7); } catch { }
-
-                        double radiusFt = 250.0 / 304.8; // ~250mm radius -- visible regardless of view scale
-                        XYZ xAxis = view.RightDirection;
-                        XYZ yAxis = view.UpDirection;
-
-                        foreach (var c in req.Collisions)
+                        // No plan view exists for this level (or the level
+                        // id never resolved) -- Detail Lines are a 2D,
+                        // view-specific annotation, so there's no sensible
+                        // view-agnostic fallback. Report it rather than
+                        // silently dropping the count, same spirit as
+                        // surfacing MarksFailed instead of swallowing it.
+                        if (targetView == null || targetView is View3D)
                         {
-                            if (c.HasHole || c.Point == null) continue;
-                            result.MarksAttempted++;
+                            result.MarksSkippedNoView += group.Count();
+                            continue;
+                        }
+
+                        double? planeZ = GetViewPlaneZ(targetView);
+                        XYZ xAxis = targetView.RightDirection;
+                        XYZ yAxis = targetView.UpDirection;
+
+                        foreach (var c in group)
+                        {
                             try
                             {
                                 var center = planeZ.HasValue
@@ -711,10 +737,10 @@ namespace METools.CollisionChecker
                                 var centeredPlane = Plane.CreateByOriginAndBasis(center, xAxis, yAxis);
                                 var arc1 = Arc.Create(centeredPlane, radiusFt, 0, Math.PI);
                                 var arc2 = Arc.Create(centeredPlane, radiusFt, Math.PI, 2 * Math.PI);
-                                var dc1 = doc.Create.NewDetailCurve(view, arc1);
-                                var dc2 = doc.Create.NewDetailCurve(view, arc2);
-                                view.SetElementOverrides(dc1.Id, ogs);
-                                view.SetElementOverrides(dc2.Id, ogs);
+                                var dc1 = doc.Create.NewDetailCurve(targetView, arc1);
+                                var dc2 = doc.Create.NewDetailCurve(targetView, arc2);
+                                targetView.SetElementOverrides(dc1.Id, ogs);
+                                targetView.SetElementOverrides(dc2.Id, ogs);
 
                                 if (!result.MarkersByCollisionId.TryGetValue(c.Id, out var list))
                                 {
@@ -743,6 +769,27 @@ namespace METools.CollisionChecker
             }
 
             OnDone?.Invoke(result);
+        }
+
+        // Prefers an actual Floor Plan view on the given level over other
+        // plan-based view types (Ceiling Plan, Structural Plan, Area Plan)
+        // that also happen to report the same GenLevel. Shared by "Go To"
+        // (CollisionCheckerWindow) and mark-drawing (here) so both always
+        // land on the exact same view for a given level -- a mark drawn
+        // here is guaranteed visible from wherever "Go To" takes you.
+        public static View FindPlanViewForLevel(Document doc, ElementId levelId)
+        {
+            if (doc == null || levelId == null || levelId == ElementId.InvalidElementId) return null;
+            try
+            {
+                var candidates = new FilteredElementCollector(doc)
+                    .OfClass(typeof(ViewPlan))
+                    .Cast<ViewPlan>()
+                    .Where(v => !v.IsTemplate && v.GenLevel != null && v.GenLevel.Id == levelId)
+                    .ToList();
+                return candidates.FirstOrDefault(v => v.ViewType == ViewType.FloorPlan) ?? candidates.FirstOrDefault();
+            }
+            catch { return null; }
         }
 
         // The Z-height detail curves must be drawn at for this view to

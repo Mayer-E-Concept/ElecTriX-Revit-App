@@ -86,7 +86,14 @@ namespace METools.TimeTracker
                 var folder = METools.Comments.CommentsStorage.GetSharedFolder();
                 if (string.IsNullOrWhiteSpace(folder)) return; // feature not configured -- nothing to log to yet
 
-                var projectId = TimeTrackerStorage.GetProjectId(doc);
+                // Read-only on purpose -- DocumentOpened already has an
+                // implicit transaction of Revit's own open, and starting
+                // another explicit one (GetProjectId's write path does,
+                // on a never-before-stamped document) is prohibited there
+                // too. If this comes back null, skip this session start
+                // rather than risk silently minting an id that never
+                // actually gets saved -- see TryGetCachedOrExistingProjectId.
+                var projectId = TimeTrackerStorage.TryGetCachedOrExistingProjectId(doc);
                 if (string.IsNullOrWhiteSpace(projectId)) return;
 
                 string user = "";

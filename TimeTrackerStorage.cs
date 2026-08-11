@@ -41,6 +41,10 @@ namespace METools.TimeTracker
         private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<Document, string> _projectIdCache
             = new System.Runtime.CompilerServices.ConditionalWeakTable<Document, string>();
 
+        // Write-capable: mints and stamps a new id if this document has
+        // never been stamped yet. Only safe from a context that actually
+        // permits starting a Transaction -- used by ActivityLogCommand.Open,
+        // which runs from an IExternalCommand.Execute() context.
         public static string GetProjectId(Document doc)
         {
             if (doc == null) return null;
@@ -52,6 +56,35 @@ namespace METools.TimeTracker
                 try { _projectIdCache.Add(doc, id); } catch { }
             }
             return id;
+        }
+
+        // Read-only twin, for contexts that can't start a Transaction --
+        // specifically TimeTrackerWatcher.OnDocumentOpened. DocumentOpened
+        // already has an implicit transaction of Revit's own open for the
+        // duration of the event, and starting another one explicitly (which
+        // is exactly what GetOrCreateProjectId's Transaction.Start() does)
+        // is documented as prohibited there too, not just in DocumentChanged
+        // -- same InvalidOperationException risk, same silent-swallow, same
+        // "freshly minted id never actually gets persisted" consequence on
+        // a project that's never been stamped before. See the identical fix
+        // on ActivityLogStorage.TryGetCachedOrExistingProjectId for the full
+        // reasoning; this is the same fix for the same root cause.
+        //
+        // Returns null (never caches null) if this document hasn't been
+        // stamped yet -- the caller should just skip that one action. The id
+        // gets stamped for real the moment anyone opens Activity Log, Time
+        // Tracker's own Command.Open, Comments, or a ViewActivated check.
+        public static string TryGetCachedOrExistingProjectId(Document doc)
+        {
+            if (doc == null) return null;
+            if (_projectIdCache.TryGetValue(doc, out var cached)) return cached;
+
+            var id = METools.Comments.CommentsStorage.TryGetExistingProjectId(doc);
+            if (!string.IsNullOrWhiteSpace(id))
+            {
+                try { _projectIdCache.Add(doc, id); } catch { }
+            }
+            return id; // null if not stamped yet -- deliberately not cached
         }
 
         // ── Shared, per-project session log ────────────────────────────────

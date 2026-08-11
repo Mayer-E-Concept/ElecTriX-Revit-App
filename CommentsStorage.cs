@@ -4,8 +4,7 @@
 // Two separate problems, each solved differently:
 //   1. Identifying "this same project" across different computers -- solved
 //     by stamping a persistent GUID into the model itself via Extensible
-//     Storage (the exact technique KonfigStorage.cs already uses for circuit
-//     config), so comments stay matched to the project even if the .rvt file
+//     Storage, so comments stay matched to the project even if the .rvt file
 //     is renamed or moved. A file path or file name would NOT survive that.
 //   2. Making a comment left on one computer visible on another -- solved by
 //     one JSON file per project on a shared network folder every team member
@@ -65,6 +64,33 @@ namespace METools.Comments
             }
             catch { }
             return newId;
+        }
+
+        // Read-only twin of GetOrCreateProjectId -- returns the existing
+        // stamp if there is one, or null if this document has never been
+        // stamped yet. Deliberately never mints or writes anything, so
+        // it's safe to call from contexts where starting a Transaction
+        // isn't allowed (e.g. ActivityLogWatcher's DocumentChanged handler
+        // -- confirmed via Autodesk's own docs that DocumentChanged is
+        // explicitly read-only). Callers that need write access on a
+        // first-touch document should use GetOrCreateProjectId instead,
+        // from a context that actually permits it.
+        public static string TryGetExistingProjectId(Document doc)
+        {
+            if (doc == null) return null;
+            try
+            {
+                var schema = Schema.Lookup(SCHEMA_GUID);
+                if (schema == null || doc.ProjectInformation == null) return null;
+                var entity = doc.ProjectInformation.GetEntity(schema);
+                if (entity != null && entity.IsValid())
+                {
+                    var id = entity.Get<string>(FIELD_ID);
+                    if (!string.IsNullOrWhiteSpace(id)) return id;
+                }
+            }
+            catch { }
+            return null;
         }
 
         private static Schema BuildSchema()

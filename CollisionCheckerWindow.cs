@@ -480,7 +480,7 @@ namespace METools.CollisionChecker
                 // if the active view isn't already on that level --
                 // otherwise zooming just pans/zooms whatever's currently
                 // open, which may not show this level's geometry at all.
-                var targetView = FindPlanViewForLevel(doc, c.LevelId);
+                var targetView = CollisionCheckerHandler.FindPlanViewForLevel(doc, c.LevelId);
                 if (targetView != null && targetView.Id != uiDoc.ActiveView?.Id)
                 {
                     try { uiDoc.ActiveView = targetView; } catch { }
@@ -509,24 +509,9 @@ namespace METools.CollisionChecker
             catch { }
         }
 
-        // Prefers an actual Floor Plan view on the given level over other
-        // plan-based view types (Ceiling Plan, Structural Plan, Area Plan)
-        // that also happen to report the same GenLevel, since a Floor Plan
-        // is what every screenshot of this tool has been used in so far.
-        private static View FindPlanViewForLevel(Document doc, ElementId levelId)
-        {
-            if (doc == null || levelId == null || levelId == ElementId.InvalidElementId) return null;
-            try
-            {
-                var candidates = new FilteredElementCollector(doc)
-                    .OfClass(typeof(ViewPlan))
-                    .Cast<ViewPlan>()
-                    .Where(v => !v.IsTemplate && v.GenLevel != null && v.GenLevel.Id == levelId)
-                    .ToList();
-                return candidates.FirstOrDefault(v => v.ViewType == ViewType.FloorPlan) ?? candidates.FirstOrDefault();
-            }
-            catch { return null; }
-        }
+        // Moved to CollisionCheckerHandler (as FindPlanViewForLevel) so the
+        // mark-drawing code can use the exact same lookup "Go To" does --
+        // a mark is now guaranteed to land in the same view "Go To" opens.
 
         // Removes just the circle for one specific collision, immediately
         // after its hole is placed, rather than waiting for the next Scan
@@ -600,6 +585,11 @@ namespace METools.CollisionChecker
                 MessageBox.Show(
                     string.Format(S._("collisioncheck.mark_failed"), result.MarksFailed, result.MarksAttempted, result.FirstMarkError),
                     S._("collisioncheck.title"), MessageBoxButton.OK, MessageBoxImage.Warning);
+
+            if (result.MarksSkippedNoView > 0)
+                MessageBox.Show(
+                    string.Format(S._("collisioncheck.mark_skipped_no_view"), result.MarksSkippedNoView),
+                    S._("collisioncheck.title"), MessageBoxButton.OK, MessageBoxImage.Information);
         }
 
         private void HandlePlaceResult(PlaceHolesResult result)
