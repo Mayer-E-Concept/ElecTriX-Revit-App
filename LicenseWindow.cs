@@ -35,7 +35,7 @@ namespace METools
 
             BuildStatusBar(S._("license.status_bar"));
 
-            var body = new StackPanel { Margin = new Thickness(24, 20, 24, 20) };
+            var body = new StackPanel { Margin = new Thickness(24, 20, 24, 20), Background = MeToolsTheme.BrBg };
 
             // Header
             body.Children.Add(new TextBlock

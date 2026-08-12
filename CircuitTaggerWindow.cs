@@ -319,7 +319,7 @@ namespace METools.FamilyPlacer
             prevSp.Children.Add(new TextBlock { Text = S._("circuittagger.preview"), FontSize = 8, FontWeight = FontWeights.SemiBold,
                 Foreground = MeToolsTheme.BrMuted, Margin = new Thickness(0, 0, 0, 2) });
             var prevLabel = new TextBlock { Text = "--", FontSize = 16, FontWeight = FontWeights.Bold,
-                FontFamily = new FontFamily("Consolas"), Foreground = MeToolsTheme.BrPetrol };
+                FontFamily = new FontFamily("Consolas"), Foreground = MeToolsTheme.BrAccent };
             prevSp.Children.Add(prevLabel); prevBox.Child = prevSp;
             pRow.Children.Add(prevBox);
 
@@ -334,7 +334,7 @@ namespace METools.FamilyPlacer
                 var sub = (_tbSubIndex?.Text ?? "").Trim();
                 var lbl = fi + sk + (string.IsNullOrEmpty(sub) ? "" : "_" + sub);
                 prevLabel.Text       = string.IsNullOrEmpty(lbl) ? "--" : lbl;
-                prevLabel.Foreground = string.IsNullOrEmpty(lbl) ? MeToolsTheme.BrMuted : MeToolsTheme.BrPetrol;
+                prevLabel.Foreground = string.IsNullOrEmpty(lbl) ? MeToolsTheme.BrMuted : MeToolsTheme.BrAccent;
             };
             _tbFI.TextChanged         += (s, e) => updatePreview();
             _tbStromkreis.TextChanged += (s, e) => updatePreview();
@@ -870,7 +870,7 @@ namespace METools.FamilyPlacer
                 panel.Children.Add(new TextBlock
                 {
                     Text = lvlGrp.Key, FontSize = 10.5, FontWeight = FontWeights.SemiBold,
-                    Foreground = MeToolsTheme.BrPetrol, Margin = new Thickness(0, 6, 0, 2),
+                    Foreground = MeToolsTheme.BrAccent, Margin = new Thickness(0, 6, 0, 2),
                 });
                 foreach (var el in lvlGrp.OrderBy(e => e.FamilyName))
                 {
@@ -1132,8 +1132,8 @@ namespace METools.FamilyPlacer
             var laSp = new StackPanel();
             laSp.Children.Add(new TextBlock { Text = S._("circuittagger.leader_arrowhead"), FontSize = 9, FontWeight = FontWeights.SemiBold,
                 Foreground = MeToolsTheme.BrMuted, Margin = new Thickness(0, 0, 0, 6) });
-            _cbSetHAlign = new ComboBox { Height = 28, FontSize = 11, IsEditable = false,
-                Background = MeToolsTheme.BrInput, Foreground = MeToolsTheme.BrInputFg, BorderBrush = MeToolsTheme.BrBorder };
+            _cbSetHAlign = new ComboBox { Height = 28, FontSize = 11, IsEditable = false };
+            ApplyComboStyle(_cbSetHAlign); // was setting Background/Foreground/BorderBrush directly, which the default Template mostly ignores -- same gap as CompactComboStrict/ComboCard in the shared base file
             foreach (var arrow in new[] { "None", "Arrow 30 Deg", "Arrow Filled 30 Deg", "Dot Small", "Dot Medium" })
                 _cbSetHAlign.Items.Add(arrow);
             _cbSetHAlign.SelectedItem = s.SubLabelHAlign;
@@ -1173,10 +1173,9 @@ namespace METools.FamilyPlacer
             var fontCombo = new ComboBox
             {
                 Height = 32, FontSize = 12, IsEditable = true,
-                Background = MeToolsTheme.BrInput, Foreground = MeToolsTheme.BrInputFg,
-                BorderBrush = MeToolsTheme.BrBorder, BorderThickness = new Thickness(1),
                 IsTextSearchEnabled = true,
             };
+            ApplyComboStyle(fontCombo); // same fix -- IsEditable=true here specifically needed the shared template's new PART_EditableTextBox to keep typing working
 
             // Populate with system fonts using WPF's font API (no System.Drawing needed)
             try
@@ -1593,9 +1592,9 @@ namespace METools.FamilyPlacer
                     {
                         CornerRadius = new CornerRadius(3), Padding = new Thickness(5, 1, 5, 1),
                         Margin = new Thickness(6, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center,
-                        Background = MeToolsTheme.BrActiveBg, BorderBrush = MeToolsTheme.BrPetrol, BorderThickness = new Thickness(1),
+                        Background = MeToolsTheme.BrActiveBg, BorderBrush = MeToolsTheme.BrAccent, BorderThickness = new Thickness(1),
                         Child = new TextBlock { Text = CatShort(info.CategoryId), FontSize = 9,
-                            Foreground = MeToolsTheme.BrPetrol, FontWeight = FontWeights.SemiBold },
+                            Foreground = MeToolsTheme.BrAccent, FontWeight = FontWeights.SemiBold },
                     };
                     var famTb  = new TextBlock { Text = info.FamilyName, FontSize = 11, Foreground = MeToolsTheme.BrText,
                         VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis,
@@ -1720,11 +1719,11 @@ namespace METools.FamilyPlacer
                 CornerRadius = new CornerRadius(3), Padding = new Thickness(5, 2, 5, 2),
                 VerticalAlignment = VerticalAlignment.Center,
                 Background = new SolidColorBrush(Color.FromArgb(isSubRow ? (byte)15 : (byte)30,
-                    MeToolsTheme.CPetrol.R, MeToolsTheme.CPetrol.G, MeToolsTheme.CPetrol.B)),
-                BorderBrush = MeToolsTheme.BrPetrol, BorderThickness = new Thickness(1),
+                    MeToolsTheme.CAccent.R, MeToolsTheme.CAccent.G, MeToolsTheme.CAccent.B)),
+                BorderBrush = MeToolsTheme.BrAccent, BorderThickness = new Thickness(1),
                 Child = new TextBlock { Text = label, FontSize = isSubRow ? 9 : 11,
                     FontWeight = FontWeights.Bold, FontFamily = new FontFamily("Consolas"),
-                    Foreground = MeToolsTheme.BrPetrol },
+                    Foreground = MeToolsTheme.BrAccent },
             };
         }
 
@@ -1765,8 +1764,9 @@ namespace METools.FamilyPlacer
 
         private Button MakeFooterBtn(string label, bool primary, Action onClick)
         {
-            var bgN = primary ? MeToolsTheme.BrPetrol : MeToolsTheme.BrBtnBg;
-            var bgH = primary ? MeToolsTheme.BrPetrolDark : MeToolsTheme.BrActiveBg;
+            bool dark = MeToolsTheme.Current == MeTheme.Dark;
+            var bgN = primary ? MeToolsTheme.BrPrimaryFill : MeToolsTheme.BrBtnBg;
+            var bgH = primary ? (dark ? MeToolsTheme.BrAccentHover : MeToolsTheme.BrPetrolDark) : MeToolsTheme.BrActiveBg;
 
             // Build a template that respects Padding properly
             var f = new System.Windows.FrameworkElementFactory(typeof(Border));
@@ -1786,12 +1786,13 @@ namespace METools.FamilyPlacer
                 Content = label, Height = 32, FontSize = 12,
                 FontWeight = primary ? FontWeights.SemiBold : FontWeights.Normal,
                 Background = bgN,
-                BorderBrush = primary ? MeToolsTheme.BrPetrol : MeToolsTheme.BrBtnBorder,
-                BorderThickness = new Thickness(1),
-                Foreground = primary ? Brushes.White : MeToolsTheme.BrText,
+                BorderBrush = Brushes.Transparent,
+                BorderThickness = new Thickness(0),
+                Foreground = primary ? MeToolsTheme.BrPrimaryFg : MeToolsTheme.BrText,
                 Cursor = Cursors.Hand,
                 Template = tmpl,
             };
+            if (primary) b.Effect = MeToolsTheme.PrimaryButtonGlow();
             b.MouseEnter += (s, e) => b.Background = bgH;
             b.MouseLeave += (s, e) => b.Background = bgN;
             b.Click      += (s, e) => onClick();
@@ -1800,8 +1801,9 @@ namespace METools.FamilyPlacer
 
         private Button SmallBtn(string label, bool primary, Action onClick)
         {
-            var bgN = primary ? MeToolsTheme.BrPetrol : MeToolsTheme.BrBtnBg;
-            var bgH = primary ? MeToolsTheme.BrPetrolDark : MeToolsTheme.BrActiveBg;
+            bool dark = MeToolsTheme.Current == MeTheme.Dark;
+            var bgN = primary ? MeToolsTheme.BrPrimaryFill : MeToolsTheme.BrBtnBg;
+            var bgH = primary ? (dark ? MeToolsTheme.BrAccentHover : MeToolsTheme.BrPetrolDark) : MeToolsTheme.BrActiveBg;
 
             var f = new System.Windows.FrameworkElementFactory(typeof(Border));
             f.SetBinding(Border.BackgroundProperty,      new System.Windows.Data.Binding("Background")      { RelativeSource = new System.Windows.Data.RelativeSource(System.Windows.Data.RelativeSourceMode.TemplatedParent) });
@@ -1819,11 +1821,12 @@ namespace METools.FamilyPlacer
             {
                 Content = label, Height = 30, FontSize = 11,
                 FontWeight = primary ? FontWeights.SemiBold : FontWeights.Normal,
-                Background = bgN, BorderBrush = primary ? MeToolsTheme.BrPetrol : MeToolsTheme.BrBtnBorder,
-                BorderThickness = new Thickness(1),
-                Foreground = primary ? Brushes.White : MeToolsTheme.BrText,
+                Background = bgN, BorderBrush = Brushes.Transparent,
+                BorderThickness = new Thickness(0),
+                Foreground = primary ? MeToolsTheme.BrPrimaryFg : MeToolsTheme.BrText,
                 Cursor = Cursors.Hand, Template = tmpl,
             };
+            if (primary) b.Effect = MeToolsTheme.PrimaryButtonGlow();
             b.MouseEnter += (s, e) => b.Background = bgH;
             b.MouseLeave += (s, e) => b.Background = bgN;
             b.Click      += (s, e) => onClick();

@@ -343,7 +343,7 @@ namespace METools.BatchParams
             _lblPreview = new TextBlock
             {
                 Text = "--", FontSize = 15, FontFamily = new FontFamily("Consolas"), FontWeight = FontWeights.Bold,
-                Foreground = MeToolsTheme.BrPetrol, Margin = new Thickness(0, 2, 0, 10),
+                Foreground = MeToolsTheme.BrAccent, Margin = new Thickness(0, 2, 0, 10),
             };
             sp.Children.Add(_lblPreview);
 
@@ -796,7 +796,7 @@ namespace METools.BatchParams
 
             int total = _matchedElements.Count;
             _lblCompletenessSummary.Text = string.Format(S._("batchparams.n_missing"), missing.Count, total);
-            _lblCompletenessSummary.Foreground = missing.Count > 0 ? MeToolsTheme.Br(MeToolsTheme.COrange) : MeToolsTheme.BrPetrol;
+            _lblCompletenessSummary.Foreground = missing.Count > 0 ? MeToolsTheme.Br(MeToolsTheme.COrange) : MeToolsTheme.BrAccent;
 
             _completenessResultList.Children.Clear();
             const int cap = 200;
@@ -893,7 +893,7 @@ namespace METools.BatchParams
             lblSummary.Text = summary;
             lblSummary.Foreground = result.Errors > 0 ? MeToolsTheme.Br(MeToolsTheme.CRed)
                                    : result.Skipped > 0 ? MeToolsTheme.Br(MeToolsTheme.COrange)
-                                   : MeToolsTheme.BrPetrol;
+                                   : MeToolsTheme.BrAccent;
 
             list.Children.Clear();
             const int cap = 200;

@@ -128,7 +128,7 @@ namespace METools.Comments
             footer.Child = footerBtnRow;
             RootDock.Children.Add(footer);
 
-            var scroller = new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, MaxHeight = 480 };
+            var scroller = new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, MaxHeight = 480, Background = MeToolsTheme.BrBg };
             var root = new StackPanel { Margin = new Thickness(16) };
             scroller.Content = root;
             RootDock.Children.Add(scroller);
@@ -511,9 +511,9 @@ namespace METools.Comments
                 stack.Children.Add(new Border
                 {
                     Background = isMe
-                        ? new SolidColorBrush(Color.FromArgb(50, MeToolsTheme.CPetrol.R, MeToolsTheme.CPetrol.G, MeToolsTheme.CPetrol.B))
+                        ? new SolidColorBrush(Color.FromArgb(50, MeToolsTheme.CAccent.R, MeToolsTheme.CAccent.G, MeToolsTheme.CAccent.B))
                         : MeToolsTheme.BrInfoBox,
-                    BorderBrush = isMe ? MeToolsTheme.BrPetrol : MeToolsTheme.BrBorder,
+                    BorderBrush = isMe ? MeToolsTheme.BrAccent : MeToolsTheme.BrBorder,
                     BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(4),
                     Padding = new Thickness(8, 3, 8, 3), Margin = new Thickness(0, 0, 0, 8),
                     HorizontalAlignment = HorizontalAlignment.Left,
@@ -521,7 +521,7 @@ namespace METools.Comments
                     {
                         Text = (isMe ? S._("comments.assigned_to_you") : S._("comments.assigned_to")) + c.AssignedTo,
                         FontSize = 11, FontWeight = isMe ? FontWeights.SemiBold : FontWeights.Normal,
-                        Foreground = isMe ? MeToolsTheme.BrPetrol : MeToolsTheme.BrInfoText,
+                        Foreground = isMe ? MeToolsTheme.BrAccent : MeToolsTheme.BrInfoText,
                     },
                 });
             }

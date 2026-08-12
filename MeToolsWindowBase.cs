@@ -23,6 +23,14 @@ namespace METools
         private Action      _themeHandler;
         private bool        _isDialog;
         private Border      _outerBorder;
+        private Grid        _titleBar;
+        private Border      _titleWash;
+        private Border      _footerWash;
+        private TextBlock   _titleTextBlock;
+        private TextBlock   _bylineTextBlock;
+        private Button      _caretBtn;
+        private TextBlock   _minGlyph;
+        private TextBlock   _closeGlyph;
 
         // Revit main window handle (set by commands) -> keeps windows above Revit.
         public static System.IntPtr RevitHandle = System.IntPtr.Zero;
@@ -69,7 +77,17 @@ namespace METools
             FontFamily            = new FontFamily("Segoe UI");
             FontSize              = 12;
 
-            // Kein weißer Rand: WindowChrome entfernt + Background = Titelleiste            Background = new SolidColorBrush(MeToolsTheme.CPetrolDark);
+            // Kein weißer Rand: WindowChrome entfernt + Background = Titelleiste
+            // Flat CBg, not the grid brush -- this only ever shows in the
+            // tiny sliver outside _outerBorder's rounded corners. Also
+            // fixes a real pre-existing bug: this statement used to be on
+            // the SAME physical line as the comment above it, so the `//`
+            // silently commented out the entire assignment -- it never
+            // actually ran. Barely noticeable while hardcoded to
+            // CPetrolDark next to an also-solid-petrol title bar; would
+            // have been obviously wrong once the header went light in
+            // Light mode, which is what surfaced it.
+            Background = new SolidColorBrush(MeToolsTheme.CBg);
             var chrome = new System.Windows.Shell.WindowChrome
             {
                 CaptionHeight         = 0,
@@ -82,7 +100,7 @@ namespace METools
             // Äußerer Container — abgerundete Ecken
             _outerBorder = new Border
             {
-                CornerRadius = new CornerRadius(8),
+                CornerRadius = new CornerRadius(20),
                 ClipToBounds = true,
                 Background   = MeToolsTheme.BrBg,
             };
@@ -93,13 +111,51 @@ namespace METools
             // Titelleiste
             BuildTitleBar(title);
 
+            // Implicit style, not an explicit call like ApplyComboStyle --
+            // checkboxes get constructed ad-hoc in individual tool windows
+            // (e.g. Collision Checker's "Also check imported CAD/IFC..."),
+            // not through a shared helper here, so there's no one place to
+            // intercept them all. An implicit Style keyed by typeof(CheckBox)
+            // on THIS window's own Resources applies automatically to every
+            // CheckBox anywhere in this window's visual tree -- current and
+            // future -- without touching a single tool's own file.
+            ApplyCheckBoxStyle(this);
+            ApplyScrollBarStyle(this); // same implicit-style reasoning -- scrollbars live inside whatever ScrollViewer a tool uses, not a shared helper
+
             // Theme-Event: alle offenen Fenster gleichzeitig umschalten
             _themeHandler = () => Dispatcher.Invoke(() =>
             {
-                Background = new SolidColorBrush(MeToolsTheme.CPetrolDark);
+                // Flat CBg, not the grid brush -- this only ever shows in
+                // the tiny sliver outside _outerBorder's rounded corners,
+                // where a tiled pattern would be pointless. Was hardcoded
+                // to CPetrolDark regardless of theme before, which barely
+                // mattered while the title bar was ALSO solid petrol (it
+                // just blended in) -- now that the header is light in
+                // Light mode, a dark corner speck would actually be
+                // visible and look like a mistake.
+                Background = new SolidColorBrush(MeToolsTheme.CBg);
                 _outerBorder.Background = MeToolsTheme.BrBg;
-                if (StatusBarGrid != null)
-                    StatusBarGrid.Background = MeToolsTheme.BrStatusBar;
+                if (_titleBar != null) _titleBar.Background = MeToolsTheme.BrBg;
+                if (_titleWash != null) _titleWash.Background = MeToolsTheme.HeaderWashBrush();
+                if (_titleTextBlock != null) _titleTextBlock.Foreground = MeToolsTheme.BrTitleText;
+                if (_bylineTextBlock != null) _bylineTextBlock.Foreground = MeToolsTheme.BrTitleTextMuted;
+                if (_caretBtn != null)
+                {
+                    _caretBtn.Background = MeToolsTheme.BrTitleOverlay;
+                    _caretBtn.Foreground = MeToolsTheme.BrTitleText;
+                }
+                if (_minGlyph != null) _minGlyph.Foreground = MeToolsTheme.BrTitleText;
+                if (_closeGlyph != null) _closeGlyph.Foreground = MeToolsTheme.BrTitleText;
+                if (StatusBarGrid != null) StatusBarGrid.Background = MeToolsTheme.BrBg;
+                if (_footerWash != null) _footerWash.Background = MeToolsTheme.FooterWashBrush();
+                if (StatusLeft != null) StatusLeft.Foreground = MeToolsTheme.BrTitleTextMuted;
+                if (StatusRight != null)
+                {
+                    var mc = MeToolsTheme.CTitleTextMuted;
+                    StatusRight.Foreground = new SolidColorBrush(Color.FromArgb(170, mc.R, mc.G, mc.B));
+                }
+                ApplyCheckBoxStyle(this);
+                ApplyScrollBarStyle(this);
                 OnThemeChanged();
             });
             MeToolsTheme.ThemeChanged += _themeHandler;
@@ -166,7 +222,7 @@ namespace METools
             var bar = new Grid
             {
                 Height     = 38,
-                Background = MeToolsTheme.BrPetrolDark,
+                Background = MeToolsTheme.BrBg,
             };
             bar.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             bar.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -189,67 +245,86 @@ namespace METools
 
             // Titel
             var tp = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
-            tp.Children.Add(new TextBlock
+            _titleTextBlock = new TextBlock
             {
                 Text = title, FontSize = 14,
-                FontWeight = FontWeights.Bold, FontStyle = FontStyles.Italic,
-                Foreground = Brushes.White, VerticalAlignment = VerticalAlignment.Center,
-            });
-            tp.Children.Add(new TextBlock
+                FontWeight = FontWeights.SemiBold,
+                Foreground = MeToolsTheme.BrTitleText, VerticalAlignment = VerticalAlignment.Center,
+            };
+            tp.Children.Add(_titleTextBlock);
+            _bylineTextBlock = new TextBlock
             {
                 Text = "  by Mayer E-Concept SRL", FontSize = 10,
-                Foreground = new SolidColorBrush(Color.FromArgb(160, 255, 255, 255)),
+                Foreground = MeToolsTheme.BrTitleTextMuted,
                 VerticalAlignment = VerticalAlignment.Center,
-            });
+            };
+            tp.Children.Add(_bylineTextBlock);
+            
             if (AppKey != null)
             {
-                var caret = new Button
+                _caretBtn = new Button
                 {
                     Content = "\u25BE", FontSize = 13, FontWeight = FontWeights.Bold,
                     Width = 34, Height = 26, Padding = new Thickness(0),
                     Margin = new Thickness(8, 1, 0, 0),
-                    Background = new SolidColorBrush(Color.FromArgb(36, 255, 255, 255)),
+                    Background = MeToolsTheme.BrTitleOverlay,
                     BorderThickness = new Thickness(0),
-                    Foreground = Brushes.White,
+                    Foreground = MeToolsTheme.BrTitleText,
                     Cursor = Cursors.Hand, VerticalAlignment = VerticalAlignment.Center,
                     ToolTip = "Switch app",
                 };
-                caret.Template = RoundedBtnTemplate();
-                var caretBg = caret.Background;
-                caret.MouseEnter += (s, e) => caret.Background = new SolidColorBrush(Color.FromArgb(80, 255, 255, 255));
-                caret.MouseLeave += (s, e) => caret.Background = caretBg;
-                caret.Click += (s, e) => ShowAppMenu(caret);
-                tp.Children.Add(caret);
+                _caretBtn.Template = RoundedBtnTemplate();
+                _caretBtn.MouseEnter += (s, e) => _caretBtn.Background = MeToolsTheme.BrTitleOverlayHover;
+                _caretBtn.MouseLeave += (s, e) => _caretBtn.Background = MeToolsTheme.BrTitleOverlay;
+                _caretBtn.Click += (s, e) => ShowAppMenu(_caretBtn);
+                tp.Children.Add(_caretBtn);
             }
             Grid.SetColumn(tp, 1);
             bar.Children.Add(tp);
 
-            // Fenster-Buttons: Theme | Minimize | Close
+            // Fenster-Buttons: Minimize | Close
             var btns = new StackPanel { Orientation = Orientation.Horizontal };
 
-            var minBtn = TitleBtn(new TextBlock
+            _minGlyph = new TextBlock
             {
                 Text = "─", FontSize = 14, FontWeight = FontWeights.Bold,
-                Foreground = Brushes.White,
+                Foreground = MeToolsTheme.BrTitleText,
                 HorizontalAlignment = HorizontalAlignment.Center,
                 VerticalAlignment   = VerticalAlignment.Center,
-            }, false);
+            };
+            var minBtn = TitleBtn(_minGlyph, false);
             minBtn.Click += (s, e) => WindowState = WindowState.Minimized;
             btns.Children.Add(minBtn);
 
-            var closeBtn = TitleBtn(new TextBlock
+            _closeGlyph = new TextBlock
             {
                 Text = "✕", FontSize = 12, FontWeight = FontWeights.Bold,
-                Foreground = Brushes.White,
+                Foreground = MeToolsTheme.BrTitleText,
                 HorizontalAlignment = HorizontalAlignment.Center,
                 VerticalAlignment   = VerticalAlignment.Center,
-            }, true);
+            };
+            var closeBtn = TitleBtn(_closeGlyph, true);
             closeBtn.Click += (s, e) => OnCloseClicked();
             btns.Children.Add(closeBtn);
 
             Grid.SetColumn(btns, 2);
             bar.Children.Add(btns);
 
+            // The actual redesign: no more solid petrol fill -- a soft
+            // wash, strongest at the bottom (the seam with the body),
+            // fading to nothing at the window's own top edge. Added last
+            // so it sits visually on top of the logo/title/buttons (same
+            // as the approved preview, where the wash tints everything
+            // semi-transparently rather than sitting behind it), spans
+            // all 3 columns, and is hit-test-transparent so it doesn't
+            // swallow clicks meant for the buttons or the drag behavior
+            // above.
+            var wash = new Border { Background = MeToolsTheme.HeaderWashBrush(), IsHitTestVisible = false };
+            Grid.SetColumnSpan(wash, 3);
+            bar.Children.Add(wash);
+
+            _titleBar  = bar;
+            _titleWash = wash;
             DockPanel.SetDock(bar, Dock.Top);
             RootDock.Children.Add(bar);
         }
@@ -274,7 +349,7 @@ namespace METools
             StatusBarGrid = new Grid
             {
                 Height = 26,
-                Background = MeToolsTheme.BrStatusBar,
+                Background = MeToolsTheme.BrBg,
             };
             StatusBarGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             StatusBarGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -282,14 +357,15 @@ namespace METools
             StatusLeft = new TextBlock
             {
                 Text = left, FontSize = 11,
-                Foreground = new SolidColorBrush(Color.FromArgb(220, 255, 255, 255)),
+                Foreground = MeToolsTheme.BrTitleTextMuted,
                 VerticalAlignment = VerticalAlignment.Center,
                 Margin = new Thickness(12, 0, 0, 0),
             };
+            var mutedC = MeToolsTheme.CTitleTextMuted;
             StatusRight = new TextBlock
             {
                 Text = right, FontSize = 10,
-                Foreground = new SolidColorBrush(Color.FromArgb(140, 255, 255, 255)),
+                Foreground = new SolidColorBrush(Color.FromArgb(170, mutedC.R, mutedC.G, mutedC.B)),
                 VerticalAlignment = VerticalAlignment.Center,
                 Margin = new Thickness(0, 0, 10, 0),
             };
@@ -297,6 +373,15 @@ namespace METools
             Grid.SetColumn(StatusRight, 1);
             StatusBarGrid.Children.Add(StatusLeft);
             StatusBarGrid.Children.Add(StatusRight);
+
+            // Mirror of the header wash -- strongest at the TOP of the bar
+            // (the seam with the body above it), fading to nothing at the
+            // window's own bottom edge. Added last, spans both columns,
+            // hit-test-transparent so it doesn't block anything.
+            _footerWash = new Border { Background = MeToolsTheme.FooterWashBrush(), IsHitTestVisible = false };
+            Grid.SetColumnSpan(_footerWash, 2);
+            StatusBarGrid.Children.Add(_footerWash);
+
             DockPanel.SetDock(StatusBarGrid, Dock.Bottom);
             RootDock.Children.Add(StatusBarGrid);
         }
@@ -319,7 +404,7 @@ namespace METools
                 bool current = key == AppKey;
                 var row = new Border
                 {
-                    Height = 34, CornerRadius = new CornerRadius(4),
+                    Height = 34, CornerRadius = new CornerRadius(8),
                     Padding = new Thickness(14, 0, 18, 0),
                     Background = current ? MeToolsTheme.BrActiveBg : Brushes.Transparent,
                     Cursor = current ? Cursors.Arrow : Cursors.Hand,
@@ -351,7 +436,7 @@ namespace METools
                 Background = MeToolsTheme.BrSurface,
                 BorderBrush = MeToolsTheme.BrBorder,
                 BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(6),
+                CornerRadius = new CornerRadius(12),
                 MinWidth = 180,
                 Padding = new Thickness(4),
                 Child = panel,
@@ -390,12 +475,12 @@ namespace METools
             if (cb == null) return;
 
             bool dark   = MeToolsTheme.Current == MeTheme.Dark;
-            string bg   = dark ? "#FF282828" : "#FFFFFFFF";
-            string fg   = dark ? "#FFE8E8E8" : "#FF1E2528";
-            string bdr  = dark ? "#FF444444" : "#FFD0D5D9";
-            string hov  = dark ? "#FF0F3535" : "#FFE0F0F0";
-            string hfg  = dark ? "#FF5DCAA5" : "#FF0D3D3D";
-            string pbg  = dark ? "#FF2A2A2A" : "#FFFFFFFF";
+            string bg   = dark ? "#FF0F1E1E" : "#FFFFFFFF";
+            string fg   = dark ? "#FFE9F7F5" : "#FF23292B";
+            string bdr  = dark ? "#22FFFFFF" : "#FFE3E5E4";
+            string hov  = dark ? "#1F54DBD3" : "#FFE8F2F0";
+            string hfg  = dark ? "#FF6FE9E0" : "#FF14524C";
+            string pbg  = dark ? "#FF112222" : "#FFFFFFFF";
 
             string xaml = $@"
 <Style xmlns=""http://schemas.microsoft.com/winfx/2006/xaml/presentation""
@@ -412,15 +497,20 @@ namespace METools
                 <Border Background=""{{TemplateBinding Background}}""
                         BorderBrush=""{{TemplateBinding BorderBrush}}""
                         BorderThickness=""{{TemplateBinding BorderThickness}}""
-                        CornerRadius=""4"">
+                        CornerRadius=""10"">
                     <Grid>
                         <ToggleButton Focusable=""False"" Opacity=""0""
                             IsChecked=""{{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={{RelativeSource TemplatedParent}}}}""
                             HorizontalAlignment=""Stretch"" VerticalAlignment=""Stretch""/>
-                        <ContentPresenter Margin=""8,0,24,0"" IsHitTestVisible=""False""
+                        <ContentPresenter x:Name=""ContentSite"" Margin=""8,0,24,0"" IsHitTestVisible=""False""
                             VerticalAlignment=""Center""
                             Content=""{{Binding SelectionBoxItem, RelativeSource={{RelativeSource TemplatedParent}}}}""
                             ContentTemplate=""{{Binding SelectionBoxItemTemplate, RelativeSource={{RelativeSource TemplatedParent}}}}""/>
+                        <TextBox x:Name=""PART_EditableTextBox"" Visibility=""Collapsed""
+                            Margin=""8,0,24,0"" Background=""Transparent"" BorderThickness=""0""
+                            Foreground=""{fg}"" CaretBrush=""{fg}""
+                            VerticalAlignment=""Center"" VerticalContentAlignment=""Center""
+                            Focusable=""True""/>
                         <Path Data=""M 0 0 L 4 4 L 8 0 Z"" Fill=""{fg}""
                               HorizontalAlignment=""Right"" VerticalAlignment=""Center""
                               Margin=""0,0,8,0"" IsHitTestVisible=""False""/>
@@ -429,7 +519,7 @@ namespace METools
                                Focusable=""False"" StaysOpen=""False""
                                Width=""{{Binding ActualWidth, RelativeSource={{RelativeSource TemplatedParent}}}}"">
                             <Border Background=""{pbg}"" BorderBrush=""{bdr}""
-                                    BorderThickness=""1"" CornerRadius=""0,0,4,4"">
+                                    BorderThickness=""1"" CornerRadius=""0,0,10,10"">
                                 <ScrollViewer MaxHeight=""200"" VerticalScrollBarVisibility=""Auto"">
                                     <ItemsPresenter/>
                                 </ScrollViewer>
@@ -437,6 +527,12 @@ namespace METools
                         </Popup>
                     </Grid>
                 </Border>
+                <ControlTemplate.Triggers>
+                    <Trigger Property=""IsEditable"" Value=""true"">
+                        <Setter TargetName=""ContentSite"" Property=""Visibility"" Value=""Collapsed""/>
+                        <Setter TargetName=""PART_EditableTextBox"" Property=""Visibility"" Value=""Visible""/>
+                    </Trigger>
+                </ControlTemplate.Triggers>
             </ControlTemplate>
         </Setter.Value>
     </Setter>
@@ -461,6 +557,140 @@ namespace METools
             {
                 var style = (System.Windows.Style)System.Windows.Markup.XamlReader.Parse(xaml);
                 cb.Style = style;
+            }
+            catch { }
+        }
+
+        // Implicit style for every CheckBox in this window (see the call
+        // site in InitWindow for why implicit rather than explicit-per-
+        // control). Rounded box instead of WPF's default square one,
+        // solid accent fill + a checkmark glyph when checked instead of
+        // the default's plain tick-in-a-square -- same visual family as
+        // the rest of this redesign's rounded, accent-filled controls.
+        // Re-called from the theme-toggle handler too, replacing this
+        // window's Resources entry with a freshly-themed Style -- WPF's
+        // implicit style lookup is resource-reference-based under the
+        // hood, so existing checkboxes already in the tree pick up the
+        // replacement the same way a DynamicResource would.
+        public static void ApplyCheckBoxStyle(Window window)
+        {
+            if (window == null) return;
+            bool dark = MeToolsTheme.Current == MeTheme.Dark;
+            string fg        = dark ? "#FFCFE6E3" : "#FF23292B";
+            string boxBg     = dark ? "#2654DBD3" : "#FFFFFFFF";
+            string boxBdr    = dark ? "#FF54DBD3" : "#FFC7CBCA";
+            string checkedBg = dark ? "#FF54DBD3" : "#FF0F6E5E";
+            string checkFg   = dark ? "#FF06201D" : "#FFFFFFFF";
+
+            string xaml = $@"
+<Style xmlns=""http://schemas.microsoft.com/winfx/2006/xaml/presentation""
+       xmlns:x=""http://schemas.microsoft.com/winfx/2006/xaml""
+       TargetType=""CheckBox"">
+    <Setter Property=""Foreground"" Value=""{fg}""/>
+    <Setter Property=""Template"">
+        <Setter.Value>
+            <ControlTemplate TargetType=""CheckBox"">
+                <StackPanel Orientation=""Horizontal"">
+                    <Border x:Name=""Box"" Width=""16"" Height=""16"" CornerRadius=""5""
+                            Background=""{boxBg}"" BorderBrush=""{boxBdr}"" BorderThickness=""1.3""
+                            VerticalAlignment=""Center"">
+                        <Path x:Name=""Check"" Data=""M 2 6 L 6 10 L 12 2"" Stroke=""{checkFg}""
+                              StrokeThickness=""1.8"" StrokeStartLineCap=""Round"" StrokeEndLineCap=""Round""
+                              StrokeLineJoin=""Round"" Visibility=""Collapsed""
+                              Margin=""1"" Stretch=""Uniform""/>
+                    </Border>
+                    <ContentPresenter Margin=""8,0,0,0"" VerticalAlignment=""Center""/>
+                </StackPanel>
+                <ControlTemplate.Triggers>
+                    <Trigger Property=""IsChecked"" Value=""True"">
+                        <Setter TargetName=""Box"" Property=""Background"" Value=""{checkedBg}""/>
+                        <Setter TargetName=""Box"" Property=""BorderBrush"" Value=""{checkedBg}""/>
+                        <Setter TargetName=""Check"" Property=""Visibility"" Value=""Visible""/>
+                    </Trigger>
+                </ControlTemplate.Triggers>
+            </ControlTemplate>
+        </Setter.Value>
+    </Setter>
+</Style>";
+
+            try
+            {
+                var style = (System.Windows.Style)System.Windows.Markup.XamlReader.Parse(xaml);
+                window.Resources[typeof(System.Windows.Controls.CheckBox)] = style;
+            }
+            catch { }
+        }
+
+        // Implicit style for every ScrollBar in this window -- same
+        // reasoning as ApplyCheckBoxStyle: scrollbars show up inside
+        // whatever ScrollViewer a given tool happens to use, not through a
+        // shared helper, so an implicit Style is the only way to reach all
+        // of them without touching every tool's own file. WPF's stock
+        // scrollbar is plain OS-themed light gray and doesn't adapt to an
+        // app's own theme at all -- exactly what stood out against a dark
+        // background.
+        //
+        // Deliberately doesn't touch the scrollbar's own thickness/width --
+        // that's actually controlled by the ScrollViewer's template, a
+        // different control this doesn't touch, so changing it here
+        // wouldn't do anything anyway. This only recolors what's already
+        // there: a transparent track and a rounded, theme-tinted thumb,
+        // with the up/down and page arrow buttons kept functional but
+        // invisible (Opacity 0) for a cleaner, more minimal look, matching
+        // the rest of this redesign.
+        public static void ApplyScrollBarStyle(Window window)
+        {
+            if (window == null) return;
+            bool dark = MeToolsTheme.Current == MeTheme.Dark;
+            string thumb      = dark ? "#3854DBD3" : "#48124D4D";
+            string thumbHover = dark ? "#7054DBD3" : "#80124D4D";
+
+            string xaml = $@"
+<Style xmlns=""http://schemas.microsoft.com/winfx/2006/xaml/presentation""
+       xmlns:x=""http://schemas.microsoft.com/winfx/2006/xaml""
+       TargetType=""ScrollBar"">
+    <Setter Property=""Background"" Value=""Transparent""/>
+    <Setter Property=""Template"">
+        <Setter.Value>
+            <ControlTemplate TargetType=""ScrollBar"">
+                <Grid Background=""Transparent"">
+                    <Track x:Name=""PART_Track"" IsDirectionReversed=""True"" Focusable=""False"">
+                        <Track.DecreaseRepeatButton>
+                            <RepeatButton Command=""ScrollBar.PageUpCommand"" Opacity=""0"" Focusable=""False""/>
+                        </Track.DecreaseRepeatButton>
+                        <Track.IncreaseRepeatButton>
+                            <RepeatButton Command=""ScrollBar.PageDownCommand"" Opacity=""0"" Focusable=""False""/>
+                        </Track.IncreaseRepeatButton>
+                        <Track.Thumb>
+                            <Thumb MinHeight=""24"" MinWidth=""24"">
+                                <Thumb.Template>
+                                    <ControlTemplate TargetType=""Thumb"">
+                                        <Border x:Name=""ThumbBorder"" Background=""{thumb}"" CornerRadius=""4"" Margin=""4,2,2,2""/>
+                                        <ControlTemplate.Triggers>
+                                            <Trigger Property=""IsMouseOver"" Value=""True"">
+                                                <Setter TargetName=""ThumbBorder"" Property=""Background"" Value=""{thumbHover}""/>
+                                            </Trigger>
+                                        </ControlTemplate.Triggers>
+                                    </ControlTemplate>
+                                </Thumb.Template>
+                            </Thumb>
+                        </Track.Thumb>
+                    </Track>
+                </Grid>
+                <ControlTemplate.Triggers>
+                    <Trigger Property=""Orientation"" Value=""Horizontal"">
+                        <Setter TargetName=""PART_Track"" Property=""IsDirectionReversed"" Value=""False""/>
+                    </Trigger>
+                </ControlTemplate.Triggers>
+            </ControlTemplate>
+        </Setter.Value>
+    </Setter>
+</Style>";
+
+            try
+            {
+                var style = (System.Windows.Style)System.Windows.Markup.XamlReader.Parse(xaml);
+                window.Resources[typeof(System.Windows.Controls.Primitives.ScrollBar)] = style;
             }
             catch { }
         }
@@ -504,7 +734,7 @@ namespace METools
             sp.Children.Add(new Border { Height = 1, Width = 10, Background = MeToolsTheme.BrSecLine, VerticalAlignment = VerticalAlignment.Center });
             sp.Children.Add(new TextBlock
             {
-                Text = $"  {text.ToUpper()}  ", FontSize = 9.5, FontWeight = FontWeights.Bold,
+                Text = $"  {text}  ", FontSize = 11, FontWeight = FontWeights.Medium,
                 Foreground = MeToolsTheme.BrSecText, VerticalAlignment = VerticalAlignment.Center,
             });
             sp.Children.Add(new Border { Height = 1, MinWidth = 80, Background = MeToolsTheme.BrSecLine, VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Stretch });
@@ -539,9 +769,13 @@ namespace METools
             {
                 Content = label, Height = 30, MinWidth = 80, FontSize = 12,
                 Padding = new Thickness(14, 0, 14, 0),
-                Background  = active ? MeToolsTheme.BrActiveBg : MeToolsTheme.BrBtnBg,
-                BorderBrush = active ? MeToolsTheme.BrPetrol    : MeToolsTheme.BrBtnBorder,
-                BorderThickness = new Thickness(1),
+                // No border at all in either state -- calmer, closer to
+                // how macOS segmented controls read (background-tint
+                // differentiation only), instead of the previous
+                // bordered-outline treatment.
+                Background  = active ? MeToolsTheme.BrActiveBg : MeToolsTheme.BrSoftFill,
+                BorderBrush = Brushes.Transparent,
+                BorderThickness = new Thickness(0),
                 Foreground  = active ? MeToolsTheme.BrActiveFg  : MeToolsTheme.BrMuted,
                 Cursor = Cursors.Hand,
             };
@@ -559,7 +793,7 @@ namespace METools
                 { RelativeSource = new System.Windows.Data.RelativeSource(System.Windows.Data.RelativeSourceMode.TemplatedParent) });
             f.SetBinding(Border.BorderThicknessProperty, new System.Windows.Data.Binding("BorderThickness")
                 { RelativeSource = new System.Windows.Data.RelativeSource(System.Windows.Data.RelativeSourceMode.TemplatedParent) });
-            f.SetValue(Border.CornerRadiusProperty, new CornerRadius(4));
+            f.SetValue(Border.CornerRadiusProperty, new CornerRadius(10));
             var cp = new System.Windows.FrameworkElementFactory(typeof(ContentPresenter));
             cp.SetValue(ContentPresenter.HorizontalAlignmentProperty, HorizontalAlignment.Center);
             cp.SetValue(ContentPresenter.VerticalAlignmentProperty, VerticalAlignment.Center);
@@ -580,8 +814,9 @@ namespace METools
         protected void UpdateToggle(Button b, bool active)
         {
             if (b == null) return;
-            b.Background  = active ? MeToolsTheme.BrActiveBg : MeToolsTheme.BrBtnBg;
-            b.BorderBrush = active ? MeToolsTheme.BrPetrol    : MeToolsTheme.BrBtnBorder;
+            b.Background  = active ? MeToolsTheme.BrActiveBg : MeToolsTheme.BrSoftFill;
+            b.BorderBrush = Brushes.Transparent;
+            b.BorderThickness = new Thickness(0);
             b.Foreground  = active ? MeToolsTheme.BrActiveFg  : MeToolsTheme.BrMuted;
             if (b.Template == null) b.Template = RoundedBtnTemplate();
         }
@@ -589,17 +824,26 @@ namespace METools
         // Aktions-Button (Place / Multi-Place)
         protected Button ActionBtn(string label, bool outline, Action onClick)
         {
-            var bgNorm = outline ? MeToolsTheme.BrBtnBg       : MeToolsTheme.BrPetrol;
-            var bgHov  = outline ? MeToolsTheme.BrActiveBg    : MeToolsTheme.BrPetrolDark;
-            var fg     = outline ? (MeToolsTheme.Current == MeTheme.Dark ? Brushes.White : MeToolsTheme.BrPetrol) : Brushes.White;
+            bool dark = MeToolsTheme.Current == MeTheme.Dark;
+            var bgNorm = outline ? MeToolsTheme.BrSoftFill : MeToolsTheme.BrPrimaryFill;
+            var bgHov  = outline ? MeToolsTheme.BrSoftFillHover : (dark ? MeToolsTheme.BrAccentHover : MeToolsTheme.BrPetrolDark);
+            // Primary (non-outline) buttons need theme-aware text: white on
+            // the light-mode petrol gradient, but the dark COnAccent tone on
+            // dark mode's bright cyan fill -- white text there would barely
+            // be legible against that background. Secondary/outline
+            // buttons now use muted text to match their new soft-fill,
+            // no-border look -- a calmer button reads better with calmer
+            // text than the previous strong petrol tone.
+            var fg     = outline ? MeToolsTheme.BrMuted : MeToolsTheme.BrPrimaryFg;
             var b = new Button
             {
                 Content = label, Height = 36, FontSize = 13, FontWeight = FontWeights.SemiBold,
                 Padding = new Thickness(16, 0, 16, 0),
-                Background = bgNorm, BorderBrush = MeToolsTheme.BrPetrol,
-                BorderThickness = new Thickness(1.5), Foreground = fg, Cursor = Cursors.Hand,
+                Background = bgNorm, BorderBrush = Brushes.Transparent,
+                BorderThickness = new Thickness(0), Foreground = fg, Cursor = Cursors.Hand,
             };
             b.Template = RoundedBtnTemplate();
+            if (!outline) b.Effect = MeToolsTheme.PrimaryButtonGlow(); // contained shadow/glow -- see remarks on PrimaryButtonGlow itself for why this is safe here but wouldn't be on the whole window
             b.MouseEnter += (s, e) => b.Background = bgHov;
             b.MouseLeave += (s, e) => b.Background = bgNorm;
             b.Click += (s, e) => onClick();
@@ -609,17 +853,19 @@ namespace METools
         // Footer-Button (Abbrechen / Speichern)
         protected Button FooterBtn(string label, bool primary, Action onClick)
         {
-            var bgNorm = primary ? MeToolsTheme.BrPetrol    : MeToolsTheme.BrBtnBg;
-            var bgHov  = primary ? MeToolsTheme.BrPetrolDark : MeToolsTheme.BrActiveBg;
-            var fg     = primary ? Brushes.White              : MeToolsTheme.BrText;
+            bool dark = MeToolsTheme.Current == MeTheme.Dark;
+            var bgNorm = primary ? MeToolsTheme.BrPrimaryFill : MeToolsTheme.BrSoftFill;
+            var bgHov  = primary ? (dark ? MeToolsTheme.BrAccentHover : MeToolsTheme.BrPetrolDark) : MeToolsTheme.BrSoftFillHover;
+            var fg     = primary ? MeToolsTheme.BrPrimaryFg : MeToolsTheme.BrMuted;
             var b = new Button
             {
                 Content = label, Height = 32, Padding = new Thickness(16, 0, 16, 0),
                 FontSize = 12, FontWeight = primary ? FontWeights.SemiBold : FontWeights.Normal,
                 Background = bgNorm,
-                BorderBrush = primary ? MeToolsTheme.BrPetrol : MeToolsTheme.BrBtnBorder,
-                BorderThickness = new Thickness(1), Foreground = fg, Cursor = Cursors.Hand,
+                BorderBrush = Brushes.Transparent,
+                BorderThickness = new Thickness(0), Foreground = fg, Cursor = Cursors.Hand,
             };
+            if (primary) b.Effect = MeToolsTheme.PrimaryButtonGlow();
             b.MouseEnter += (s, e) => b.Background = bgHov;
             b.MouseLeave += (s, e) => b.Background = bgNorm;
             b.Template = RoundedBtnTemplate();
@@ -630,7 +876,7 @@ namespace METools
         // Info-Box
         protected Border InfoBox(string text) => new Border
         {
-            Background = MeToolsTheme.BrInfoBox, CornerRadius = new CornerRadius(5),
+            Background = MeToolsTheme.BrInfoBox, CornerRadius = new CornerRadius(12),
             Padding = new Thickness(10, 8, 10, 8), Margin = new Thickness(0, 0, 0, 12),
             Child = new TextBlock
             {
@@ -668,7 +914,7 @@ namespace METools
         // Small muted section-header label, e.g. "CIRCUIT PARAMETERS".
         protected static TextBlock SecH(string text) => new TextBlock
         {
-            Text = text.ToUpper(), FontSize = 10, FontWeight = FontWeights.SemiBold,
+            Text = text, FontSize = 11.5, FontWeight = FontWeights.Medium,
             Foreground = MeToolsTheme.BrMuted, Margin = new Thickness(0, 0, 0, 6),
         };
 
@@ -684,7 +930,7 @@ namespace METools
         protected StackPanel CompactField(string label, string hint, double width, out TextBox tb, string defaultText = "")
         {
             var sp = new StackPanel { Margin = new Thickness(0, 0, 14, 8) };
-            sp.Children.Add(new TextBlock { Text = label.ToUpper(), FontSize = 8, FontWeight = FontWeights.SemiBold,
+            sp.Children.Add(new TextBlock { Text = label, FontSize = 9.5, FontWeight = FontWeights.Medium,
                 Foreground = MeToolsTheme.BrMuted, Margin = new Thickness(1, 0, 0, 3) });
             var box = new TextBox
             {
@@ -705,14 +951,24 @@ namespace METools
         // width instead of stretching full-width for a short value.
         protected ComboBox CompactComboStrict(string hint, double width)
         {
-            return new ComboBox
+            var cb = new ComboBox
             {
                 Width = width, Height = 26, FontSize = 12, IsEditable = false,
                 FontFamily = new FontFamily("Consolas"), FontWeight = FontWeights.SemiBold,
-                Background = MeToolsTheme.BrInput, Foreground = MeToolsTheme.BrInputFg,
-                BorderBrush = MeToolsTheme.BrBorder, ToolTip = hint,
+                ToolTip = hint,
                 DisplayMemberPath = "DisplayName",
             };
+            // Was missing entirely -- this constructed a plain ComboBox
+            // with a few properties set directly, but never applied the
+            // themed Style/Template that actually controls how a ComboBox
+            // renders (the dropdown button chrome, the popup background,
+            // etc. all come from the Template, not from loose property
+            // values on the outer control). Result: it always looked like
+            // WPF's stock light-themed combo regardless of app theme --
+            // exactly what showed up as "doesn't match dark mode" in
+            // Circuit Tagger's Tag Family picker, which uses this helper.
+            ApplyComboStyle(cb);
+            return cb;
         }
 
         // Bordered card: label above, full-width input below, hint below
@@ -722,11 +978,11 @@ namespace METools
             var card = new Border
             {
                 Background = MeToolsTheme.BrSurface, BorderBrush = MeToolsTheme.BrBorder,
-                BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(5),
+                BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(12),
                 Padding = new Thickness(12, 10, 12, 10),
             };
             var sp = new StackPanel();
-            sp.Children.Add(new TextBlock { Text = label.ToUpper(), FontSize = 9, FontWeight = FontWeights.SemiBold,
+            sp.Children.Add(new TextBlock { Text = label, FontSize = 10.5, FontWeight = FontWeights.Medium,
                 Foreground = MeToolsTheme.BrMuted, Margin = new Thickness(0, 0, 0, 5) });
             var box = new TextBox
             {
@@ -752,19 +1008,28 @@ namespace METools
             var card = new Border
             {
                 Background = MeToolsTheme.BrSurface, BorderBrush = MeToolsTheme.BrBorder,
-                BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(5),
+                BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(12),
                 Padding = new Thickness(12, 8, 12, 8), MaxWidth = 220, HorizontalAlignment = HorizontalAlignment.Left,
             };
             var sp = new StackPanel();
-            sp.Children.Add(new TextBlock { Text = label.ToUpper(), FontSize = 9, FontWeight = FontWeights.SemiBold,
+            sp.Children.Add(new TextBlock { Text = label, FontSize = 10.5, FontWeight = FontWeights.Medium,
                 Foreground = MeToolsTheme.BrMuted, Margin = new Thickness(0, 0, 0, 5) });
             var combo = new ComboBox
             {
                 Height = 28, FontSize = 12, IsEditable = true,
                 FontFamily = new FontFamily("Consolas"), FontWeight = FontWeights.SemiBold,
-                Background = MeToolsTheme.BrInput, Foreground = MeToolsTheme.BrInputFg,
-                BorderBrush = MeToolsTheme.BrBorder, ToolTip = hint,
+                ToolTip = hint,
             };
+            // Same fix as CompactComboStrict above -- was setting a few
+            // properties directly but never applying the Style/Template
+            // that actually renders a ComboBox, so it always looked like
+            // stock WPF regardless of theme (Circuit Tagger's Apartment/
+            // Building fields use this helper). IsEditable=true here
+            // specifically needed the shared template to gain a real
+            // PART_EditableTextBox first (see ApplyComboStyle) -- applying
+            // the old template to an editable combo would have silently
+            // removed the ability to type into it.
+            ApplyComboStyle(combo);
             sp.Children.Add(combo);
             card.Child = sp; cb = combo;
             return card;

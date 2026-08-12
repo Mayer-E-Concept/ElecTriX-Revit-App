@@ -120,6 +120,7 @@ namespace METools.FamilyPlacer
                 VerticalScrollBarVisibility   = ScrollBarVisibility.Auto,
                 HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
                 MaxHeight = 700,
+                Background = MeToolsTheme.BrBg,
             };
             var body = new StackPanel { Margin = new Thickness(14, 12, 14, 12) };
 
@@ -254,8 +255,8 @@ namespace METools.FamilyPlacer
             };
             btnAdd.Click       += (s, e) => AddSlot();
             btnAdd.MouseEnter  += (s, e) => {
-                btnAdd.BorderBrush = MeToolsTheme.BrPetrol;
-                btnAdd.Foreground  = MeToolsTheme.BrPetrol;
+                btnAdd.BorderBrush = MeToolsTheme.BrAccent;
+                btnAdd.Foreground  = MeToolsTheme.BrAccent;
             };
             btnAdd.MouseLeave  += (s, e) => {
                 btnAdd.BorderBrush = MeToolsTheme.BrBorder;
@@ -322,7 +323,7 @@ namespace METools.FamilyPlacer
             // Highlight target slot
             for (int i = 0; i < _rows.Count; i++)
                 _rows[i].Container.BorderBrush = i == targetIdx
-                    ? MeToolsTheme.BrPetrol
+                    ? MeToolsTheme.BrAccent
                     : MeToolsTheme.BrBorder;
         }
 
@@ -784,7 +785,7 @@ namespace METools.FamilyPlacer
             };
             btn.Template = RoundedBtnTemplate();
             btn.Click    += (s, e) => onClick();
-            btn.MouseEnter += (s, e) => { btn.Background = MeToolsTheme.BrActiveBg; btn.BorderBrush = MeToolsTheme.BrPetrol; };
+            btn.MouseEnter += (s, e) => { btn.Background = MeToolsTheme.BrActiveBg; btn.BorderBrush = MeToolsTheme.BrAccent; };
             btn.MouseLeave += (s, e) => { btn.Background = MeToolsTheme.BrBtnBg;    btn.BorderBrush = MeToolsTheme.BrBorder; };
             return btn;
         }
@@ -799,8 +800,8 @@ namespace METools.FamilyPlacer
                 Padding         = new Thickness(12, 0, 12, 0),
                 FontSize        = 12,
                 Background      = active ? MeToolsTheme.BrActiveBg : MeToolsTheme.BrBtnBg,
-                BorderBrush     = active ? MeToolsTheme.BrPetrol    : MeToolsTheme.BrBorder,
-                BorderThickness = new Thickness(1),
+                BorderBrush     = Brushes.Transparent,
+                BorderThickness = new Thickness(0),
                 Foreground      = active ? MeToolsTheme.BrActiveFg  : MeToolsTheme.BrMuted,
                 Cursor          = Cursors.Hand,
             };
@@ -839,12 +840,13 @@ namespace METools.FamilyPlacer
         {
             if (b == null) return;
             b.Background  = active ? MeToolsTheme.BrActiveBg : MeToolsTheme.BrBtnBg;
-            b.BorderBrush = active ? MeToolsTheme.BrPetrol    : MeToolsTheme.BrBorder;
+            b.BorderBrush = Brushes.Transparent;
             b.Foreground  = active ? MeToolsTheme.BrActiveFg  : MeToolsTheme.BrMuted;
         }
 
         private Button MakePlaceBtn(string label, bool isOutline, Action onClick)
         {
+            bool dark = MeToolsTheme.Current == MeTheme.Dark;
             var btn = new Button
             {
                 Content         = label,
@@ -852,20 +854,21 @@ namespace METools.FamilyPlacer
                 FontSize        = 13,
                 Padding         = new Thickness(16, 0, 16, 0),
                 FontWeight      = FontWeights.SemiBold,
-                Background      = isOutline ? MeToolsTheme.BrBtnBg : MeToolsTheme.BrPetrol,
-                BorderBrush     = MeToolsTheme.BrPetrol,
-                BorderThickness = new Thickness(1.5),
-                Foreground      = isOutline ? (MeToolsTheme.Current == MeTheme.Dark ? Brushes.White : MeToolsTheme.BrPetrol) : Brushes.White,
+                Background      = isOutline ? MeToolsTheme.BrSoftFill : MeToolsTheme.BrPrimaryFill,
+                BorderBrush     = Brushes.Transparent,
+                BorderThickness = new Thickness(0),
+                Foreground      = isOutline ? MeToolsTheme.BrMuted : MeToolsTheme.BrPrimaryFg,
                 Cursor          = Cursors.Hand,
             };
+            if (!isOutline) btn.Effect = MeToolsTheme.PrimaryButtonGlow();
             btn.Template   = RoundedBtnTemplate();
             btn.Click      += (s, e) => onClick();
             btn.MouseEnter += (s, e) => btn.Background = isOutline
-                ? MeToolsTheme.BrActiveBg
-                : MeToolsTheme.BrPetrolDark;
+                ? MeToolsTheme.BrSoftFillHover
+                : (dark ? MeToolsTheme.BrAccentHover : MeToolsTheme.BrPetrolDark);
             btn.MouseLeave += (s, e) => btn.Background = isOutline
-                ? MeToolsTheme.BrBtnBg
-                : MeToolsTheme.BrPetrol;
+                ? MeToolsTheme.BrSoftFill
+                : MeToolsTheme.BrPrimaryFill;
             return btn;
         }
 
@@ -1109,7 +1112,7 @@ namespace METools.FamilyPlacer
                 Content   = S._("placer.y_frame"),
                 IsChecked = yFrameCur,
                 FontSize  = 9,
-                Foreground = METools.MeToolsTheme.BrPetrol,
+                Foreground = METools.MeToolsTheme.BrAccent,
                 Margin    = new Thickness(0, 2, 0, 0),
                 ToolTip   = S._("placer.y_frame_tip"),
             };
@@ -1144,7 +1147,7 @@ namespace METools.FamilyPlacer
             {
                 Text                = "\u25CF",
                 FontSize            = 8,
-                Foreground          = MeToolsTheme.BrPetrol,
+                Foreground          = MeToolsTheme.BrAccent,
                 HorizontalAlignment = HorizontalAlignment.Right,
                 VerticalAlignment   = VerticalAlignment.Top,
                 Margin              = new Thickness(0, -1, 1, 0),
@@ -1540,7 +1543,7 @@ namespace METools.FamilyPlacer
                     _familyPopupList.Children.Add(new TextBlock
                     {
                         Text = info.CategoryGroup, FontWeight = FontWeights.Bold, FontStyle = FontStyles.Italic,
-                        Foreground = MeToolsTheme.BrPetrol, FontSize = 10, Margin = new Thickness(6, 4, 0, 1),
+                        Foreground = MeToolsTheme.BrAccent, FontSize = 10, Margin = new Thickness(6, 4, 0, 1),
                     });
                     lastGroup = info.CategoryGroup;
                 }
@@ -1632,14 +1635,31 @@ namespace METools.FamilyPlacer
             SizeToContent = SizeToContent.Height;
             ResizeMode = ResizeMode.NoResize;
             WindowStartupLocation = WindowStartupLocation.CenterOwner;
+            // This dialog extends plain Window, not MeToolsWindowBase (a
+            // native OS title bar is a reasonable, low-risk choice for a
+            // small modal input dialog -- rebuilding the app's own custom
+            // chrome here would be a bigger, riskier change than what this
+            // is), but its CONTENT was never actually themed at all before
+            // this -- plain default black text and default white
+            // background regardless of app theme. Fixed by applying the
+            // same theme-aware colors used everywhere else, just without
+            // the fancy chrome.
+            Background = MeToolsTheme.BrBg;
 
             var sp = new StackPanel { Margin = new Thickness(14) };
             sp.Children.Add(new TextBlock
             {
                 Text = label ?? S._("placer.tpl_name"), FontSize = 12,
+                Foreground = MeToolsTheme.BrText,
                 Margin = new Thickness(0, 0, 0, 6)
             });
-            var tb = new TextBox { Height = 28, FontSize = 12, Text = initialValue ?? "" };
+            var tb = new TextBox
+            {
+                Height = 28, FontSize = 12, Text = initialValue ?? "",
+                Background = MeToolsTheme.BrInput, Foreground = MeToolsTheme.BrInputFg,
+                BorderBrush = MeToolsTheme.BrBorder, BorderThickness = new Thickness(1),
+                Padding = new Thickness(6, 0, 6, 0), VerticalContentAlignment = VerticalAlignment.Center,
+            };
             sp.Children.Add(tb);
 
             var btnRow = new StackPanel
@@ -1650,15 +1670,16 @@ namespace METools.FamilyPlacer
             };
             var cancel = new Button { Content = S._("placer.cancel"), Height = 28, MinWidth = 80,
                 Margin = new Thickness(0, 0, 8, 0),
-                Background = MeToolsTheme.BrBtnBg, Foreground = MeToolsTheme.BrText,
-                BorderBrush = MeToolsTheme.BrBtnBorder, BorderThickness = new Thickness(1),
+                Background = MeToolsTheme.BrSoftFill, Foreground = MeToolsTheme.BrMuted,
+                BorderBrush = Brushes.Transparent, BorderThickness = new Thickness(0),
                 Cursor = Cursors.Hand, Template = METools.MeToolsWindowBase.RoundedBtnTemplate() };
             var ok = new Button { Content = okText ?? S._("placer.save_tpl"), Height = 28, MinWidth = 80,
                 IsDefault = true,
-                Background = MeToolsTheme.BrPetrol,
-                Foreground = Brushes.White,
-                BorderBrush = MeToolsTheme.BrPetrol, BorderThickness = new Thickness(1),
+                Background = MeToolsTheme.BrPrimaryFill,
+                Foreground = MeToolsTheme.BrPrimaryFg,
+                BorderBrush = Brushes.Transparent, BorderThickness = new Thickness(0),
                 Cursor = Cursors.Hand, Template = METools.MeToolsWindowBase.RoundedBtnTemplate() };
+            ok.Effect = MeToolsTheme.PrimaryButtonGlow();
             cancel.Click += (s, e) => { DialogResult = false; Close(); };
             ok.Click     += (s, e) => { TemplateName = tb.Text; DialogResult = true; Close(); };
             btnRow.Children.Add(cancel);

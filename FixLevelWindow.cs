@@ -120,12 +120,14 @@ namespace METools
             {
                 Content = S.Get("fixlevel.fix_btn"), Height = 34, FontSize = 13, FontWeight = FontWeights.SemiBold,
                 Padding = new Thickness(24, 0, 24, 0),
-                Background = MeToolsTheme.BrPetrol, Foreground = Brushes.White,
-                BorderBrush = MeToolsTheme.BrPetrol, BorderThickness = new Thickness(1),
+                Background = MeToolsTheme.BrPrimaryFill, Foreground = MeToolsTheme.BrPrimaryFg,
+                BorderBrush = Brushes.Transparent, BorderThickness = new Thickness(0),
                 Cursor = Cursors.Hand, Template = RoundedBtnTemplate(),
             };
-            run.MouseEnter += (s, e) => run.Background = MeToolsTheme.BrPetrolDark;
-            run.MouseLeave += (s, e) => run.Background = MeToolsTheme.BrPetrol;
+            run.Effect = MeToolsTheme.PrimaryButtonGlow();
+            bool runBtnDark = MeToolsTheme.Current == MeTheme.Dark;
+            run.MouseEnter += (s, e) => run.Background = runBtnDark ? MeToolsTheme.BrAccentHover : MeToolsTheme.BrPetrolDark;
+            run.MouseLeave += (s, e) => run.Background = MeToolsTheme.BrPrimaryFill;
             run.Click += (s, e) => RunFix(dryRun: false);
             btnRow.Children.Add(run);
             _body.Children.Add(btnRow);

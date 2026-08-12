@@ -29,6 +29,7 @@ namespace METools
             {
                 Margin = new Thickness(30, 20, 30, 24),
                 HorizontalAlignment = HorizontalAlignment.Center,
+                Background = MeToolsTheme.BrBg,
             };
             RootDock.Children.Add(panel);
 
@@ -46,7 +47,7 @@ namespace METools
             {
                 Text       = "ME-Tools",
                 FontSize   = 24, FontWeight = FontWeights.Bold, FontStyle = FontStyles.Italic,
-                Foreground = MeToolsTheme.BrPetrol,
+                Foreground = MeToolsTheme.BrAccent,
                 HorizontalAlignment = HorizontalAlignment.Center,
                 Margin     = new Thickness(0, 0, 0, 2),
             });

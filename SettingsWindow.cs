@@ -332,7 +332,7 @@ namespace METools
             var iconTb = new TextBlock
             {
                 Text = glyph, FontFamily = new FontFamily("Segoe MDL2 Assets"), FontSize = 26,
-                Foreground = MeToolsTheme.BrPetrol, HorizontalAlignment = HorizontalAlignment.Center,
+                Foreground = MeToolsTheme.BrAccent, HorizontalAlignment = HorizontalAlignment.Center,
                 Margin = new Thickness(0, 2, 0, 8),
             };
             var labelTb = new TextBlock
@@ -383,7 +383,7 @@ namespace METools
 
             _backBarTitle = new TextBlock
             {
-                FontSize = 13, FontWeight = FontWeights.SemiBold, Foreground = MeToolsTheme.BrPetrol,
+                FontSize = 13, FontWeight = FontWeights.SemiBold, Foreground = MeToolsTheme.BrAccent,
                 VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(12, 0, 0, 0),
             };
             Grid.SetColumn(_backBarTitle, 1);
@@ -578,7 +578,7 @@ namespace METools
                 FontSize        = 14,
                 FontWeight      = FontWeights.Bold,
                 Background      = MeToolsTheme.BrSurface,
-                Foreground      = MeToolsTheme.BrPetrol,
+                Foreground      = MeToolsTheme.BrAccent,
                 BorderBrush     = MeToolsTheme.BrBorder,
                 BorderThickness = new Thickness(1),
                 Padding         = new Thickness(10, 6, 10, 6),
@@ -601,7 +601,7 @@ namespace METools
 
             var contactRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 6, 0, 0) };
             contactRow.Children.Add(new TextBlock { Text = S._("settings.license.need"), FontSize = 10, Foreground = MeToolsTheme.BrMuted, VerticalAlignment = VerticalAlignment.Center });
-            var mailLink = new TextBlock { Text = "office@mayer-econcept.ro", FontSize = 10, Foreground = MeToolsTheme.BrPetrol, Cursor = Cursors.Hand, TextDecorations = TextDecorations.Underline, VerticalAlignment = VerticalAlignment.Center };
+            var mailLink = new TextBlock { Text = "office@mayer-econcept.ro", FontSize = 10, Foreground = MeToolsTheme.BrAccent, Cursor = Cursors.Hand, TextDecorations = TextDecorations.Underline, VerticalAlignment = VerticalAlignment.Center };
             mailLink.MouseLeftButtonDown += (s, e) => { try { System.Diagnostics.Process.Start("mailto:office@mayer-econcept.ro"); } catch { } };
             contactRow.Children.Add(mailLink);
             p.Children.Add(contactRow);
@@ -1110,7 +1110,7 @@ namespace METools
                             Text       = en.Group,
                             FontSize   = 11,
                             FontWeight = FontWeights.Bold,
-                            Foreground = MeToolsTheme.BrPetrol,
+                            Foreground = MeToolsTheme.BrAccent,
                             Margin     = new Thickness(2, 8, 0, 2),
                         });
                         lastGroup = en.Group;

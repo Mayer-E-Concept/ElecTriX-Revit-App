@@ -120,7 +120,7 @@ namespace METools.Comments
                 {
                     Text = S._("commentpopup.assigned_to") + _comment.AssignedTo,
                     FontSize = 11, FontWeight = FontWeights.SemiBold,
-                    Foreground = MeToolsTheme.BrPetrol,
+                    Foreground = MeToolsTheme.BrAccent,
                     Margin = new Thickness(0, -8, 0, 14),
                 });
             }

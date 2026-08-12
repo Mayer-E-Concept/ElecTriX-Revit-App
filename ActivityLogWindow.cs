@@ -442,8 +442,8 @@ namespace METools.ActivityLog
                 {
                     Content = S._("activitylog.go_to_level"), FontSize = 9, Height = 18,
                     Padding = new Thickness(6, 0, 6, 0), Margin = new Thickness(8, 0, 0, 0),
-                    Background = MeToolsTheme.BrBtnBg, Foreground = MeToolsTheme.BrPetrol,
-                    BorderBrush = MeToolsTheme.BrPetrol, BorderThickness = new Thickness(1),
+                    Background = MeToolsTheme.BrBtnBg, Foreground = MeToolsTheme.BrAccent,
+                    BorderBrush = MeToolsTheme.BrAccent, BorderThickness = new Thickness(1),
                     Cursor = System.Windows.Input.Cursors.Hand,
                     Template = RoundedBtnTemplate(),
                 };
@@ -590,7 +590,7 @@ namespace METools.ActivityLog
             {
                 Text = user, FontSize = 12,
                 FontWeight = isMe ? FontWeights.Bold : FontWeights.Normal,
-                Foreground = isMe ? MeToolsTheme.BrPetrol : MeToolsTheme.BrText,
+                Foreground = isMe ? MeToolsTheme.BrAccent : MeToolsTheme.BrText,
                 VerticalAlignment = VerticalAlignment.Center,
             };
             Grid.SetColumn(userText, 0);
@@ -707,7 +707,7 @@ namespace METools.ActivityLog
             var totalText = new TextBlock
             {
                 Text = string.Format(S._("timetracker.daily_total"), FormatDuration(dayTotal)),
-                FontSize = 11, FontWeight = FontWeights.Bold, Foreground = MeToolsTheme.BrPetrol,
+                FontSize = 11, FontWeight = FontWeights.Bold, Foreground = MeToolsTheme.BrAccent,
                 VerticalAlignment = VerticalAlignment.Center,
             };
 

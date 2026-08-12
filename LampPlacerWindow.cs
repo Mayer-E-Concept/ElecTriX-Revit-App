@@ -571,8 +571,9 @@ namespace METools.LampPlacer
 
         Button MiniBtn(string text, bool primary, System.Action onClick)
         {
-            var bgN = primary ? MeToolsTheme.BrPetrol : MeToolsTheme.BrInput;
-            var bgH = primary ? MeToolsTheme.BrPetrolDark : MeToolsTheme.BrActiveBg;
+            bool dark = MeToolsTheme.Current == MeTheme.Dark;
+            var bgN = primary ? MeToolsTheme.BrPrimaryFill : MeToolsTheme.BrSoftFill;
+            var bgH = primary ? (dark ? MeToolsTheme.BrAccentHover : MeToolsTheme.BrPetrolDark) : MeToolsTheme.BrSoftFillHover;
             var b = new Button
             {
                 Content         = text,
@@ -580,12 +581,13 @@ namespace METools.LampPlacer
                 FontSize        = 11,
                 Padding         = new Thickness(10, 0, 10, 0),
                 Background      = bgN,
-                Foreground      = primary ? System.Windows.Media.Brushes.White : MeToolsTheme.BrText,
-                BorderBrush     = MeToolsTheme.BrBorder,
-                BorderThickness = new Thickness(1),
+                Foreground      = primary ? MeToolsTheme.BrPrimaryFg : MeToolsTheme.BrMuted,
+                BorderBrush     = Brushes.Transparent,
+                BorderThickness = new Thickness(0),
                 Cursor          = Cursors.Hand,
                 Template        = RoundedBtnTemplate(),
             };
+            if (primary) b.Effect = MeToolsTheme.PrimaryButtonGlow();
             b.MouseEnter += (s, e) => b.Background = bgH;
             b.MouseLeave += (s, e) => b.Background = bgN;
             b.Click += (s, e) => onClick();
@@ -954,8 +956,14 @@ namespace METools.LampPlacer
         new void UpdateToggle(Button b, bool active)
         {
             if (b == null) return;
+            // This `new` override shadows MeToolsWindowBase's own
+            // UpdateToggle -- meaning the earlier fix made there (removing
+            // the BrPetrol border) never actually reached this file at
+            // all, since C# resolves to whichever UpdateToggle is visible
+            // in LampPlacerWindow's own scope, not the base class's.
+            // Fixed the same way here directly.
             b.Background  = active ? MeToolsTheme.BrActiveBg  : MeToolsTheme.BrSurface;
-            b.BorderBrush = active ? MeToolsTheme.BrPetrol     : MeToolsTheme.BrBtnBorder;
+            b.BorderBrush = Brushes.Transparent;
             b.Foreground  = active ? MeToolsTheme.BrActiveFg   : MeToolsTheme.BrMuted;
         }
 
@@ -1007,8 +1015,8 @@ namespace METools.LampPlacer
             var row = new StackPanel { Orientation = Orientation.Horizontal,
                 HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 14, 0, 0) };
             var ok = new Button { Content = "OK", Width = 72, Margin = new Thickness(0, 0, 6, 0),
-                IsDefault = true, Background = MeToolsTheme.BrPetrol, Foreground = Brushes.White,
-                BorderBrush = MeToolsTheme.BrPetrol, Padding = new Thickness(0, 4, 0, 4),
+                IsDefault = true, Background = MeToolsTheme.BrPrimaryFill, Foreground = MeToolsTheme.BrPrimaryFg,
+                BorderBrush = Brushes.Transparent, Padding = new Thickness(0, 4, 0, 4),
                 Cursor = Cursors.Hand, Template = RoundedBtnTemplate() };
             var cancel = new Button { Content = "Cancel", Width = 72, IsCancel = true,
                 Background = MeToolsTheme.BrInput, Foreground = MeToolsTheme.BrText,
@@ -1047,8 +1055,8 @@ namespace METools.LampPlacer
             var row = new StackPanel { Orientation = Orientation.Horizontal,
                 HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 14, 0, 0) };
             var ok = new Button { Content = "OK", Width = 72, Margin = new Thickness(0, 0, 6, 0),
-                IsDefault = true, Background = MeToolsTheme.BrPetrol, Foreground = Brushes.White,
-                BorderBrush = MeToolsTheme.BrPetrol, Padding = new Thickness(0, 4, 0, 4),
+                IsDefault = true, Background = MeToolsTheme.BrPrimaryFill, Foreground = MeToolsTheme.BrPrimaryFg,
+                BorderBrush = Brushes.Transparent, Padding = new Thickness(0, 4, 0, 4),
                 Cursor = Cursors.Hand, Template = RoundedBtnTemplate() };
             var cancel = new Button { Content = "Cancel", Width = 72, IsCancel = true,
                 Background = MeToolsTheme.BrInput, Foreground = MeToolsTheme.BrText,
@@ -1100,8 +1108,8 @@ namespace METools.LampPlacer
             var placeBtn = new Button
             {
                 Content = "Place", Width = 80, IsDefault = true, Margin = new Thickness(0, 0, 6, 0),
-                Background = MeToolsTheme.BrPetrol, Foreground = Brushes.White,
-                BorderBrush = MeToolsTheme.BrPetrol, Padding = new Thickness(0, 4, 0, 4),
+                Background = MeToolsTheme.BrPrimaryFill, Foreground = MeToolsTheme.BrPrimaryFg,
+                BorderBrush = Brushes.Transparent, Padding = new Thickness(0, 4, 0, 4),
                 Cursor = Cursors.Hand, Template = RoundedBtnTemplate(),
             };
             var cancelBtn = new Button

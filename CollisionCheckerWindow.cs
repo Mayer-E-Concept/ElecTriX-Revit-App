@@ -536,14 +536,15 @@ namespace METools.CollisionChecker
             var info = new TextBlock
             {
                 Text = $"\"{c.ElementTypeName}\"  \u2192  {c.WallTypeName}",
-                FontSize = 11, VerticalAlignment = VerticalAlignment.Center, TextWrapping = TextWrapping.Wrap,
+                FontSize = 11, Foreground = MeToolsTheme.BrText,
+                VerticalAlignment = VerticalAlignment.Center, TextWrapping = TextWrapping.Wrap,
             };
             Grid.SetColumn(info, 1); row.Children.Add(info);
 
             var status = new TextBlock
             {
                 Text = c.HasHole ? S._("collisioncheck.hole_placed") : "",
-                FontSize = 10, Foreground = MeToolsTheme.BrPetrol, FontWeight = FontWeights.SemiBold,
+                FontSize = 10, Foreground = MeToolsTheme.BrAccent, FontWeight = FontWeights.SemiBold,
                 VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(6, 0, 6, 0),
             };
             Grid.SetColumn(status, 2); row.Children.Add(status);

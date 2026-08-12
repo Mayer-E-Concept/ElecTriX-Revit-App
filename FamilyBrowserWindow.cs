@@ -121,7 +121,7 @@ namespace METools
             {
                 Text = S.Get("browser.title"),
                 FontSize = 15, FontWeight = FontWeights.SemiBold,
-                Foreground = MeToolsTheme.BrPetrol,
+                Foreground = MeToolsTheme.BrAccent,
             };
             var subtitle = new TextBlock
             {
@@ -138,7 +138,8 @@ namespace METools
             var ftr = new Border
             {
                 Background = MeToolsTheme.BrSurface,
-                BorderBrush = MeToolsTheme.BrBorder, BorderThickness = new Thickness(0, 1, 0, 0),
+                CornerRadius = new CornerRadius(12),
+                Margin = new Thickness(12, 8, 12, 8),
                 Padding = new Thickness(14, 10, 14, 10),
             };
             var ftrSp = new StackPanel { Orientation = Orientation.Horizontal };
@@ -169,7 +170,8 @@ namespace METools
             var searchBar = new Border
             {
                 Background = MeToolsTheme.BrSurface,
-                BorderBrush = MeToolsTheme.BrBorder, BorderThickness = new Thickness(0, 0, 0, 1),
+                CornerRadius = new CornerRadius(12),
+                Margin = new Thickness(12, 12, 12, 8),
                 Padding = new Thickness(14, 8, 14, 8),
             };
             _searchBox = new System.Windows.Controls.TextBox
@@ -201,7 +203,8 @@ namespace METools
             var groupBorder = new Border
             {
                 Background = MeToolsTheme.BrSurface,
-                BorderBrush = MeToolsTheme.BrBorder, BorderThickness = new Thickness(0, 0, 0, 1),
+                CornerRadius = new CornerRadius(12),
+                Margin = new Thickness(12, 0, 12, 8),
                 Padding = new Thickness(8, 6, 8, 6),
             };
             _groupBar = new StackPanel { Orientation = Orientation.Horizontal };
@@ -222,15 +225,28 @@ namespace METools
                 HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
                 Background = MeToolsTheme.BrBg,
             };
-            _listSp = new StackPanel { Margin = new Thickness(8, 4, 8, 4) };
+            _listSp = new StackPanel { Margin = new Thickness(0, 8, 0, 8) };
             _scroll.Content = _listSp;
             root.Children.Add(_scroll);
 
             var _fbGrid = new System.Windows.Controls.Grid();
             _fbGrid.Children.Add(root);
             _fbGrid.Children.Add(Watermark());
-            RootDock.Children.Add(_fbGrid);
+            // BuildStatusBar must come BEFORE this Add -- DockPanel's
+            // LastChildFill treats whichever child is added LAST as the
+            // fill element, regardless of that child's own Dock value.
+            // With the old order, StatusBarGrid (added inside
+            // BuildStatusBar, with Dock=Bottom) was the literal last
+            // child, so IT became the fill element and its own Dock=Bottom
+            // got silently overridden -- while _fbGrid, docked Left by
+            // default, claimed the DockPanel's full height before the
+            // status bar ever got a chance to reserve its own strip.
+            // Net effect: no visible status bar at all, not an oversized
+            // one -- confirmed against FamilyPlacerWindow, which already
+            // calls BuildStatusBar before adding its own main content and
+            // renders correctly.
             BuildStatusBar("", "Revit 2025");
+            RootDock.Children.Add(_fbGrid);
         }
 
         private void LoadFamilies()
@@ -345,10 +361,10 @@ namespace METools
                         foreach (var tb in child.FindVisualChildren<TextBlock>())
                             tb.Foreground = MeToolsTheme.BrText;
                 }
-                btn.Background = MeToolsTheme.BrPetrol;
-                btn.BorderBrush = MeToolsTheme.BrPetrolDark;
+                btn.Background = MeToolsTheme.BrActiveBg;
+                btn.BorderBrush = Brushes.Transparent;
                 foreach (var tb in btn.FindVisualChildren<TextBlock>())
-                    tb.Foreground = System.Windows.Media.Brushes.White;
+                    tb.Foreground = MeToolsTheme.BrActiveFg;
                 Refilter();
             };
             btn.Tag = group;
@@ -402,7 +418,7 @@ namespace METools
                     hdrSp.Children.Add(new TextBlock
                     {
                         Text = GroupDisplay(grp.Key), FontWeight = FontWeights.SemiBold,
-                        FontSize = 11, Foreground = MeToolsTheme.BrPetrol,
+                        FontSize = 11, Foreground = MeToolsTheme.BrAccent,
                     });
                     hdrSp.Children.Add(new TextBlock
                     {
@@ -430,8 +446,9 @@ namespace METools
             var row = new Border
             {
                 Background = MeToolsTheme.BrSurface,
-                BorderBrush = MeToolsTheme.BrBorder, BorderThickness = new Thickness(0, 0, 0, 1),
-                Padding = new Thickness(10, 8, 10, 8), Margin = new Thickness(0, 0, 0, 0),
+                CornerRadius = new CornerRadius(10),
+                Margin = new Thickness(12, 0, 12, 8),
+                Padding = new Thickness(10, 8, 10, 8),
                 Cursor = Cursors.Hand,
             };
 
@@ -508,17 +525,19 @@ namespace METools
                 Content    = "Place",
                 Height     = 24, Padding = new Thickness(10, 0, 10, 0),
                 FontSize   = 10,
-                Background = MeToolsTheme.BrPetrol,
-                Foreground = System.Windows.Media.Brushes.White,
-                BorderBrush = MeToolsTheme.BrPetrol,
-                BorderThickness = new Thickness(1),
+                Background = MeToolsTheme.BrPrimaryFill,
+                Foreground = MeToolsTheme.BrPrimaryFg,
+                BorderBrush = Brushes.Transparent,
+                BorderThickness = new Thickness(0),
                 VerticalAlignment = VerticalAlignment.Center,
                 ToolTip    = "Click to enter placement mode for this family (like drag-and-drop)",
                 Cursor     = Cursors.Hand,
                 Template   = RoundedBtnTemplate(),
             };
-            btnPlace.MouseEnter += (s, e) => btnPlace.Background = MeToolsTheme.BrPetrolDark;
-            btnPlace.MouseLeave += (s, e) => btnPlace.Background = MeToolsTheme.BrPetrol;
+            btnPlace.Effect = MeToolsTheme.PrimaryButtonGlow();
+            bool btnPlaceDark = MeToolsTheme.Current == MeTheme.Dark;
+            btnPlace.MouseEnter += (s, e) => btnPlace.Background = btnPlaceDark ? MeToolsTheme.BrAccentHover : MeToolsTheme.BrPetrolDark;
+            btnPlace.MouseLeave += (s, e) => btnPlace.Background = MeToolsTheme.BrPrimaryFill;
             var capturedFam = fam;
             btnPlace.Click += (s, e) =>
             {

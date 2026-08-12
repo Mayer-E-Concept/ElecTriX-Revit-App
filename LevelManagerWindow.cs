@@ -115,7 +115,7 @@ namespace METools.LevelManager
         // ═════════════════════════════════════════════════════════════════
         private void BuildUi()
         {
-            var outer = new StackPanel();
+            var outer = new StackPanel { Background = MeToolsTheme.BrBg };
             RootDock.Children.Add(outer);
 
             outer.Children.Add(BuildModeTabs());

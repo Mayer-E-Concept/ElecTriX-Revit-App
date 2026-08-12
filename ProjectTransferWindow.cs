@@ -64,7 +64,7 @@ namespace METools.ProjectTransfer
         // ═════════════════════════════════════════════════════════════════
         private void BuildUi()
         {
-            var root = new StackPanel { Margin = new Thickness(14, 12, 14, 10) };
+            var root = new StackPanel { Margin = new Thickness(14, 12, 14, 10), Background = MeToolsTheme.BrBg };
             RootDock.Children.Add(root);
 
             // ── Target project ───────────────────────────────────────────

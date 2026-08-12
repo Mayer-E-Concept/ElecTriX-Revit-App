@@ -273,7 +273,7 @@ namespace METools
             sp.Children.Add(new TextBlock
             {
                 Text = count.ToString(), FontSize = 26, FontWeight = FontWeights.Bold,
-                Foreground = MeToolsTheme.BrPetrol, HorizontalAlignment = HorizontalAlignment.Center,
+                Foreground = MeToolsTheme.BrAccent, HorizontalAlignment = HorizontalAlignment.Center,
             });
             sp.Children.Add(new TextBlock
             {
@@ -359,7 +359,7 @@ namespace METools
             {
                 Text = $"{lengthM:F1} m",
                 FontSize = 12, FontWeight = FontWeights.Bold,
-                Foreground = MeToolsTheme.BrPetrol, VerticalAlignment = VerticalAlignment.Center,
+                Foreground = MeToolsTheme.BrAccent, VerticalAlignment = VerticalAlignment.Center,
             };
             Grid.SetColumn(l, 0); Grid.SetColumn(c, 1);
             g.Children.Add(l); g.Children.Add(c);
@@ -368,8 +368,9 @@ namespace METools
 
         private Button MiniBtn(string text, bool primary, Action onClick)
         {
-            var bgN = primary ? MeToolsTheme.BrPetrol : MeToolsTheme.BrInput;
-            var bgH = primary ? MeToolsTheme.BrPetrolDark : MeToolsTheme.BrActiveBg;
+            bool dark = MeToolsTheme.Current == MeTheme.Dark;
+            var bgN = primary ? MeToolsTheme.BrPrimaryFill : MeToolsTheme.BrSoftFill;
+            var bgH = primary ? (dark ? MeToolsTheme.BrAccentHover : MeToolsTheme.BrPetrolDark) : MeToolsTheme.BrSoftFillHover;
             var b = new Button
             {
                 Content         = text,
@@ -377,12 +378,13 @@ namespace METools
                 FontSize        = 12,
                 Padding         = new Thickness(14, 0, 14, 0),
                 Background      = bgN,
-                Foreground      = primary ? Brushes.White : MeToolsTheme.BrText,
-                BorderBrush     = MeToolsTheme.BrBorder,
-                BorderThickness = new Thickness(1),
+                Foreground      = primary ? MeToolsTheme.BrPrimaryFg : MeToolsTheme.BrMuted,
+                BorderBrush     = Brushes.Transparent,
+                BorderThickness = new Thickness(0),
                 Cursor          = Cursors.Hand,
                 Template        = RoundedBtnTemplate(),
             };
+            if (primary) b.Effect = MeToolsTheme.PrimaryButtonGlow();
             b.MouseEnter += (s, e) => b.Background = bgH;
             b.MouseLeave += (s, e) => b.Background = bgN;
             b.Click += (s, e) => onClick();
