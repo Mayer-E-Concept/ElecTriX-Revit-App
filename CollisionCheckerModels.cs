@@ -29,15 +29,17 @@ namespace METools.CollisionChecker
         public Autodesk.Revit.DB.ElementId HoleInstanceId { get; set; } = Autodesk.Revit.DB.ElementId.InvalidElementId;
         public bool HasHole => HoleInstanceId != null && HoleInstanceId != Autodesk.Revit.DB.ElementId.InvalidElementId;
 
-        // True when WallId actually points at an ImportInstance (an
-        // imported IFC/CAD architectural file) rather than a real Wall --
-        // see CollisionCheckerHandler.FindWallLikeSolidsInImport. The crossing
-        // point/level still resolve the same way either way; only hole
-        // placement currently treats this differently (there's no real Wall
-        // to host on yet -- see ExecutePlaceHoles).
-        public bool IsImportedGeometry { get; set; } = false;
+        // True when WallId points at an ImportInstance (an imported CAD/IFC
+        // file) or a RevitLinkInstance (a linked model) rather than a real
+        // host-document Wall -- see CollisionCheckerHandler.
+        // FindWallLikeSolidsInImport / FindWallLikeElementsInLink. The
+        // crossing point/level resolve the same way regardless of which;
+        // only hole placement treats this differently, since there's no
+        // real host-document Wall to host a face-hosted family on in
+        // either case (see ExecutePlaceHoles).
+        public bool IsExternalGeometry { get; set; } = false;
 
-        // Only meaningful when IsImportedGeometry is true -- captured at
+        // Only meaningful when IsExternalGeometry is true -- captured at
         // scan time (from the detected face pair) so hole placement doesn't
         // need to re-parse the import's geometry to recover the thickness/
         // orientation a real Wall would otherwise supply directly.
@@ -128,5 +130,24 @@ namespace METools.CollisionChecker
             string.IsNullOrEmpty(TypeName) || string.Equals(TypeName, FamilyName, StringComparison.OrdinalIgnoreCase)
                 ? FamilyName : $"{FamilyName} : {TypeName}";
         public override string ToString() => DisplayName;
+    }
+
+    // One entry per ImportInstance in the project, for the "which import is
+    // the architecture" picker -- Name is whatever Revit shows for that
+    // import (typically the source file name, e.g. "ARC_OG1.dwg").
+    // One entry per candidate architecture source in the project -- either
+    // an ImportInstance (imported CAD/IFC file) or a RevitLinkInstance (a
+    // linked model, checked live against a real project: often the more
+    // common case for a genuine .ifc, since Revit's own IFC linker
+    // converts it into a real Document you can query, whereas an imported
+    // .ifc has no per-entity structure left at all). IsLink says which, so
+    // ScanForCollisions knows which of FindWallLikeSolidsInImport /
+    // FindWallLikeElementsInLink to use.
+    public class ArchitectureSourceOption
+    {
+        public Autodesk.Revit.DB.ElementId InstanceId { get; set; }
+        public string Name { get; set; } = "";
+        public bool IsLink { get; set; } = false;
+        public override string ToString() => Name;
     }
 }

@@ -58,7 +58,7 @@ namespace METools.CollisionChecker
             else if (req.Action == CollisionCheckerAction.MoveHoles)
                 ExecuteMoveHoles(doc, req);
             else if (req.Action == CollisionCheckerAction.MarkCollisions)
-                ExecuteMarkCollisions(doc, req);
+                ExecuteMarkCollisions(doc, app.ActiveUIDocument?.ActiveView?.Id, req);
         }
 
         // ═════════════════════════════════════════════════════════════════
@@ -136,24 +136,44 @@ namespace METools.CollisionChecker
             public double    ThicknessFt { get; set; }
         }
 
-        // Finds every ImportInstance whose name mentions ".ifc" -- same
-        // name-matching convention LevelManagerCommand.DetectLinkedIfcFiles
-        // already uses (there for a linked IFC's generated cache file; here
-        // for an imported one, which is what actually shows up as an
-        // ImportInstance -- a genuine Link IFC produces DirectShapes in a
-        // separate linked document instead, a different scenario this
-        // doesn't cover).
-        internal static List<ImportInstance> GetImportedIfcInstances(Document doc)
+        // Every ImportInstance in the doc, with no name filtering -- an
+        // earlier version of this only matched names containing ".ifc",
+        // on the assumption architectural coordination backgrounds would
+        // actually be IFC. Checked against two real, live projects and
+        // found neither had ever imported a .ifc at all -- both use
+        // imported DWGs instead (named per firm/architect convention,
+        // which differs project to project: "ARC_..." in one, "ARH_..."
+        // in the other, so no name pattern is reliable either). The
+        // person picks which import is "the architecture" in the UI
+        // instead of this trying to guess.
+        internal static List<ImportInstance> GetAllImportInstances(Document doc)
         {
             try
             {
                 return new FilteredElementCollector(doc)
                     .OfClass(typeof(ImportInstance))
                     .Cast<ImportInstance>()
-                    .Where(ii => (ii.Name ?? "").IndexOf(".ifc", StringComparison.OrdinalIgnoreCase) >= 0)
                     .ToList();
             }
             catch { return new List<ImportInstance>(); }
+        }
+
+        // Every RevitLinkInstance in the doc -- covers a genuinely LINKED
+        // .ifc (or .rvt) rather than an imported one; see
+        // FindWallLikeElementsInLink for how its walls get found. Unloaded
+        // links are skipped here (nothing to check yet) rather than
+        // included with a confusing empty result later.
+        internal static List<RevitLinkInstance> GetAllLoadedRevitLinks(Document doc)
+        {
+            try
+            {
+                return new FilteredElementCollector(doc)
+                    .OfClass(typeof(RevitLinkInstance))
+                    .Cast<RevitLinkInstance>()
+                    .Where(li => { try { return li.GetLinkDocument() != null; } catch { return false; } })
+                    .ToList();
+            }
+            catch { return new List<RevitLinkInstance>(); }
         }
 
         internal static List<ImportedWallCandidate> FindWallLikeSolidsInImport(ImportInstance inst)
@@ -168,49 +188,133 @@ namespace METools.CollisionChecker
 
                 foreach (var solid in FlattenToSolids(geomElem))
                 {
+                    if (TryFindWallFacePair(solid, out var faceA, out var faceB, out var thickness))
+                    {
+                        result.Add(new ImportedWallCandidate
+                        {
+                            ImportInstanceId  = inst.Id,
+                            ImportDisplayName = displayName,
+                            FaceA = faceA,
+                            FaceB = faceB,
+                            ThicknessFt = thickness,
+                        });
+                    }
+                }
+            }
+            catch { }
+            return result;
+        }
+
+        // Shared by both the ImportInstance path above and the linked-
+        // document path below -- given any single Solid, looks for a pair
+        // of large, roughly-vertical, anti-parallel planar faces spaced
+        // apart by something in a plausible wall-thickness range (see the
+        // class-level remarks above FindWallLikeSolidsInImport for why this
+        // heuristic exists at all instead of just checking a category).
+        private static bool TryFindWallFacePair(Solid solid, out PlanarFace faceA, out PlanarFace faceB, out double thicknessFt)
+        {
+            faceA = null; faceB = null; thicknessFt = 0;
+            try
+            {
+                if (solid == null || solid.Volume < 1e-6 || solid.Faces == null) return false;
+
+                var candidates = new List<PlanarFace>();
+                foreach (Face f in solid.Faces)
+                {
+                    if (f is PlanarFace pf && pf.Area >= ImportedWallMinFaceAreaSqFt
+                        && Math.Abs(pf.FaceNormal.Z) < 0.3)
+                        candidates.Add(pf);
+                }
+                if (candidates.Count < 2) return false;
+
+                for (int i = 0; i < candidates.Count; i++)
+                {
+                    for (int j = i + 1; j < candidates.Count; j++)
+                    {
+                        var nA = candidates[i].FaceNormal;
+                        var nB = candidates[j].FaceNormal;
+                        if (nA.DotProduct(nB) > -0.9) continue; // not close enough to opposite-facing
+
+                        double thickness = Math.Abs((candidates[j].Origin - candidates[i].Origin).DotProduct(nA));
+                        if (thickness < ImportedWallMinThicknessFt || thickness > ImportedWallMaxThicknessFt) continue;
+
+                        faceA = candidates[i]; faceB = candidates[j]; thicknessFt = thickness;
+                        return true; // one wall-slab reading per solid is enough
+                    }
+                }
+            }
+            catch { }
+            return false;
+        }
+
+        // Walls in a LINKED architectural model -- unlike an imported file,
+        // a link has its own real Document you can query, and (checked live
+        // against a real project) its walls very often come through as
+        // DirectShape elements correctly categorized OST_Walls rather than
+        // genuine Wall-class instances -- a well-known consequence of how
+        // Revit's IFC linker converts IFC entities. Filtering by CATEGORY
+        // instead of by class (OfClass(typeof(Wall)) would miss every one of
+        // these) picks up both that case and a genuine native Wall the same
+        // way, if the link happens to be an ordinary linked .rvt instead.
+        //
+        // Category alone is enough to know "this is a wall" here -- unlike
+        // the imported-file case, there's no need to also guess via
+        // thickness/face-shape. TryFindWallFacePair is still used, but only
+        // to find WHICH two faces of an already-known wall are its own two
+        // broad sides, for the same Face.Intersect crossing check every
+        // other wall type in this file uses.
+        //
+        // SolidUtils.CreateTransformed brings each solid from the link's own
+        // local coordinate system into the host document's, using the
+        // link's placement transform -- from that point on this is
+        // identical to the imported-file case: same face-pair search, same
+        // Face.Intersect against a host-space run curve, no further
+        // transform bookkeeping needed anywhere downstream.
+        internal static List<ImportedWallCandidate> FindWallLikeElementsInLink(RevitLinkInstance linkInst)
+        {
+            var result = new List<ImportedWallCandidate>();
+            try
+            {
+                var linkDoc = linkInst.GetLinkDocument();
+                if (linkDoc == null) return result; // link unloaded -- nothing to check
+
+                var transform = linkInst.GetTotalTransform();
+                var typeName = (linkDoc.GetElement(linkInst.GetTypeId()) as RevitLinkType)?.Name ?? linkInst.Name ?? "";
+                if (typeName.EndsWith(".rvt", StringComparison.OrdinalIgnoreCase))
+                    typeName = typeName.Substring(0, typeName.Length - 4);
+
+                var options = new Options { ComputeReferences = false, IncludeNonVisibleObjects = false };
+                var wallElements = new FilteredElementCollector(linkDoc)
+                    .OfCategory(BuiltInCategory.OST_Walls)
+                    .WhereElementIsNotElementType()
+                    .ToElements();
+
+                foreach (var el in wallElements)
+                {
                     try
                     {
-                        if (solid == null || solid.Volume < 1e-6 || solid.Faces == null) continue;
+                        var geomElem = el.get_Geometry(options);
+                        if (geomElem == null) continue;
 
-                        // Large, roughly-vertical planar faces only -- these
-                        // are candidate "broad sides of a slab"; small faces
-                        // (trim, reveals, bolt holes) and near-horizontal
-                        // faces (floors, soffits, tops of low walls) are
-                        // never useful here.
-                        var candidates = new List<PlanarFace>();
-                        foreach (Face f in solid.Faces)
+                        foreach (var localSolid in FlattenToSolids(geomElem))
                         {
-                            if (f is PlanarFace pf && pf.Area >= ImportedWallMinFaceAreaSqFt
-                                && Math.Abs(pf.FaceNormal.Z) < 0.3)
-                                candidates.Add(pf);
-                        }
-                        if (candidates.Count < 2) continue;
+                            Solid hostSolid;
+                            try { hostSolid = SolidUtils.CreateTransformed(localSolid, transform); }
+                            catch { continue; }
 
-                        for (int i = 0; i < candidates.Count; i++)
-                        {
-                            for (int j = i + 1; j < candidates.Count; j++)
+                            if (TryFindWallFacePair(hostSolid, out var faceA, out var faceB, out var thickness))
                             {
-                                var nA = candidates[i].FaceNormal;
-                                var nB = candidates[j].FaceNormal;
-                                if (nA.DotProduct(nB) > -0.9) continue; // not close enough to opposite-facing
-
-                                double thickness = Math.Abs(
-                                    (candidates[j].Origin - candidates[i].Origin).DotProduct(nA));
-                                if (thickness < ImportedWallMinThicknessFt || thickness > ImportedWallMaxThicknessFt)
-                                    continue;
-
                                 result.Add(new ImportedWallCandidate
                                 {
-                                    ImportInstanceId  = inst.Id,
-                                    ImportDisplayName = displayName,
-                                    FaceA = candidates[i],
-                                    FaceB = candidates[j],
+                                    ImportInstanceId  = linkInst.Id, // the link instance itself, resolvable in the HOST doc -- the link's own wall element's id is only valid inside linkDoc
+                                    ImportDisplayName = typeName,
+                                    FaceA = faceA,
+                                    FaceB = faceB,
                                     ThicknessFt = thickness,
                                 });
-                                goto nextSolid; // one wall-slab reading per solid is enough; move on
+                                break; // one wall-slab reading per element is enough
                             }
                         }
-                        nextSolid: ;
                     }
                     catch { }
                 }
@@ -285,7 +389,7 @@ namespace METools.CollisionChecker
         // wall in the whole model is always considered as a potential
         // obstacle regardless of scope, since a run in view/selection scope
         // can still be crossing a wall that itself isn't in that scope.
-        public static List<CollisionInfo> ScanForCollisions(Document doc, UIDocument uiDoc, ScanScope scope, bool includeImportedArchitecture = false)
+        public static List<CollisionInfo> ScanForCollisions(Document doc, UIDocument uiDoc, ScanScope scope, ElementId architectureSourceId = null, bool architectureSourceIsLink = false, ElementId holeSymbolId = null)
         {
             var result = new List<CollisionInfo>();
             try
@@ -294,14 +398,29 @@ namespace METools.CollisionChecker
                 var walls = new FilteredElementCollector(doc).OfClass(typeof(Wall)).WhereElementIsNotElementType().Cast<Wall>().ToList();
 
                 // Built once per scan, not per run -- geometry parsing on an
-                // imported architectural file can be nontrivial, and every
-                // run needs to check against the same fixed set of
-                // candidates regardless.
+                // architectural source (imported file or linked model) can
+                // be nontrivial, and every run needs to check against the
+                // same fixed candidate set regardless. Only the ONE source
+                // the person picked in the UI is parsed -- not every import
+                // or link in the project, since a typical project has
+                // dozens (electrical schemas, other disciplines'
+                // backgrounds, structural/furniture/MEP links, etc.) and
+                // most aren't "the architecture" at all.
                 var importedCandidates = new List<ImportedWallCandidate>();
-                if (includeImportedArchitecture)
+                if (architectureSourceId != null && architectureSourceId != ElementId.InvalidElementId)
                 {
-                    foreach (var inst in GetImportedIfcInstances(doc))
-                        importedCandidates.AddRange(FindWallLikeSolidsInImport(inst));
+                    if (architectureSourceIsLink)
+                    {
+                        var chosenLink = doc.GetElement(architectureSourceId) as RevitLinkInstance;
+                        if (chosenLink != null)
+                            importedCandidates.AddRange(FindWallLikeElementsInLink(chosenLink));
+                    }
+                    else
+                    {
+                        var chosenImport = doc.GetElement(architectureSourceId) as ImportInstance;
+                        if (chosenImport != null)
+                            importedCandidates.AddRange(FindWallLikeSolidsInImport(chosenImport));
+                    }
                 }
 
                 if (runs.Count == 0 || (walls.Count == 0 && importedCandidates.Count == 0)) return result;
@@ -324,6 +443,20 @@ namespace METools.CollisionChecker
                     }
                     list.Add(kv.Key);
                 }
+
+                // A THIRD tier, below the two above: holes that were never
+                // placed by this tool at all -- placed by hand before this
+                // add-in existed, or by someone not using it, so there's no
+                // link map entry for them whatsoever. Confirmed as a real,
+                // live case (a project with existing "-CAx WD..." opening
+                // markers already in place before Collision Checker's
+                // first-ever scan there). Matched purely by proximity to
+                // the SAME family currently selected as the Hole Family --
+                // any type of that family counts, not just an exact type
+                // match, since a legacy hole may have been placed with a
+                // different type of the same family than what's configured
+                // for new placements now.
+                var existingHoleInstances = GetExistingHoleInstances(doc, holeSymbolId);
 
                 foreach (var run in runs)
                 {
@@ -387,7 +520,13 @@ namespace METools.CollisionChecker
                             // likely right at a corner where two walls
                             // meet, or after a wall was edited) -- check
                             // this run's other existing holes by physical
-                            // distance instead of only by exact wall match.
+                            // proximity instead of only by exact wall
+                            // match. Compares against each candidate's own
+                            // real bounding box, not its Location Point --
+                            // see the remarks above GetExistingHoleInstances
+                            // for why: for at least one real hole family in
+                            // active use, those two can be several METERS
+                            // apart.
                             if (!info.HasHole && holeUidsByRun.TryGetValue(run.UniqueId, out var candidateHoleUids))
                             {
                                 const double proximityToleranceFt = 300.0 / 304.8; // ~300mm
@@ -396,8 +535,8 @@ namespace METools.CollisionChecker
                                     try
                                     {
                                         var holeEl = doc.GetElement(candidateUid);
-                                        var holeLoc = (holeEl?.Location as LocationPoint)?.Point;
-                                        if (holeLoc != null && holeLoc.DistanceTo(point) <= proximityToleranceFt)
+                                        var holeBBox = holeEl?.get_BoundingBox(null);
+                                        if (IsPointNearBoundingBox(point, holeBBox, proximityToleranceFt))
                                         {
                                             info.HoleInstanceId = holeEl.Id;
                                             break;
@@ -407,12 +546,21 @@ namespace METools.CollisionChecker
                                 }
                             }
 
+                            // Third tier: a hole this tool never placed or
+                            // linked at all -- see the remarks above
+                            // existingHoleInstances. Matched purely by
+                            // proximity, same tolerance as the fallback
+                            // just above.
+                            if (!info.HasHole)
+                                info.HoleInstanceId = FindNearbyExistingHole(existingHoleInstances, point);
+
                             result.Add(info);
                         }
                         catch { }
                     }
 
-                    // Imported IFC architecture: no cheap bounding-box
+                    // Imported architecture (CAD/IFC, whichever the person
+                    // picked): no cheap bounding-box
                     // pre-filter here (a Face doesn't expose one in the
                     // same 3D-Outline shape the wall/run check above uses),
                     // but importedCandidates is normally a short list --
@@ -452,17 +600,15 @@ namespace METools.CollisionChecker
                                 Point             = point,
                                 LevelId           = ResolveLevelIdByElevation(doc, point.Z),
                                 LevelName         = ResolveLevelName(doc, ResolveLevelIdByElevation(doc, point.Z)),
-                                IsImportedGeometry = true,
+                                IsExternalGeometry = true,
                                 ImportedWallThicknessFt = cand.ThicknessFt,
                                 ImportedWallDirection   = wallDir,
                             };
 
-                            // Same two lookups as the native-wall case above
-                            // -- ImportInstance.UniqueId works the same way
-                            // as any other element's for this purpose, even
-                            // though hole placement isn't wired up for this
-                            // case yet (see ExecutePlaceHoles), so this is
-                            // future-ready for whenever it is.
+                            // Same lookup as the native-wall case above --
+                            // ImportInstance/RevitLinkInstance UniqueId
+                            // works the same way as any other element's
+                            // for this purpose.
                             if (linkByRunAndWall.TryGetValue((run.UniqueId, doc.GetElement(cand.ImportInstanceId)?.UniqueId ?? ""), out var impHoleUid))
                             {
                                 try
@@ -472,6 +618,18 @@ namespace METools.CollisionChecker
                                 }
                                 catch { }
                             }
+
+                            // Third tier -- see the remarks above
+                            // existingHoleInstances. No run-scoped proximity
+                            // fallback tier here the way the native-wall
+                            // case has one above (that one leans on
+                            // holeUidsByRun, which is keyed from the SAME
+                            // link map this tier is specifically for
+                            // holes that were never in), so this is the
+                            // only fallback tier for the imported/linked
+                            // architecture case.
+                            if (!info.HasHole)
+                                info.HoleInstanceId = FindNearbyExistingHole(existingHoleInstances, point);
 
                             result.Add(info);
                         }
@@ -683,15 +841,19 @@ namespace METools.CollisionChecker
                         var attempts = new List<string>();
                         try
                         {
-                            // No real Wall to host on -- an ImportInstance
-                            // has no per-entity geometry the way a real
-                            // wall's own faces do, so this skips straight to
-                            // the same non-hosted tiers (3/4) the native-wall
-                            // path below falls back to only as a last
-                            // resort. Direction/thickness come from what was
-                            // captured at scan time (see ScanForCollisions),
-                            // not re-derived here.
-                            if (c.IsImportedGeometry)
+                            // No real host-document Wall to host on -- true
+                            // whether this came from an imported file (no
+                            // per-entity geometry at all) or a linked model
+                            // (its wall elements live in a different
+                            // Document; Revit can't face-host a family in
+                            // THIS document on a face from another one), so
+                            // this skips straight to the same non-hosted
+                            // tiers (3/4) the native-wall path below falls
+                            // back to only as a last resort. Direction/
+                            // thickness come from what was captured at scan
+                            // time (see ScanForCollisions), not re-derived
+                            // here.
+                            if (c.IsExternalGeometry)
                             {
                                 var impRun = doc.GetElement(c.ElementId);
                                 var importEl = doc.GetElement(c.WallId);
@@ -1012,7 +1174,7 @@ namespace METools.CollisionChecker
         // this used to run directly from the window's OnScanClicked, which
         // is exactly that invalid context. Routed through the ExternalEvent
         // instead, the same way every other write in this file already is.
-        private void ExecuteMarkCollisions(Document doc, CollisionCheckerRequest req)
+        private void ExecuteMarkCollisions(Document doc, ElementId activeViewId, CollisionCheckerRequest req)
         {
             var result = new PlaceHolesResult { ResultAction = CollisionCheckerAction.MarkCollisions };
             if (doc == null || req.Collisions == null) { OnDone?.Invoke(result); return; }
@@ -1039,9 +1201,26 @@ namespace METools.CollisionChecker
                     // physical Z-elevation upstream in ScanForCollisions --
                     // see lesson on Reference Level not being trustworthy
                     // for MEP elements), NOT by whatever view is active.
+                    // activeViewId is only used as a TIE-BREAK inside
+                    // FindPlanViewForLevel, for the case where the resolved
+                    // level itself has more than one Floor Plan view (a
+                    // real, confirmed case: one Floor Plan per discipline
+                    // on the same level, e.g. an Electrical "EG" and a
+                    // Mechanical/Heating coordination "H_EG" both tied to
+                    // the same Level) -- it can never send a mark to the
+                    // wrong LEVEL, only help pick between two views that
+                    // are both already correct for this one.
                     foreach (var group in toMark.GroupBy(c => c.LevelId))
                     {
-                        var targetView = FindPlanViewForLevel(doc, group.Key);
+                        // A group's collisions can involve different runs,
+                        // but on a real project they're overwhelmingly the
+                        // same category/discipline (Cable Trays, Conduits)
+                        // that would share the same visibility fate in any
+                        // one view -- using the first as a representative
+                        // for the visibility check is a reasonable, cheap
+                        // stand-in for checking every one individually.
+                        var representativeRunId = group.FirstOrDefault()?.ElementId;
+                        var targetView = FindPlanViewForLevel(doc, group.Key, activeViewId, representativeRunId);
 
                         // No plan view exists for this level (or the level
                         // id never resolved) -- Detail Lines are a 2D,
@@ -1114,7 +1293,20 @@ namespace METools.CollisionChecker
         // (CollisionCheckerWindow) and mark-drawing (here) so both always
         // land on the exact same view for a given level -- a mark drawn
         // here is guaranteed visible from wherever "Go To" takes you.
-        public static View FindPlanViewForLevel(Document doc, ElementId levelId)
+        //
+        // mustShowElementId is the load-bearing check, added after a real,
+        // live case: a level can have more than one Floor Plan (one per
+        // discipline -- e.g. an Electrical "EG" and a Mechanical/Heating
+        // coordination "H_EG", both genuinely tied to the same Level), and
+        // "same Level" alone does NOT mean "shows the run you're trying to
+        // see" -- confirmed live that Cable Trays were entirely invisible
+        // in the Mechanical view (discipline filtering hides Electrical-
+        // only categories) while fully visible in the Electrical one on
+        // the exact same Level. Candidates are filtered down to ones that
+        // actually show this element FIRST; preferredViewId only breaks
+        // ties AMONG those, so it can never win by being "already open"
+        // if it wouldn't actually show anything there.
+        public static View FindPlanViewForLevel(Document doc, ElementId levelId, ElementId preferredViewId = null, ElementId mustShowElementId = null)
         {
             if (doc == null || levelId == null || levelId == ElementId.InvalidElementId) return null;
             try
@@ -1124,9 +1316,52 @@ namespace METools.CollisionChecker
                     .Cast<ViewPlan>()
                     .Where(v => !v.IsTemplate && v.GenLevel != null && v.GenLevel.Id == levelId)
                     .ToList();
-                return candidates.FirstOrDefault(v => v.ViewType == ViewType.FloorPlan) ?? candidates.FirstOrDefault();
+
+                var floorPlans = candidates.Where(v => v.ViewType == ViewType.FloorPlan).ToList();
+
+                // Narrow to candidates that actually show the element, if
+                // asked to check -- but only if that narrowing leaves at
+                // least one option. An element genuinely hidden on every
+                // Floor Plan for this level (e.g. a discipline filter or a
+                // stray "Hide element" override) shouldn't make this
+                // return null outright when there was a perfectly good
+                // level-matching view to fall back to; it just means the
+                // visibility preference can't be honored this time.
+                if (mustShowElementId != null && mustShowElementId != ElementId.InvalidElementId)
+                {
+                    var visible = floorPlans.Where(v => IsElementVisibleInView(doc, v, mustShowElementId)).ToList();
+                    if (visible.Count > 0) floorPlans = visible;
+                }
+
+                if (preferredViewId != null && preferredViewId != ElementId.InvalidElementId)
+                {
+                    var preferred = floorPlans.FirstOrDefault(v => v.Id == preferredViewId)
+                                  ?? candidates.FirstOrDefault(v => v.Id == preferredViewId);
+                    if (preferred != null) return preferred;
+                }
+
+                return floorPlans.FirstOrDefault() ?? candidates.FirstOrDefault();
             }
             catch { return null; }
+        }
+
+        // See remarks above FindPlanViewForLevel. Confirmed against a real
+        // project: a FilteredElementCollector scoped to a view is the
+        // Revit-API-endorsed way to answer "would this element actually
+        // show up here" -- it accounts for discipline filtering, category
+        // visibility overrides, and per-element hide, all at once, rather
+        // than trying to reason about each of those separately.
+        private static bool IsElementVisibleInView(Document doc, View view, ElementId elementId)
+        {
+            if (doc == null || view == null || elementId == null || elementId == ElementId.InvalidElementId) return false;
+            try
+            {
+                return new FilteredElementCollector(doc, view.Id)
+                    .WhereElementIsNotElementType()
+                    .ToElementIds()
+                    .Contains(elementId);
+            }
+            catch { return false; }
         }
 
         // The Z-height detail curves must be drawn at for this view to
@@ -1303,6 +1538,81 @@ namespace METools.CollisionChecker
         // (RunUniqueId, WallUniqueId); entries that don't parse (shouldn't
         // happen, but a hand-edited or corrupted value shouldn't throw) are
         // skipped rather than failing the whole read.
+        // Every instance of the SAME FAMILY as holeSymbolId, anywhere in
+        // the document -- deliberately family-wide, not restricted to the
+        // exact type currently selected, since a legacy/hand-placed hole
+        // may well be a different type of the same family than what's
+        // configured for new placements right now. Read-only, no
+        // Transaction, safe to call from ScanForCollisions directly (no
+        // ExternalEvent needed for a plain read).
+        //
+        // Returns each instance's BOUNDING BOX, not its raw Location
+        // Point -- confirmed live against a real project that these two
+        // can be nowhere near each other for this kind of family: a
+        // "WD_Bezug_UKD_OKB" ("wall opening, referenced base-to-top")
+        // style family often anchors its insertion point at its BASE
+        // reference (Location.Point.Z came back as exactly 0.00 on a real
+        // instance), while the actual opening geometry -- and the real
+        // crossing point a run passes through -- sits much higher, near
+        // the TOP of the family's own vertical reach (that same
+        // instance's bounding box ran from Z=0.00 all the way to
+        // Z=11.37ft). Matching against the raw insertion point would
+        // systematically miss every hole of this shape, off by however
+        // tall the family's own base-to-top span is -- several METERS,
+        // nowhere close to the ~300mm tolerance this is meant to allow
+        // for. The bounding box, by contrast, reflects the family's real
+        // geometry regardless of where its own insertion point happens to
+        // sit internally.
+        internal static List<(ElementId Id, BoundingBoxXYZ BBox)> GetExistingHoleInstances(Document doc, ElementId holeSymbolId)
+        {
+            var result = new List<(ElementId, BoundingBoxXYZ)>();
+            if (doc == null || holeSymbolId == null || holeSymbolId == ElementId.InvalidElementId) return result;
+            try
+            {
+                var familyId = (doc.GetElement(holeSymbolId) as FamilySymbol)?.Family?.Id;
+                if (familyId == null || familyId == ElementId.InvalidElementId) return result;
+
+                foreach (var el in new FilteredElementCollector(doc).OfClass(typeof(FamilyInstance)))
+                {
+                    try
+                    {
+                        var fi = el as FamilyInstance;
+                        if (fi?.Symbol?.Family?.Id != familyId) continue;
+                        var bbox = fi.get_BoundingBox(null); // model space directly, same call already used for the wall/run quick-filter above -- no extra Transform needed
+                        if (bbox != null) result.Add((fi.Id, bbox));
+                    }
+                    catch { }
+                }
+            }
+            catch { }
+            return result;
+        }
+
+        private static ElementId FindNearbyExistingHole(List<(ElementId Id, BoundingBoxXYZ BBox)> existingHoleInstances, XYZ point)
+        {
+            const double proximityToleranceFt = 300.0 / 304.8; // ~300mm, applied as padding on every side of each instance's own bounding box
+            foreach (var (id, bbox) in existingHoleInstances)
+            {
+                try { if (IsPointNearBoundingBox(point, bbox, proximityToleranceFt)) return id; }
+                catch { }
+            }
+            return null;
+        }
+
+        // Shared by the run-scoped fallback above and FindNearbyExistingHole
+        // -- padding an element's own real bounding box, rather than
+        // measuring straight-line distance to its Location Point, is what
+        // actually accounts for a family whose insertion point doesn't sit
+        // where its visible geometry does (see the remarks above
+        // GetExistingHoleInstances for a real, confirmed example of this).
+        private static bool IsPointNearBoundingBox(XYZ point, BoundingBoxXYZ bbox, double toleranceFt)
+        {
+            if (point == null || bbox == null) return false;
+            return point.X >= bbox.Min.X - toleranceFt && point.X <= bbox.Max.X + toleranceFt
+                && point.Y >= bbox.Min.Y - toleranceFt && point.Y <= bbox.Max.Y + toleranceFt
+                && point.Z >= bbox.Min.Z - toleranceFt && point.Z <= bbox.Max.Z + toleranceFt;
+        }
+
         public static Dictionary<string, (string RunUniqueId, string WallUniqueId)> ReadHoleLinkMap(Document doc)
         {
             var result = new Dictionary<string, (string RunUniqueId, string WallUniqueId)>();

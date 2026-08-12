@@ -16,6 +16,33 @@ namespace METools.CollisionChecker
         // (same convention as Circuit Tagger's TagFamilyName/TagTypeName).
         public string HoleFamilyName { get; set; } = "";
         public string HoleTypeName   { get; set; } = "";
+
+        // Off by default -- this is a geometric heuristic against imported
+        // (uncategorized) CAD/IFC geometry, not a guaranteed-precise check
+        // the way native-wall detection is, so it stays opt-in rather than
+        // silently changing what a plain Scan does.
+        public bool IncludeImportedArchitecture { get; set; } = false;
+
+        // Which import represents "the architecture" -- matched by name
+        // against the project's actual imports at scan time, same
+        // by-name-not-by-id convention as HoleFamilyName above, since a
+        // project can easily have a dozen+ imports (other disciplines'
+        // backgrounds, schemas, etc.) and only one or two are ever the
+        // relevant architectural walls. There's no reliable way to guess
+        // which one by name pattern alone -- two real projects checked so
+        // far use two completely different naming conventions for the
+        // same thing ("ARC_..." vs "ARH_...Rohbau...") -- so this is
+        // picked explicitly rather than auto-detected.
+        public string ImportArchitectureName { get; set; } = "";
+
+        // Distinguishes an ImportInstance ("ARC_...dwg") from a
+        // RevitLinkInstance ("Architekturmodell.ifc") sharing the same
+        // ImportArchitectureName, so Load() resolves against the right
+        // one -- checked live, a genuine .ifc is more often a LINK than an
+        // import (Revit's IFC linker gives it a real, queryable Document),
+        // while other disciplines' backgrounds tend to be plain DWG
+        // imports, so a project can easily have both kinds at once.
+        public bool ImportArchitectureIsLink { get; set; } = false;
     }
 
     public static class CollisionCheckerSettings
@@ -61,7 +88,10 @@ namespace METools.CollisionChecker
             var sb = new StringBuilder();
             sb.AppendLine("{");
             sb.AppendLine($"  \"HoleFamilyName\": \"{Esc(d.HoleFamilyName)}\",");
-            sb.AppendLine($"  \"HoleTypeName\": \"{Esc(d.HoleTypeName)}\"");
+            sb.AppendLine($"  \"HoleTypeName\": \"{Esc(d.HoleTypeName)}\",");
+            sb.AppendLine($"  \"IncludeImportedArchitecture\": {(d.IncludeImportedArchitecture ? "true" : "false")},");
+            sb.AppendLine($"  \"ImportArchitectureName\": \"{Esc(d.ImportArchitectureName)}\",");
+            sb.AppendLine($"  \"ImportArchitectureIsLink\": {(d.ImportArchitectureIsLink ? "true" : "false")}");
             sb.AppendLine("}");
             return sb.ToString();
         }
@@ -76,8 +106,21 @@ namespace METools.CollisionChecker
                 var trim = line.Trim().TrimEnd(',');
                 if (TryReadString(trim, "HoleFamilyName", out var fn)) d.HoleFamilyName = fn;
                 if (TryReadString(trim, "HoleTypeName",   out var tn)) d.HoleTypeName   = tn;
+                if (TryReadBool(trim, "IncludeImportedArchitecture", out var ia)) d.IncludeImportedArchitecture = ia;
+                if (TryReadString(trim, "ImportArchitectureName", out var ian)) d.ImportArchitectureName = ian;
+                if (TryReadBool(trim, "ImportArchitectureIsLink", out var ial)) d.ImportArchitectureIsLink = ial;
             }
             return d;
+        }
+
+        private static bool TryReadBool(string trimmedLine, string key, out bool value)
+        {
+            value = false;
+            var prefix = $"\"{key}\":";
+            if (!trimmedLine.StartsWith(prefix)) return false;
+            var rest = trimmedLine.Substring(prefix.Length).Trim();
+            if (bool.TryParse(rest, out value)) return true;
+            return false;
         }
 
         private static bool TryReadString(string trimmedLine, string key, out string value)

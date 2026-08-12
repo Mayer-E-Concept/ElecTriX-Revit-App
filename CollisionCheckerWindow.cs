@@ -26,7 +26,21 @@ namespace METools.CollisionChecker
         private readonly CollisionCheckerHandler _handler;
 
         private ScanScope _scope = ScanScope.WholeModel;
+        // Caches FindPlanViewForLevel's result per (level, run category,
+        // active view) -- that visibility check it does is a genuinely
+        // heavier operation (a view-scoped FilteredElementCollector, which
+        // Autodesk's own docs note can force Revit to rebuild that view's
+        // visible-element cache), and "Go To" calls it once per click.
+        // Most collisions in a real project share only a couple of
+        // categories (Cable Trays, Conduits), so caching by category
+        // rather than by the exact run element turns dozens of repeated
+        // clicks into one real computation per level. Cleared at the
+        // start of every Scan so it can never serve a stale answer from
+        // before the model or view settings changed.
+        private readonly Dictionary<(int LevelId, int CategoryId, int ActiveViewId), View> _goToViewCache = new();
         private Button _btnScopeModel, _btnScopeView, _btnScopeSel;
+        private CheckBox _cbIncludeImported;
+        private ComboBox _cbImportChoice;
         private TextBlock _lblSummary;
         private TextBlock _lblLastScanned;
 
@@ -181,6 +195,38 @@ namespace METools.CollisionChecker
             row.Children.Add(_btnScopeSel);
             sp.Children.Add(row);
 
+            _cbIncludeImported = new CheckBox
+            {
+                Content = S._("collisioncheck.include_imported_ifc"),
+                IsChecked = _settingsData?.IncludeImportedArchitecture ?? false,
+                Foreground = MeToolsTheme.BrText,
+                Margin = new Thickness(0, 2, 0, 4),
+                ToolTip = S._("collisioncheck.include_imported_ifc_hint"),
+            };
+            _cbIncludeImported.Checked   += (s, e) => { SetIncludeImportedArchitecture(true);  RefreshImportChoicesVisibility(); };
+            _cbIncludeImported.Unchecked += (s, e) => { SetIncludeImportedArchitecture(false); RefreshImportChoicesVisibility(); };
+            sp.Children.Add(_cbIncludeImported);
+
+            // Which import is "the architecture" -- not auto-detected (see
+            // GetAllImportInstances), picked here instead. A project can
+            // easily have a dozen+ imports; this combo lists every one of
+            // them by its actual name so the person can tell them apart.
+            _cbImportChoice = StyledCombo();
+            _cbImportChoice.DisplayMemberPath = "Name";
+            _cbImportChoice.ToolTip = S._("collisioncheck.import_choice_hint");
+            _cbImportChoice.Margin = new Thickness(0, 0, 0, 6);
+            _cbImportChoice.Visibility = (_settingsData?.IncludeImportedArchitecture ?? false) ? Visibility.Visible : Visibility.Collapsed;
+            _cbImportChoice.SelectionChanged += (s, e) =>
+            {
+                var chosen = _cbImportChoice.SelectedItem as ArchitectureSourceOption;
+                _settingsData = _settingsData ?? new CollisionCheckerSettingsData();
+                _settingsData.ImportArchitectureName   = chosen?.Name ?? "";
+                _settingsData.ImportArchitectureIsLink = chosen?.IsLink ?? false;
+                CollisionCheckerSettings.Save(_settingsData);
+            };
+            sp.Children.Add(_cbImportChoice);
+            RefreshImportChoices();
+
             var scanRow = new Grid { Margin = new Thickness(0, 4, 0, 0) };
             scanRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             scanRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -204,6 +250,53 @@ namespace METools.CollisionChecker
             UpdateToggle(_btnScopeModel, scope == ScanScope.WholeModel);
             UpdateToggle(_btnScopeView,  scope == ScanScope.ActiveView);
             UpdateToggle(_btnScopeSel,   scope == ScanScope.CurrentSelection);
+        }
+
+        private void SetIncludeImportedArchitecture(bool on)
+        {
+            _settingsData = _settingsData ?? new CollisionCheckerSettingsData();
+            _settingsData.IncludeImportedArchitecture = on;
+            CollisionCheckerSettings.Save(_settingsData);
+        }
+
+        private void RefreshImportChoicesVisibility()
+        {
+            if (_cbImportChoice == null) return;
+            _cbImportChoice.Visibility = (_cbIncludeImported?.IsChecked ?? false) ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        // Lists every ImportInstance in the CURRENT document -- refreshed
+        // each time the window opens (imports can differ project to
+        // project, and elements ids aren't stable across sessions anyway,
+        // so this always re-resolves ImportArchitectureName against
+        // whatever's actually in front of the person right now rather than
+        // trusting a stale id from a previous session).
+        private void RefreshImportChoices()
+        {
+            if (_cbImportChoice == null) return;
+            var doc = _uiApp?.ActiveUIDocument?.Document;
+            var options = new List<ArchitectureSourceOption> { new ArchitectureSourceOption { InstanceId = ElementId.InvalidElementId, Name = S._("collisioncheck.import_choice_none") } };
+            if (doc != null)
+            {
+                foreach (var inst in CollisionCheckerHandler.GetAllImportInstances(doc))
+                    options.Add(new ArchitectureSourceOption { InstanceId = inst.Id, Name = inst.Name ?? inst.Id.ToString(), IsLink = false });
+                foreach (var link in CollisionCheckerHandler.GetAllLoadedRevitLinks(doc))
+                {
+                    var linkDoc = link.GetLinkDocument();
+                    var typeName = (linkDoc?.GetElement(link.GetTypeId()) as RevitLinkType)?.Name ?? link.Name ?? link.Id.ToString();
+                    if (typeName.EndsWith(".rvt", StringComparison.OrdinalIgnoreCase))
+                        typeName = typeName.Substring(0, typeName.Length - 4);
+                    options.Add(new ArchitectureSourceOption { InstanceId = link.Id, Name = typeName, IsLink = true });
+                }
+            }
+
+            _cbImportChoice.ItemsSource = options;
+            var savedName = _settingsData?.ImportArchitectureName ?? "";
+            var savedIsLink = _settingsData?.ImportArchitectureIsLink ?? false;
+            var match = !string.IsNullOrEmpty(savedName)
+                ? options.FirstOrDefault(o => o.IsLink == savedIsLink && string.Equals(o.Name, savedName, StringComparison.OrdinalIgnoreCase))
+                : null;
+            _cbImportChoice.SelectedItem = match ?? options[0];
         }
 
         // ── Hole family picker ───────────────────────────────────────────
@@ -323,8 +416,17 @@ namespace METools.CollisionChecker
             var doc = uiDoc?.Document;
             if (doc == null) return;
 
+            _goToViewCache.Clear(); // model/views may have changed since the last scan -- never carry a stale answer into a new one
             UpdateStatusBar(S._("collisioncheck.scanning"));
-            _collisions = CollisionCheckerHandler.ScanForCollisions(doc, uiDoc, _scope);
+            ElementId architectureSourceId = null;
+            bool architectureSourceIsLink = false;
+            if (_settingsData?.IncludeImportedArchitecture ?? false)
+            {
+                var chosen = _cbImportChoice?.SelectedItem as ArchitectureSourceOption;
+                architectureSourceId = chosen?.InstanceId;
+                architectureSourceIsLink = chosen?.IsLink ?? false;
+            }
+            _collisions = CollisionCheckerHandler.ScanForCollisions(doc, uiDoc, _scope, architectureSourceId, architectureSourceIsLink, (_cbHoleSymbol?.SelectedItem as HoleSymbolOption)?.SymbolId);
             _lblSummary.Text = _collisions.Count == 0
                 ? S._("collisioncheck.none_found")
                 : string.Format(S._("collisioncheck.n_found"), _collisions.Count);
@@ -480,7 +582,41 @@ namespace METools.CollisionChecker
                 // if the active view isn't already on that level --
                 // otherwise zooming just pans/zooms whatever's currently
                 // open, which may not show this level's geometry at all.
-                var targetView = CollisionCheckerHandler.FindPlanViewForLevel(doc, c.LevelId);
+                // The active view only wins the tie-break if it actually
+                // SHOWS the run (mustShowElementId) -- confirmed live that
+                // "same Level" alone isn't enough: a Mechanical/Heating
+                // coordination plan and an Electrical plan can share a
+                // Level while one of them hides Cable Trays entirely via
+                // discipline filtering. Without that check, staying on a
+                // technically-valid-but-wrong-discipline view was exactly
+                // what sent "Go To" to a point with nothing visible there.
+                //
+                // Cached by (level, run category, active view) rather than
+                // calling FindPlanViewForLevel fresh every click -- that
+                // visibility check is a real cost (a view-scoped
+                // FilteredElementCollector), and on a real project the
+                // overwhelming majority of collisions share just a
+                // category or two, so the answer for THIS run is almost
+                // always identical to the last one already computed. This
+                // does assume visibility is driven by category rather
+                // than a one-off "Hide Element" on this specific instance
+                // -- true in every case seen so far, but if a specific row
+                // ever behaves oddly after this, that's the first thing to
+                // suspect.
+                var runEl = doc.GetElement(c.ElementId);
+                var activeViewId = uiDoc.ActiveView?.Id;
+                var cacheKey = (
+                    c.LevelId?.IntegerValue ?? -1,
+                    runEl?.Category?.Id?.IntegerValue ?? -1,
+                    activeViewId?.IntegerValue ?? -1);
+
+                View targetView;
+                if (!_goToViewCache.TryGetValue(cacheKey, out targetView))
+                {
+                    targetView = CollisionCheckerHandler.FindPlanViewForLevel(doc, c.LevelId, activeViewId, c.ElementId);
+                    _goToViewCache[cacheKey] = targetView;
+                }
+
                 if (targetView != null && targetView.Id != uiDoc.ActiveView?.Id)
                 {
                     try { uiDoc.ActiveView = targetView; } catch { }
