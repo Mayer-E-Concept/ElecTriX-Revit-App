@@ -89,7 +89,7 @@ namespace METools.CollisionChecker
         public Autodesk.Revit.DB.XYZ ImportedWallDirection { get; set; } = null;
     }
 
-    public enum CollisionCheckerAction { None, PlaceHoles, MoveHoles, MarkCollisions, MarkPlumbingSolved }
+    public enum CollisionCheckerAction { None, PlaceHoles, MoveHoles, MarkCollisions, MarkPlumbingSolved, Frame3D }
 
     public class CollisionCheckerRequest
     {
@@ -140,6 +140,15 @@ namespace METools.CollisionChecker
         // equivalent of PlacedHoleByRowId, so the window can flip IsSolved
         // on the matching rows without re-scanning.
         public List<string> SolvedRowIds { get; set; } = new List<string>();
+
+        // Frame3D's own result fields -- setting the section box is a
+        // document change, so it has to happen in the handler (this
+        // result carries back which view/element the window then needs
+        // to switch to and select, since THAT part isn't a document
+        // change and belongs back on the window side).
+        public Autodesk.Revit.DB.ElementId Frame3DViewId { get; set; } = Autodesk.Revit.DB.ElementId.InvalidElementId;
+        public Autodesk.Revit.DB.ElementId Frame3DElementId { get; set; } = Autodesk.Revit.DB.ElementId.InvalidElementId;
+        public bool Frame3DSucceeded { get; set; } = false;
         // Row id -> the specific exception message for THAT row, so the
         // result list can show exactly why each failed row failed, not
         // just a total count.

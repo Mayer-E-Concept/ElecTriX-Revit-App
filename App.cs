@@ -64,7 +64,7 @@ namespace METools
             // -- Settings (Appearance ? Language ? License ? Worksets) -------
             // Leftmost -- entry point for theme switch, language, license and worksets.
             var stBtn = new PushButtonData(
-                "Settings", "Settings", dll,
+                "Settings", S._("ribbon.settings"), dll,
                 "METools.SettingsCommand")
             {
                 ToolTip         = "ME-Tools settings: appearance, language, license and worksets.",
@@ -77,10 +77,11 @@ namespace METools
             if (settingsButton != null)
                 SettingsCommand.RibbonButton = settingsButton;
             RibbonThemeWatcher.Register(settingsButton, "icon_settings");
+            RibbonLanguageWatcher.Register(settingsButton, "ribbon.settings");
 
             // -- Project Health Check -----------------------------------------
             var hcBtn = new PushButtonData(
-                "ProjectHealthCheck", "Project\nHealth Check", dll,
+                "ProjectHealthCheck", S._("ribbon.project_health_check"), dll,
                 "METools.ProjectHealthCheckCommand")
             {
                 ToolTip         = "Checks the ME-Tools_CircuitTag family and Circuit Tagger's shared-parameter bindings in this project.",
@@ -93,10 +94,11 @@ namespace METools
             };
             var hcButton = panelSetup.AddItem(hcBtn) as PushButton;
             RibbonThemeWatcher.Register(hcButton, "icon_healthcheck");
+            RibbonLanguageWatcher.Register(hcButton, "ribbon.project_health_check");
 
             // -- Family Placer -----------------------------------------------
             var fpBtn = new PushButtonData(
-                "FamilyPlacer", "Family\nPlacer", dll,
+                "FamilyPlacer", S._("ribbon.family_placer"), dll,
                 "METools.FamilyPlacer.FamilyPlacerCommand")
             {
                 ToolTip         = "Place stacked combinations of electrical families with configurable height and offset.",
@@ -106,10 +108,11 @@ namespace METools
             };
             var fpButton = panelPlacement.AddItem(fpBtn) as PushButton;
             RibbonThemeWatcher.Register(fpButton, "icon_fp");
+            RibbonLanguageWatcher.Register(fpButton, "ribbon.family_placer");
 
             // -- Family Browser ---------------------------------------------
             var fbBtn = new PushButtonData(
-                "FamilyBrowser", "Family\nBrowser", dll,
+                "FamilyBrowser", S._("ribbon.family_browser"), dll,
                 "METools.FamilyBrowserCommand")
             {
                 ToolTip         = "Browse and place loaded electrical CAx families by category.",
@@ -119,10 +122,11 @@ namespace METools
             };
             var fbButton = panelPlacement.AddItem(fbBtn) as PushButton;
             RibbonThemeWatcher.Register(fbButton, "icon_fb");
+            RibbonLanguageWatcher.Register(fbButton, "ribbon.family_browser");
 
             // -- Lamp Placer -------------------------------------------------
             var lpBtn = new PushButtonData(
-                "LampPlacer", "Lamp\nPlacer", dll,
+                "LampPlacer", S._("ribbon.lamp_placer"), dll,
                 "METools.LampPlacer.LampPlacerCommand")
             {
                 ToolTip         = "Place lighting fixtures evenly distributed across selected rooms.",
@@ -132,10 +136,11 @@ namespace METools
             };
             var lpButton = panelPlacement.AddItem(lpBtn) as PushButton;
             RibbonThemeWatcher.Register(lpButton, "icon_lamp");
+            RibbonLanguageWatcher.Register(lpButton, "ribbon.lamp_placer");
 
             // -- Fix Level ---------------------------------------------------
             var flBtn = new PushButtonData(
-                "FixLevel", "Fix\nLevel", dll,
+                "FixLevel", S._("ribbon.fix_level"), dll,
                 "METools.FixLevelCommand")
             {
                 ToolTip         = "Assign the correct schedule level to all visible electrical elements in the active view.",
@@ -145,11 +150,12 @@ namespace METools
             };
             var flButton = panelLevels.AddItem(flBtn) as PushButton;
             RibbonThemeWatcher.Register(flButton, "icon_fl_fix");
+            RibbonLanguageWatcher.Register(flButton, "ribbon.fix_level");
 
             // -- Level Manager (also handles IFC level import -- see its own
             // "Import from IFC" tab; that used to be a separate ribbon button) --
             var lmBtn = new PushButtonData(
-                "LevelManager", "Level & IFC\nManager", dll,
+                "LevelManager", S._("ribbon.level_manager"), dll,
                 "METools.LevelManager.LevelManagerCommand")
             {
                 ToolTip         = "See every level in the project laid out like a section, add new ones, or import levels from an IFC file.",
@@ -165,10 +171,11 @@ namespace METools
             };
             var lmButton = panelLevels.AddItem(lmBtn) as PushButton;
             RibbonThemeWatcher.Register(lmButton, "icon_lm");
+            RibbonLanguageWatcher.Register(lmButton, "ribbon.level_manager");
 
             // -- Project Transfer ---------------------------------------------
             var ptBtn = new PushButtonData(
-                "ProjectTransfer", "Project\nTransfer", dll,
+                "ProjectTransfer", S._("ribbon.project_transfer"), dll,
                 "METools.ProjectTransfer.ProjectTransferCommand")
             {
                 ToolTip         = "Copy filters, drafting views/legends, sheets and schedules from this project into another one.",
@@ -178,10 +185,11 @@ namespace METools
             };
             var ptButton = panelLevels.AddItem(ptBtn) as PushButton;
             RibbonThemeWatcher.Register(ptButton, "icon_pt");
+            RibbonLanguageWatcher.Register(ptButton, "ribbon.project_transfer");
 
             // -- Circuit Tagger ---------------------------------------------
             var ctBtn = new PushButtonData(
-                "CircuitTagger", "Circuit\nTagger", dll,
+                "CircuitTagger", S._("ribbon.circuit_tagger"), dll,
                 "METools.FamilyPlacer.CircuitTaggerCommand")
             {
                 ToolTip         = "Select elements, assign circuit parameters (FI, Stromkreis, Vorsicherung) and place tags.",
@@ -196,10 +204,11 @@ namespace METools
             };
             var ctButton = panelCircuits.AddItem(ctBtn) as PushButton;
             RibbonThemeWatcher.Register(ctButton, "icon_ct");
+            RibbonLanguageWatcher.Register(ctButton, "ribbon.circuit_tagger");
 
             // -- Statistics ------------------------------------------------
             var statsBtn = new PushButtonData(
-                "Statistics", "Statistics", dll,
+                "Statistics", S._("ribbon.statistics"), dll,
                 "METools.StatisticsCommand")
             {
                 ToolTip         = "Count all electrical elements by category and floor.",
@@ -209,6 +218,7 @@ namespace METools
             };
             var statsButton = panelCircuits.AddItem(statsBtn) as PushButton;
             RibbonThemeWatcher.Register(statsButton, "icon_stats");
+            RibbonLanguageWatcher.Register(statsButton, "ribbon.statistics");
 
             // -- Batch Params (Renumber + Bulk Edit) --------------------------
             // Inspired by DiRoots' ReOrdering (renumber an instance parameter
@@ -218,7 +228,7 @@ namespace METools
             // across any category/parameter rather than scoped to electrical
             // ones specifically.
             var bpBtn = new PushButtonData(
-                "BatchParams", "Batch\nParams", dll,
+                "BatchParams", S._("ribbon.batch_params"), dll,
                 "METools.BatchParams.BatchParamsCommand")
             {
                 ToolTip         = "Renumber a parameter across many elements (manually or along a line), or bulk add-prefix/suffix/find-replace/clear one parameter across a filtered set.",
@@ -231,6 +241,7 @@ namespace METools
             };
             var bpButton = panelCircuits.AddItem(bpBtn) as PushButton;
             RibbonThemeWatcher.Register(bpButton, "icon_bp");
+            RibbonLanguageWatcher.Register(bpButton, "ribbon.batch_params");
 
             // -- Collision Checker (conduits/cable trays vs walls) -----------
             // Finds where a conduit/cable tray run crosses a wall, lists each
@@ -240,7 +251,7 @@ namespace METools
             // holes are linked to their run via Extensible Storage and kept
             // in sync by CollisionCheckerWatcher if the run is later moved.
             var ccBtn = new PushButtonData(
-                "CollisionChecker", "Collision\nChecker", dll,
+                "CollisionChecker", S._("ribbon.collision_checker"), dll,
                 "METools.CollisionChecker.CollisionCheckerCommand")
             {
                 ToolTip         = "Find where conduits/cable trays cross walls, jump to each one, and place a hole marker -- the hole follows if you later move the run.",
@@ -254,10 +265,11 @@ namespace METools
             };
             var ccButton = panelCircuits.AddItem(ccBtn) as PushButton;
             RibbonThemeWatcher.Register(ccButton, "icon_cc");
+            RibbonLanguageWatcher.Register(ccButton, "ribbon.collision_checker");
 
             // -- Comments ----------------------------------------------------
             var cmtBtn = new PushButtonData(
-                "Comments", "Comments", dll,
+                "Comments", S._("ribbon.comments"), dll,
                 "METools.Comments.CommentsCommand")
             {
                 ToolTip         = "Leave a comment tagged to a level; teammates get notified when they open this project.",
@@ -272,6 +284,7 @@ namespace METools
             };
             var cmtButton = panelTeam.AddItem(cmtBtn) as PushButton;
             RibbonThemeWatcher.Register(cmtButton, "icon_comments");
+            RibbonLanguageWatcher.Register(cmtButton, "ribbon.comments");
 
             // -- Activity Log & Time Tracker ------------------------------------
             // Time Tracker used to be its own button here; merged into this one
@@ -280,7 +293,7 @@ namespace METools
             // history read from the same shared folder. Background tracking is
             // unaffected; only the entry point moved.
             var alBtn = new PushButtonData(
-                "ActivityLog", "Activity\n& Time", dll,
+                "ActivityLog", S._("ribbon.activity_log"), dll,
                 "METools.ActivityLog.ActivityLogCommand")
             {
                 ToolTip         = "See who added, modified, or deleted which elements and when -- plus time spent per user, per project.",
@@ -294,6 +307,7 @@ namespace METools
             };
             var alButton = panelTeam.AddItem(alBtn) as PushButton;
             RibbonThemeWatcher.Register(alButton, "icon_activitylog");
+            RibbonLanguageWatcher.Register(alButton, "ribbon.activity_log");
 
             // Apply the correct light/dark icon set right now based on Revit's
             // current theme, and subscribe so it stays in sync if the user

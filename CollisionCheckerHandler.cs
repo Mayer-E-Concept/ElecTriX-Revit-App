@@ -61,6 +61,8 @@ namespace METools.CollisionChecker
                 ExecuteMarkCollisions(doc, app.ActiveUIDocument?.ActiveView?.Id, req);
             else if (req.Action == CollisionCheckerAction.MarkPlumbingSolved)
                 ExecuteMarkPlumbingSolved(doc, req);
+            else if (req.Action == CollisionCheckerAction.Frame3D)
+                ExecuteFrame3D(doc, req);
         }
 
         // ═════════════════════════════════════════════════════════════════
@@ -335,6 +337,14 @@ namespace METools.CollisionChecker
             public string Description = "";
             public string UniqueId = ""; // the linked pipe/fitting's own UniqueId, within its own link document -- see the solved-clash schema below
             public BoundingBoxXYZ HostBBox;
+            // Half the SMALLEST of the box's 3 dimensions -- for a pipe or
+            // fitting aligned along its own axis, two of the three box
+            // dimensions are close to its actual diameter and one (the
+            // length) is larger, so the smallest one is a reasonable
+            // stand-in for its radius. Used by ScanForPlumbingClashes'
+            // centerline-distance check below, not the bounding-box test
+            // this used to rely on alone.
+            public double ApproxRadiusFt;
         }
 
         private static readonly BuiltInCategory[] PlumbingCategories =
@@ -419,11 +429,15 @@ namespace METools.CollisionChecker
                             }
                             if (min == null || max == null) continue;
 
+                            double dx = max.X - min.X, dy = max.Y - min.Y, dz = max.Z - min.Z;
+                            double approxRadius = Math.Min(dx, Math.Min(dy, dz)) / 2.0;
+
                             result.Add(new PlumbingCandidate
                             {
                                 Description = catLabel,
                                 UniqueId = el.UniqueId ?? "",
                                 HostBBox = new BoundingBoxXYZ { Min = min, Max = max },
+                                ApproxRadiusFt = approxRadius,
                             });
                         }
                         catch { }
@@ -434,13 +448,15 @@ namespace METools.CollisionChecker
             return result;
         }
 
-        // For each run, checks its bounding box against every plumbing
-        // candidate's -- unlike the wall-crossing check's 600mm quick-
-        // filter tolerance (deliberately generous, since that's only a
-        // candidate filter ahead of a separate precise Face.Intersect
-        // step), this tolerance is small and IS the actual detection
-        // signal, so a generous one here would flag near-misses as real
-        // clashes.
+        // For each run, measures distance from every plumbing candidate to
+        // the run's OWN centerline (clamped to its real bounded length),
+        // not to an axis-aligned box around the whole run -- confirmed
+        // live as a real, reported problem: for a long or diagonally-
+        // angled run, that box can be far larger than the run's actual
+        // (thin) physical volume, so a box-vs-box test flagged pipes that
+        // were nowhere near the run's real geometry, just somewhere
+        // within its oversized box. Looking at a specific flagged case in
+        // 3D confirmed it directly: nothing was actually there.
         internal static List<CollisionInfo> ScanForPlumbingClashes(Document doc, List<Element> runs, RevitLinkInstance plumbingLink)
         {
             var result = new List<CollisionInfo>();
@@ -450,7 +466,17 @@ namespace METools.CollisionChecker
             if (candidates.Count == 0) return result;
 
             var solvedKeys = ReadSolvedPlumbingClashKeys(doc);
-            const double clashToleranceFt = 5.0 / 304.8; // ~5mm, geometry-rounding allowance only
+
+            // Generous, quick-reject only -- NOT the actual detection
+            // signal (that's the centerline-distance check below). Wide
+            // on purpose so it never itself excludes a genuine clash;
+            // its only job is skipping candidates that are obviously far
+            // away before the more precise (and more expensive) check.
+            const double quickFilterToleranceFt = 2.0;
+            // Geometry-rounding allowance only, added on top of the run's
+            // own half-width and the candidate's approximate radius --
+            // not a substitute for measuring actual physical proximity.
+            const double smallToleranceFt = 15.0 / 304.8;
 
             foreach (var run in runs)
             {
@@ -459,6 +485,11 @@ namespace METools.CollisionChecker
                     var runBox = run.get_BoundingBox(null);
                     if (runBox == null) continue;
                     var outline = new Outline(runBox.Min, runBox.Max);
+
+                    var centerline = (run.Location as LocationCurve)?.Curve;
+                    GetRunCrossDimensions(run, out var crossWidth, out var crossHeight);
+                    double runHalfWidthFt = Math.Max(crossWidth ?? 0, crossHeight ?? 0) / 2.0;
+                    if (runHalfWidthFt <= 0) runHalfWidthFt = 100.0 / 304.8; // ~100mm fallback if the parameter couldn't be read
 
                     ElementId levelId = ElementId.InvalidElementId;
                     string levelName = "";
@@ -474,20 +505,47 @@ namespace METools.CollisionChecker
                         try
                         {
                             if (cand.HostBBox == null) continue;
-                            if (!outline.Intersects(new Outline(cand.HostBBox.Min, cand.HostBBox.Max), clashToleranceFt)) continue;
+                            if (!outline.Intersects(new Outline(cand.HostBBox.Min, cand.HostBBox.Max), quickFilterToleranceFt)) continue;
 
-                            // The overlap region's own center -- roughly
-                            // where the two systems actually meet, rather
-                            // than either element's unrelated centroid.
-                            var ovMin = new XYZ(
-                                Math.Max(runBox.Min.X, cand.HostBBox.Min.X),
-                                Math.Max(runBox.Min.Y, cand.HostBBox.Min.Y),
-                                Math.Max(runBox.Min.Z, cand.HostBBox.Min.Z));
-                            var ovMax = new XYZ(
-                                Math.Min(runBox.Max.X, cand.HostBBox.Max.X),
-                                Math.Min(runBox.Max.Y, cand.HostBBox.Max.Y),
-                                Math.Min(runBox.Max.Z, cand.HostBBox.Max.Z));
-                            var clashPoint = new XYZ((ovMin.X + ovMax.X) / 2.0, (ovMin.Y + ovMax.Y) / 2.0, (ovMin.Z + ovMax.Z) / 2.0);
+                            var candCenter = new XYZ(
+                                (cand.HostBBox.Min.X + cand.HostBBox.Max.X) / 2.0,
+                                (cand.HostBBox.Min.Y + cand.HostBBox.Max.Y) / 2.0,
+                                (cand.HostBBox.Min.Z + cand.HostBBox.Max.Z) / 2.0);
+
+                            XYZ clashPoint;
+                            if (centerline != null)
+                            {
+                                // Project clamps to the curve's actual bound
+                                // endpoints if the closest point on the
+                                // infinite line would fall outside this
+                                // run's real length -- exactly the behavior
+                                // needed here (distance to the real,
+                                // bounded segment, not an extrapolated one).
+                                var proj = centerline.Project(candCenter);
+                                if (proj == null) continue;
+                                double allowedFt = runHalfWidthFt + cand.ApproxRadiusFt + smallToleranceFt;
+                                if (proj.Distance > allowedFt) continue;
+                                clashPoint = proj.XYZPoint;
+                            }
+                            else
+                            {
+                                // No LocationCurve (unexpected for a Cable
+                                // Tray/Conduit, but handled defensively) --
+                                // falls back to the original bounding-box
+                                // overlap test rather than skipping the run
+                                // entirely.
+                                if (!outline.Intersects(new Outline(cand.HostBBox.Min, cand.HostBBox.Max), smallToleranceFt)) continue;
+                                var ovMin = new XYZ(
+                                    Math.Max(runBox.Min.X, cand.HostBBox.Min.X),
+                                    Math.Max(runBox.Min.Y, cand.HostBBox.Min.Y),
+                                    Math.Max(runBox.Min.Z, cand.HostBBox.Min.Z));
+                                var ovMax = new XYZ(
+                                    Math.Min(runBox.Max.X, cand.HostBBox.Max.X),
+                                    Math.Min(runBox.Max.Y, cand.HostBBox.Max.Y),
+                                    Math.Min(runBox.Max.Z, cand.HostBBox.Max.Z));
+                                clashPoint = new XYZ((ovMin.X + ovMax.X) / 2.0, (ovMin.Y + ovMax.Y) / 2.0, (ovMin.Z + ovMax.Z) / 2.0);
+                            }
+
                             var combinedKey = $"{run.UniqueId}|{cand.UniqueId}";
 
                             result.Add(new CollisionInfo
@@ -1448,6 +1506,128 @@ namespace METools.CollisionChecker
             OnDone?.Invoke(result);
         }
 
+        // Confirmed live as a real, reported bug: the section-box
+        // transaction used to run directly inside the "3D" button's own
+        // click handler, bypassing the ExternalEvent every other
+        // document-modifying action in this file goes through. Revit's
+        // own API reported the UI as "blocked by another command/tool"
+        // right after that click -- a direct transaction from a modeless
+        // window's button click isn't the same guaranteed-safe context an
+        // ExternalEvent-driven one is, and it showed: the button would
+        // spin for a moment and then silently do nothing. Setting the
+        // section box here instead, then reporting back which view/
+        // element the window should switch to and select once this
+        // actually completes, matches every other action in this file
+        // and is the same context PlaceHoles/MarkCollisions/
+        // MarkPlumbingSolved already run in safely.
+        private void ExecuteFrame3D(Document doc, CollisionCheckerRequest req)
+        {
+            var result = new PlaceHolesResult { ResultAction = CollisionCheckerAction.Frame3D };
+            var c = req.Collisions?.FirstOrDefault();
+            if (doc == null || c == null || c.Point == null) { OnDone?.Invoke(result); return; }
+
+            try
+            {
+                var view3D = FindDefault3DView(doc, c.ElementId);
+                if (view3D == null) { OnDone?.Invoke(result); return; }
+
+                // Confirmed live against a direct side-by-side: a fixed
+                // cube around the clash point showed far more than
+                // Revit's own "Selection Box" on the same element does --
+                // that feature crops to the SELECTED ELEMENT's own
+                // bounding box (with a small margin), not an arbitrary
+                // fixed-size region around a point. Framing the same
+                // element this row would select (the run, or the hole
+                // once one's placed) matches that behavior directly,
+                // rather than approximating it.
+                var elementToFrame = c.HasHole ? c.HoleInstanceId : c.ElementId;
+                var el = doc.GetElement(elementToFrame);
+                var elBox = el?.get_BoundingBox(null);
+
+                using (var tx = new Transaction(doc, "ME-Tools: Frame collision in 3D"))
+                {
+                    tx.Start();
+                    try
+                    {
+                        BoundingBoxXYZ box;
+                        if (elBox != null)
+                        {
+                            double margin = 1.0; // ~0.3m -- a small margin around the element itself, not a substitute for it
+                            box = new BoundingBoxXYZ
+                            {
+                                Min = new XYZ(elBox.Min.X - margin, elBox.Min.Y - margin, elBox.Min.Z - margin),
+                                Max = new XYZ(elBox.Max.X + margin, elBox.Max.Y + margin, elBox.Max.Z + margin),
+                            };
+                        }
+                        else
+                        {
+                            // Element's bounding box couldn't be read (unusual) --
+                            // falls back to a fixed cube around the clash point
+                            // rather than leaving the section box untouched.
+                            double half = 6.0;
+                            var p = c.Point;
+                            box = new BoundingBoxXYZ
+                            {
+                                Min = new XYZ(p.X - half, p.Y - half, p.Z - half),
+                                Max = new XYZ(p.X + half, p.Y + half, p.Z + half),
+                            };
+                        }
+
+                        view3D.IsSectionBoxActive = true;
+                        view3D.SetSectionBox(box);
+                        tx.Commit();
+                        result.Frame3DSucceeded = true;
+                    }
+                    catch { try { tx.RollBack(); } catch { } }
+                }
+
+                result.Frame3DViewId    = view3D.Id;
+                result.Frame3DElementId = elementToFrame;
+            }
+            catch { }
+            OnDone?.Invoke(result);
+        }
+
+        // collision marker below can be a genuinely filled, semi-
+        // transparent circle instead of a thick outline -- a real,
+        // requested change from an outline to something that reads as a
+        // filled shape at a glance, while staying see-through enough not
+        // to hide whatever's underneath. Must be called from inside an
+        // already-open transaction (creating/duplicating a type is a
+        // document change).
+        private static FilledRegionType GetOrCreateRedFilledRegionType(Document doc)
+        {
+            const string typeName = "ME-Tools_CollisionMark";
+            try
+            {
+                var existing = new FilteredElementCollector(doc)
+                    .OfClass(typeof(FilledRegionType))
+                    .Cast<FilledRegionType>()
+                    .FirstOrDefault(t => t.Name == typeName);
+                if (existing != null) return existing;
+
+                var solidPattern = new FilteredElementCollector(doc)
+                    .OfClass(typeof(FillPatternElement))
+                    .Cast<FillPatternElement>()
+                    .FirstOrDefault(p => { try { var fp = p.GetFillPattern(); return fp != null && fp.IsSolidFill && fp.Target == FillPatternTarget.Drafting; } catch { return false; } });
+                if (solidPattern == null) return null;
+
+                var baseType = new FilteredElementCollector(doc)
+                    .OfClass(typeof(FilledRegionType))
+                    .Cast<FilledRegionType>()
+                    .FirstOrDefault();
+                if (baseType == null) return null;
+
+                var newType = baseType.Duplicate(typeName) as FilledRegionType;
+                if (newType == null) return null;
+                newType.ForegroundPatternId    = solidPattern.Id;
+                newType.ForegroundPatternColor = new Autodesk.Revit.DB.Color(226, 42, 42);
+                newType.BackgroundPatternId    = ElementId.InvalidElementId;
+                return newType;
+            }
+            catch { return null; }
+        }
+
         private void ExecuteMarkCollisions(Document doc, ElementId activeViewId, CollisionCheckerRequest req)
         {
             var result = new PlaceHolesResult { ResultAction = CollisionCheckerAction.MarkCollisions };
@@ -1463,9 +1643,15 @@ namespace METools.CollisionChecker
                         try { doc.Delete(req.OldMarkerIds); } catch { }
                     }
 
-                    var red = new Autodesk.Revit.DB.Color(226, 42, 42);
+                    // A filled, semi-transparent red circle instead of a
+                    // thick outline -- a genuinely filled shape reads much
+                    // more clearly as "something needs attention here" at
+                    // a glance than an outline does, while the
+                    // transparency keeps whatever's underneath (the wall,
+                    // the pipe) still visible rather than fully obscured.
+                    var filledRegionType = GetOrCreateRedFilledRegionType(doc);
                     var ogs = new OverrideGraphicSettings();
-                    try { ogs.SetProjectionLineColor(red); ogs.SetProjectionLineWeight(7); } catch { }
+                    try { ogs.SetSurfaceTransparency(55); } catch { } // 0=opaque, 100=invisible -- 55 reads as filled but still see-through
                     double radiusFt = 250.0 / 304.8; // ~250mm radius -- visible regardless of view scale
 
                     var toMark = req.Collisions.Where(c => !c.IsResolved && c.Point != null).ToList();
@@ -1520,25 +1706,47 @@ namespace METools.CollisionChecker
                                     ? new XYZ(c.Point.X, c.Point.Y, planeZ.Value)
                                     : c.Point;
 
-                                // A circle, as two half-circle arcs (Revit
-                                // detail curves can't be a single closed
-                                // loop) on a plane centered exactly at the
-                                // (projected) collision point.
+                                // Both half-circle arcs joined into one
+                                // closed CurveLoop -- a FilledRegion needs
+                                // a closed boundary, unlike the old
+                                // DetailCurve pair which could just be two
+                                // independent open arcs.
                                 var centeredPlane = Plane.CreateByOriginAndBasis(center, xAxis, yAxis);
                                 var arc1 = Arc.Create(centeredPlane, radiusFt, 0, Math.PI);
                                 var arc2 = Arc.Create(centeredPlane, radiusFt, Math.PI, 2 * Math.PI);
-                                var dc1 = doc.Create.NewDetailCurve(targetView, arc1);
-                                var dc2 = doc.Create.NewDetailCurve(targetView, arc2);
-                                targetView.SetElementOverrides(dc1.Id, ogs);
-                                targetView.SetElementOverrides(dc2.Id, ogs);
+
+                                List<ElementId> markerIds;
+                                if (filledRegionType != null)
+                                {
+                                    var loop = new CurveLoop();
+                                    loop.Append(arc1);
+                                    loop.Append(arc2);
+                                    var region = FilledRegion.Create(doc, filledRegionType.Id, targetView.Id, new List<CurveLoop> { loop });
+                                    targetView.SetElementOverrides(region.Id, ogs);
+                                    markerIds = new List<ElementId> { region.Id };
+                                }
+                                else
+                                {
+                                    // No solid drafting fill pattern was found in this
+                                    // document (unusual, but not impossible on a
+                                    // stripped-down template) -- falls back to the
+                                    // original outline-only circle rather than
+                                    // silently drawing nothing.
+                                    var dc1 = doc.Create.NewDetailCurve(targetView, arc1);
+                                    var dc2 = doc.Create.NewDetailCurve(targetView, arc2);
+                                    var outlineOgs = new OverrideGraphicSettings();
+                                    try { outlineOgs.SetProjectionLineColor(new Autodesk.Revit.DB.Color(226, 42, 42)); outlineOgs.SetProjectionLineWeight(7); } catch { }
+                                    targetView.SetElementOverrides(dc1.Id, outlineOgs);
+                                    targetView.SetElementOverrides(dc2.Id, outlineOgs);
+                                    markerIds = new List<ElementId> { dc1.Id, dc2.Id };
+                                }
 
                                 if (!result.MarkersByCollisionId.TryGetValue(c.Id, out var list))
                                 {
                                     list = new List<ElementId>();
                                     result.MarkersByCollisionId[c.Id] = list;
                                 }
-                                list.Add(dc1.Id);
-                                list.Add(dc2.Id);
+                                list.AddRange(markerIds);
                             }
                             catch (Exception ex)
                             {

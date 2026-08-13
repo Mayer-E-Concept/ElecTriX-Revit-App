@@ -429,6 +429,40 @@ namespace METools.BatchParams
             _lblPreview.Text = (_tbPrefix?.Text ?? "") + numStr + (_tbSuffix?.Text ?? "");
         }
 
+        // Same idea as CircuitTaggerWindow.SetPendingMark, kept as its own
+        // independent copy here rather than shared -- lower risk than
+        // refactoring that tool's existing, working mechanism into a
+        // shared base-class method just to reuse it here. Bold magenta,
+        // matching Circuit Tagger's own choice, for the same reason: it
+        // needs to read clearly against both this app's red collision
+        // markers and Revit's own selection blue.
+        private static readonly Autodesk.Revit.DB.Color PendingPickColor = new Autodesk.Revit.DB.Color(255, 60, 170);
+
+        private void SetPendingMark(Document doc, View view, ElementId id, bool on)
+        {
+            if (doc == null || view == null || id == null || id == ElementId.InvalidElementId) return;
+            try
+            {
+                using (var tx = new Transaction(doc, on ? "ME-Tools: Mark picked element" : "ME-Tools: Clear picked element mark"))
+                {
+                    tx.Start();
+                    try
+                    {
+                        var ogs = new OverrideGraphicSettings();
+                        if (on)
+                        {
+                            ogs.SetProjectionLineColor(PendingPickColor);
+                            ogs.SetProjectionLineWeight(6);
+                        }
+                        view.SetElementOverrides(id, ogs); // no color/weight set = reset to default when on == false
+                    }
+                    catch { }
+                    tx.Commit();
+                }
+            }
+            catch { }
+        }
+
         // Incremental single-object picking loop, exactly like Circuit
         // Tagger's element selection (see CircuitTaggerWindow.OnSelectClicked)
         // -- one PickObject at a time, committed to the order list
@@ -440,6 +474,7 @@ namespace METools.BatchParams
             Hide();
             var uiDoc = _uiApp?.ActiveUIDocument;
             if (uiDoc == null) { Show(); return; }
+            var doc = uiDoc.Document;
             try
             {
                 while (true)
@@ -447,7 +482,17 @@ namespace METools.BatchParams
                     var r = uiDoc.Selection.PickObject(ObjectType.Element,
                         "Click elements in the order you want them numbered. Press Esc when done.");
                     if (r == null) break;
-                    if (!_manualOrder.Contains(r.ElementId)) _manualOrder.Add(r.ElementId);
+                    // Marks the element the instant it's picked, so with a
+                    // long run (30+ items) it's immediately visible in the
+                    // model which ones are already in the list and which
+                    // aren't -- confirmed as a real, requested gap: this
+                    // loop previously gave no visual feedback at all beyond
+                    // the count label.
+                    if (!_manualOrder.Contains(r.ElementId))
+                    {
+                        _manualOrder.Add(r.ElementId);
+                        SetPendingMark(doc, uiDoc.ActiveView, r.ElementId, true);
+                    }
                 }
             }
             catch (Autodesk.Revit.Exceptions.OperationCanceledException) { /* Esc -- normal way to finish */ }
@@ -461,9 +506,19 @@ namespace METools.BatchParams
 
         private void OnClearManualClicked()
         {
+            // Clears the marks too, not just the list -- otherwise the
+            // highlight from a previous manual pick would linger in the
+            // view even after "Clear" says there's nothing selected.
+            var uiDoc = _uiApp?.ActiveUIDocument;
+            if (uiDoc != null)
+            {
+                foreach (var id in _manualOrder)
+                    SetPendingMark(uiDoc.Document, uiDoc.ActiveView, id, false);
+            }
             _manualOrder.Clear();
             UpdateManualCountLabel();
         }
+
 
         private void UpdateManualCountLabel()
         {
@@ -874,6 +929,18 @@ namespace METools.BatchParams
         private void HandleApplyResult(ApplyResult result)
         {
             if (result == null) return;
+
+            // Only once the renumber genuinely commits, not during the
+            // dry-run preview -- the highlight is still useful while
+            // reviewing the preview before confirming.
+            if (result.WhichAction == BatchParamsAction.ApplyRenumber && !result.WasDryRun && _orderMode == RenumberOrderMode.Manual)
+            {
+                var uiDoc = _uiApp?.ActiveUIDocument;
+                if (uiDoc != null)
+                    foreach (var id in _manualOrder)
+                        SetPendingMark(uiDoc.Document, uiDoc.ActiveView, id, false);
+            }
+
             if (result.WhichAction == BatchParamsAction.ApplyRenumber)
                 ShowResultPanel(result, _panRenumberResult, _lblRenumberSummary, _renumberResultList, _btnRenumberConfirm, _btnRenumberCancel);
             else if (result.WhichAction == BatchParamsAction.ApplyBulkEdit)

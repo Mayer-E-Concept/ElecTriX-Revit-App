@@ -84,7 +84,13 @@ namespace METools.CollisionChecker
             // default (SizeToContent.Height), which doesn't have a
             // meaningful answer for a star-sized row.
             SizeToContent = SizeToContent.Manual;
-            Height = Math.Min(700, SystemParameters.WorkArea.Height - 80);
+            // Opens at its own maximum allowed height by default, rather
+            // than a smaller fixed value -- confirmed as a real, reported
+            // annoyance: the window used to open shorter than its own
+            // MaxHeight allows, needing a manual resize every single time
+            // it's opened, even though the person had already found and
+            // preferred the taller size.
+            Height = MaxHeight;
             WireHandler();
             Build();
         }
@@ -98,6 +104,8 @@ namespace METools.CollisionChecker
                     HandleMarkResult(result);
                 else if (result?.ResultAction == CollisionCheckerAction.MarkPlumbingSolved)
                     HandleSolvedResult(result);
+                else if (result?.ResultAction == CollisionCheckerAction.Frame3D)
+                    HandleFrame3DResult(result);
                 else
                     HandlePlaceResult(result);
             });
@@ -903,39 +911,38 @@ namespace METools.CollisionChecker
             catch { }
         }
 
-        // A separate button rather than folding this into "Go To" --
-        // ZoomAndCenterRectangle's tight box, which is exactly right for
-        // a 2D plan view, isn't something confirmed to behave the same
-        // way in a 3D view (screen-space vs. world-space framing can
-        // differ there), so this uses ShowElements instead -- Revit's own,
-        // more broadly-tested API for "make this element visible",
-        // regardless of view type. That does mean it frames the whole
-        // run rather than the exact clash point, same trade-off ShowElements
-        // already had for the plan-view case before that was tightened up.
+        // Replicates Revit's own "Selection Box" behavior (View panel ->
+        // Selection Box, or right-click on a selection) rather than just
+        // switching to the 3D view and showing the whole model -- a
+        // section box cropped tightly around the clash point, the same
+        // "here's just the little section that matters" result you'd get
+        // clicking that button yourself. Reuses the same default 3D view
+        // every time (matching how Revit's own Selection Box behaves when
+        // you're not already in a 3D view: it reuses/creates ONE default
+        // 3D view and adjusts ITS box), so repeated clicks update the same
+        // view's crop rather than piling up new views.
+        //
+        // Setting the section box is a document change, so it has to go
+        // through the ExternalEvent just like every other document-
+        // modifying action in this window -- confirmed live as a real bug
+        // when this used to run the transaction directly here instead:
+        // Revit's own API reported the UI as blocked right after, and the
+        // button would spin for a moment then silently do nothing.
+        // HandleFrame3DResult below does the actual view-switch/select/
+        // zoom once this genuinely completes.
         private void OnGoTo3DClicked(CollisionInfo c)
         {
-            var uiDoc = _uiApp?.ActiveUIDocument;
-            if (uiDoc == null) return;
-            var doc = uiDoc.Document;
-            try
-            {
-                var view3D = CollisionCheckerHandler.FindDefault3DView(doc, c.ElementId);
-                if (view3D == null)
-                {
-                    MessageBox.Show(S._("collisioncheck.no_3d_view"), S._("collisioncheck.title"), MessageBoxButton.OK, MessageBoxImage.Information);
-                    return;
-                }
-                if (view3D.Id != uiDoc.ActiveView?.Id)
-                {
-                    try { uiDoc.ActiveView = view3D; } catch { }
-                }
+            var doc = _uiApp?.ActiveUIDocument?.Document;
+            if (doc == null || c.Point == null) return;
 
-                var idToSelect = c.HasHole ? c.HoleInstanceId : c.ElementId;
-                uiDoc.ShowElements(new List<ElementId> { idToSelect });
-                uiDoc.Selection.SetElementIds(new List<ElementId> { idToSelect });
-            }
-            catch { }
+            _handler.Request = new CollisionCheckerRequest
+            {
+                Action     = CollisionCheckerAction.Frame3D,
+                Collisions = new List<CollisionInfo> { c },
+            };
+            _extEvent.Raise();
         }
+
 
         // Moved to CollisionCheckerHandler (as FindPlanViewForLevel) so the
         // mark-drawing code can use the exact same lookup "Go To" does --
@@ -1147,6 +1154,38 @@ namespace METools.CollisionChecker
             var summary = string.Format(S._("collisioncheck.solved_summary"), result.Placed);
             if (result.Errors > 0) summary += string.Format(S._("collisioncheck.n_errors"), result.Errors);
             UpdateStatusBar(summary);
+        }
+
+        // Runs after ExecuteFrame3D genuinely completes -- the section
+        // box itself was already set inside the transaction there; this
+        // is just the view-switch/select/zoom, none of which are document
+        // changes, so they belong here rather than in the handler.
+        private void HandleFrame3DResult(PlaceHolesResult result)
+        {
+            var uiDoc = _uiApp?.ActiveUIDocument;
+            if (uiDoc == null || result == null) return;
+
+            if (result.Frame3DViewId == null || result.Frame3DViewId == ElementId.InvalidElementId)
+            {
+                MessageBox.Show(S._("collisioncheck.no_3d_view"), S._("collisioncheck.title"), MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            try
+            {
+                var view3D = uiDoc.Document.GetElement(result.Frame3DViewId) as View;
+                if (view3D != null && view3D.Id != uiDoc.ActiveView?.Id)
+                {
+                    try { uiDoc.ActiveView = view3D; } catch { }
+                }
+
+                if (result.Frame3DElementId != null && result.Frame3DElementId != ElementId.InvalidElementId)
+                    uiDoc.Selection.SetElementIds(new List<ElementId> { result.Frame3DElementId });
+
+                var uiView = uiDoc.GetOpenUIViews().FirstOrDefault(uv => uv.ViewId.Equals(result.Frame3DViewId));
+                uiView?.ZoomToFit();
+            }
+            catch { }
         }
     }
 }

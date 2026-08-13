@@ -512,9 +512,22 @@ namespace METools
                                      : SettingsStore.Language == "ro" ? "Română"
                                      : "English";
             _cbLanguage.SelectionChanged += (s, e) =>
-                SettingsStore.Language = _cbLanguage.SelectedItem?.ToString() == "Deutsch" ? "de"
-                                        : _cbLanguage.SelectedItem?.ToString() == "Română" ? "ro"
-                                        : "en";
+            {
+                var newLang = _cbLanguage.SelectedItem?.ToString() == "Deutsch" ? "de"
+                            : _cbLanguage.SelectedItem?.ToString() == "Română" ? "ro"
+                            : "en";
+                SettingsStore.Language = newLang;
+                // SettingsStore.Language's setter only persists the value to
+                // disk -- it doesn't touch S's own current-language state,
+                // which is what S._() actually reads from. Every other
+                // window already gets this right by calling S.SetLanguage
+                // fresh in its own constructor, but the ribbon buttons were
+                // created once at startup and never told to re-read
+                // anything -- confirmed live as a real, reported gap: the
+                // ribbon stayed in English no matter what was picked here.
+                S.SetLanguage(newLang);
+                RibbonLanguageWatcher.Refresh();
+            };
             row.Children.Add(_cbLanguage);
             p.Children.Add(row);
             p.Children.Add(new TextBlock { Text = S._("settings.language.restart"), FontSize = 10, Foreground = MeToolsTheme.BrMuted, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 8) });
