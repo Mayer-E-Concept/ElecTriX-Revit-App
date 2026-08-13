@@ -662,11 +662,11 @@ namespace METools.FamilyPlacer
                             Stromkreis        = sk,
                             Beleuchtungskreis = bk,
                             Category          = fi.Category?.Name ?? "",
-                            CategoryId        = fi.Category?.Id?.IntegerValue ?? 0,
+                            CategoryId        = (int)(fi.Category?.Id?.Value ?? 0),
                             FamilyName        = fi.Symbol?.Family?.Name ?? fi.Name ?? "",
                             Room              = GetRoomName(doc, fi, phase),
                             LevelName         = GetLevelName(doc, fi),
-                            ElementId         = fi.Id.IntegerValue.ToString(),
+                            ElementId         = fi.Id.Value.ToString(),
                         });
                     }
                 }
@@ -812,7 +812,7 @@ namespace METools.FamilyPlacer
                     {
                         try
                         {
-                            var el = doc.GetElement(new ElementId(int.Parse(r.ElementId)));
+                            var el = doc.GetElement(new ElementId((long)int.Parse(r.ElementId)));
                             if (el == null) continue;
                             ClearParam(el, PARAM_STROMKREIS);
                             ClearParam(el, PARAM_FI);

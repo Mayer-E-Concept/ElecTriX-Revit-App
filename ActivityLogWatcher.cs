@@ -105,7 +105,7 @@ namespace METools.ActivityLog
                         .OfCategory(cat).WhereElementIsNotElementType())
                     {
                         var snap = Snapshot(doc, el);
-                        if (snap != null) map[el.Id.IntegerValue] = snap;
+                        if (snap != null) map[el.Id.Value] = snap;
                     }
                 }
                 catch { }
@@ -149,7 +149,7 @@ namespace METools.ActivityLog
                 if (!anyRelevant)
                     foreach (var id in modifiedIds) { if (IsTrackedLive(doc, id)) { anyRelevant = true; break; } }
                 if (!anyRelevant)
-                    foreach (var id in deletedIds)  { if (map.ContainsKey(id.IntegerValue)) { anyRelevant = true; break; } }
+                    foreach (var id in deletedIds)  { if (map.ContainsKey(id.Value)) { anyRelevant = true; break; } }
                 if (!anyRelevant) return;
 
                 // Read-only on purpose -- this whole method runs inside
@@ -191,7 +191,7 @@ namespace METools.ActivityLog
                     var snap = Snapshot(doc, el);
                     if (snap == null) continue; // not a tracked category
 
-                    map[id.IntegerValue] = snap;
+                    map[id.Value] = snap;
 
                     entriesToWrite.Add(new ActivityLogEntry
                     {
@@ -203,7 +203,7 @@ namespace METools.ActivityLog
                         TypeName         = snap.TypeName,
                         LevelName        = snap.LevelName,
                         LevelId          = snap.LevelId,
-                        ElementId        = id.IntegerValue.ToString(),
+                        ElementId        = id.Value.ToString(),
                         TransactionNames = txNames,
                     });
                 }
@@ -218,7 +218,7 @@ namespace METools.ActivityLog
                     var snap = Snapshot(doc, el);
                     if (snap == null) continue;
 
-                    map[id.IntegerValue] = snap;
+                    map[id.Value] = snap;
 
                     entriesToWrite.Add(new ActivityLogEntry
                     {
@@ -230,7 +230,7 @@ namespace METools.ActivityLog
                         TypeName         = snap.TypeName,
                         LevelName        = snap.LevelName,
                         LevelId          = snap.LevelId,
-                        ElementId        = id.IntegerValue.ToString(),
+                        ElementId        = id.Value.ToString(),
                         TransactionNames = txNames,
                     });
                 }
@@ -240,8 +240,8 @@ namespace METools.ActivityLog
                 // from the initial PrimeCache scan.
                 foreach (var id in deletedIds)
                 {
-                    if (!map.TryGetValue(id.IntegerValue, out var snap)) continue; // never tracked -- not our category, skip quietly
-                    map.Remove(id.IntegerValue);
+                    if (!map.TryGetValue(id.Value, out var snap)) continue; // never tracked -- not our category, skip quietly
+                    map.Remove(id.Value);
 
                     entriesToWrite.Add(new ActivityLogEntry
                     {
@@ -253,7 +253,7 @@ namespace METools.ActivityLog
                         TypeName         = snap.TypeName,
                         LevelName        = snap.LevelName,
                         LevelId          = snap.LevelId,
-                        ElementId        = id.IntegerValue.ToString(),
+                        ElementId        = id.Value.ToString(),
                         TransactionNames = txNames,
                     });
                 }
@@ -297,7 +297,7 @@ namespace METools.ActivityLog
             try
             {
                 var el = doc.GetElement(id);
-                var catId = el?.Category?.Id?.IntegerValue;
+                var catId = (int?)(el?.Category?.Id?.Value);
                 return catId != null && _trackedCatIds.Contains(catId.Value);
             }
             catch { return false; }
@@ -307,7 +307,7 @@ namespace METools.ActivityLog
         {
             try
             {
-                var catId = el.Category?.Id?.IntegerValue;
+                var catId = (int?)(el.Category?.Id?.Value);
                 if (catId == null) return null;
                 bool tracked = _trackedCatIds.Contains(catId.Value);
                 if (!tracked) return null;
@@ -386,7 +386,7 @@ namespace METools.ActivityLog
             try { name = (doc.GetElement(levelId) as Level)?.Name ?? ""; } catch { }
             if (string.IsNullOrEmpty(name)) return ("", ""); // levelId pointed at something that isn't actually a Level
 
-            return (levelId.IntegerValue.ToString(), name);
+            return (levelId.Value.ToString(), name);
         }
     }
 }

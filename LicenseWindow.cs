@@ -17,7 +17,7 @@ namespace METools
         TextBlock _statusTb;
         Button    _activateBtn;
 
-        public bool Activated { get; private set; } = false;
+        public new bool Activated { get; private set; } = false;
 
         public LicenseWindow()
         {
@@ -262,7 +262,7 @@ namespace METools
             return card;
         }
 
-        void Activate()
+        new void Activate()
         {
             string code = _codeTb.Text?.Trim() ?? "";
             if (string.IsNullOrEmpty(code))

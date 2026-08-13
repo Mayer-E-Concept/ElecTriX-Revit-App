@@ -292,13 +292,11 @@ namespace METools.FamilyPlacer
         // ─────────────────────────────────────────────────────────────────────
         private SlotRow              _dragRow;
         private System.Windows.Point _dragStart;
-        private bool                 _dragging;
 
         private void StartDrag(SlotRow row, MouseButtonEventArgs e)
         {
             _dragRow   = row;
             _dragStart = e.GetPosition(_slotPanel);
-            _dragging  = false;
 
             _slotPanel.MouseMove  += OnDragMove;
             _slotPanel.MouseLeave += OnDragEnd;
@@ -316,7 +314,6 @@ namespace METools.FamilyPlacer
             int currentIdx = _rows.IndexOf(_dragRow);
             if (targetIdx == currentIdx) return;
 
-            _dragging = true;
             // Visual: dim dragged row
             _dragRow.Container.Opacity = 0.5;
 

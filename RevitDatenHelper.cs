@@ -246,7 +246,7 @@ namespace METools.FamilyPlacer
                         if (p != null && p.StorageType == StorageType.ElementId)
                         {
                             var sid = p.AsElementId();
-                            if (sid != null && sid.IntegerValue > 0)
+                            if (sid != null && sid.Value > 0)
                             {
                                 d.NamingSchemeId = sid;
                                 var scheme = doc.GetElement(sid);
@@ -390,7 +390,7 @@ namespace METools.FamilyPlacer
         public static List<(string Id, string Name, XYZ Position)> LeseVerteiler(Document doc)
         {
             return LeseVerteilerDetails(doc)
-                .Select(v => (v.ElementId.IntegerValue.ToString(), v.Name, v.Position))
+                .Select(v => (v.ElementId.Value.ToString(), v.Name, v.Position))
                 .ToList();
         }
 

@@ -302,7 +302,7 @@ namespace METools.Comments
             try
             {
                 var doc = uidoc.Document;
-                var elementId = new ElementId(idInt);
+                var elementId = new ElementId((long)idInt);
                 var el = doc.GetElement(elementId);
                 if (el == null)
                 { OnGoToElementResult?.Invoke(false, "That element no longer exists in this project."); return; }

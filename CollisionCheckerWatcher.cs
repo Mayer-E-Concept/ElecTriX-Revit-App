@@ -48,15 +48,25 @@ namespace METools.CollisionChecker
         // something a fresh Scan can always reproduce. Shares this file's
         // existing DocumentClosing hook for cleanup rather than adding a
         // second one.
-        private static readonly Dictionary<Document, (List<CollisionInfo> Collisions, DateTime ScannedAt)> _scanCache
-            = new Dictionary<Document, (List<CollisionInfo> Collisions, DateTime ScannedAt)>();
+        // Session-level only, not persisted to disk -- a fresh Scan can
+        // always reproduce this, so losing it on a real document close is
+        // fine. MarkersByCollisionId is the important addition here: it's
+        // what lets a reopened window's next Scan correctly delete the
+        // markers a PREVIOUS window instance already drew, instead of
+        // drawing a second, un-cleaned-up batch on top of them -- a
+        // window-instance field (like the one this used to rely on
+        // alone) has no memory of anything once that instance closes,
+        // even though the markers themselves are still sitting in the
+        // document.
+        private static readonly Dictionary<Document, (List<CollisionInfo> Collisions, DateTime ScannedAt, Dictionary<string, List<ElementId>> MarkersByCollisionId)> _scanCache
+            = new Dictionary<Document, (List<CollisionInfo> Collisions, DateTime ScannedAt, Dictionary<string, List<ElementId>> MarkersByCollisionId)>();
 
-        public static void SaveScanResults(Document doc, List<CollisionInfo> collisions)
+        public static void SaveScanResults(Document doc, List<CollisionInfo> collisions, Dictionary<string, List<ElementId>> markersByCollisionId = null)
         {
-            try { _scanCache[doc] = (collisions, DateTime.Now); } catch { }
+            try { _scanCache[doc] = (collisions, DateTime.Now, markersByCollisionId ?? new Dictionary<string, List<ElementId>>()); } catch { }
         }
 
-        public static (List<CollisionInfo> Collisions, DateTime ScannedAt)? GetScanResults(Document doc)
+        public static (List<CollisionInfo> Collisions, DateTime ScannedAt, Dictionary<string, List<ElementId>> MarkersByCollisionId)? GetScanResults(Document doc)
         {
             try { if (doc != null && _scanCache.TryGetValue(doc, out var entry)) return entry; }
             catch { }

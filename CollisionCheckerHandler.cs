@@ -59,6 +59,8 @@ namespace METools.CollisionChecker
                 ExecuteMoveHoles(doc, req);
             else if (req.Action == CollisionCheckerAction.MarkCollisions)
                 ExecuteMarkCollisions(doc, app.ActiveUIDocument?.ActiveView?.Id, req);
+            else if (req.Action == CollisionCheckerAction.MarkPlumbingSolved)
+                ExecuteMarkPlumbingSolved(doc, req);
         }
 
         // ═════════════════════════════════════════════════════════════════
@@ -323,6 +325,194 @@ namespace METools.CollisionChecker
             return result;
         }
 
+        // ── Plumbing clash detection ─────────────────────────────────────
+        // A genuinely different check from everything above: not a run
+        // crossing a fixed wall, but two routed MEP systems (this
+        // document's own cable trays/conduits, and pipes/fittings from a
+        // linked plumbing model) potentially overlapping in open space.
+        internal class PlumbingCandidate
+        {
+            public string Description = "";
+            public string UniqueId = ""; // the linked pipe/fitting's own UniqueId, within its own link document -- see the solved-clash schema below
+            public BoundingBoxXYZ HostBBox;
+        }
+
+        private static readonly BuiltInCategory[] PlumbingCategories =
+        {
+            BuiltInCategory.OST_PipeCurves,
+            BuiltInCategory.OST_FlexPipeCurves,
+            BuiltInCategory.OST_PipeFitting,
+            BuiltInCategory.OST_PipeAccessory,
+            BuiltInCategory.OST_PlumbingFixtures,
+        };
+
+        // Pipes/fittings from a linked plumbing model, with bounding boxes
+        // already transformed into host-document coordinates. Confirmed
+        // live against a real project: like the architecture walls
+        // elsewhere in this file, pipes/fittings from an IFC-linked
+        // plumbing model come through as generic DirectShape elements
+        // (2344 pipe curves, 2295 fittings, all DirectShape, none of them
+        // a real Pipe/MechanicalFitting class instance with a Diameter
+        // parameter to read) -- so there's no exact diameter or precise
+        // centerline to read the way a native Revit Pipe would offer.
+        // A bounding-box overlap test is a reasonable, well-established
+        // first pass for this kind of clash detection (plenty of BIM
+        // coordination tools start exactly here), at the cost of
+        // occasionally flagging a near-miss for an oddly-angled run as if
+        // it were a real clash -- worth a quick visual check on each
+        // flagged row rather than trusting this as pixel-precise.
+        internal static List<PlumbingCandidate> FindPlumbingElementsInLink(RevitLinkInstance linkInst)
+        {
+            var result = new List<PlumbingCandidate>();
+            try
+            {
+                var linkDoc = linkInst?.GetLinkDocument();
+                if (linkDoc == null) return result;
+                var transform = linkInst.GetTotalTransform();
+
+                foreach (var cat in PlumbingCategories)
+                {
+                    List<Element> elements;
+                    try
+                    {
+                        elements = new FilteredElementCollector(linkDoc)
+                            .OfCategory(cat)
+                            .WhereElementIsNotElementType()
+                            .ToElements()
+                            .ToList();
+                    }
+                    catch { continue; }
+
+                    string catLabel = cat == BuiltInCategory.OST_PipeCurves ? "Pipe"
+                                     : cat == BuiltInCategory.OST_FlexPipeCurves ? "Flex Pipe"
+                                     : cat == BuiltInCategory.OST_PipeFitting ? "Pipe Fitting"
+                                     : cat == BuiltInCategory.OST_PipeAccessory ? "Pipe Accessory"
+                                     : "Plumbing Fixture";
+
+                    foreach (var el in elements)
+                    {
+                        try
+                        {
+                            var localBox = el.get_BoundingBox(null);
+                            if (localBox == null) continue;
+
+                            // Transform all 8 corners, not just Min/Max --
+                            // the link's placement transform can include a
+                            // rotation, and transforming only the two
+                            // diagonal corners would produce a box that
+                            // doesn't actually contain the real
+                            // transformed shape whenever a rotation is
+                            // involved (same reasoning already applied to
+                            // rotated hosts elsewhere in this file).
+                            XYZ min = null, max = null;
+                            for (int xi = 0; xi < 2; xi++)
+                            for (int yi = 0; yi < 2; yi++)
+                            for (int zi = 0; zi < 2; zi++)
+                            {
+                                var corner = new XYZ(
+                                    xi == 0 ? localBox.Min.X : localBox.Max.X,
+                                    yi == 0 ? localBox.Min.Y : localBox.Max.Y,
+                                    zi == 0 ? localBox.Min.Z : localBox.Max.Z);
+                                var hp = transform.OfPoint(corner);
+                                min = min == null ? hp : new XYZ(Math.Min(min.X, hp.X), Math.Min(min.Y, hp.Y), Math.Min(min.Z, hp.Z));
+                                max = max == null ? hp : new XYZ(Math.Max(max.X, hp.X), Math.Max(max.Y, hp.Y), Math.Max(max.Z, hp.Z));
+                            }
+                            if (min == null || max == null) continue;
+
+                            result.Add(new PlumbingCandidate
+                            {
+                                Description = catLabel,
+                                UniqueId = el.UniqueId ?? "",
+                                HostBBox = new BoundingBoxXYZ { Min = min, Max = max },
+                            });
+                        }
+                        catch { }
+                    }
+                }
+            }
+            catch { }
+            return result;
+        }
+
+        // For each run, checks its bounding box against every plumbing
+        // candidate's -- unlike the wall-crossing check's 600mm quick-
+        // filter tolerance (deliberately generous, since that's only a
+        // candidate filter ahead of a separate precise Face.Intersect
+        // step), this tolerance is small and IS the actual detection
+        // signal, so a generous one here would flag near-misses as real
+        // clashes.
+        internal static List<CollisionInfo> ScanForPlumbingClashes(Document doc, List<Element> runs, RevitLinkInstance plumbingLink)
+        {
+            var result = new List<CollisionInfo>();
+            if (doc == null || runs == null || plumbingLink == null) return result;
+
+            var candidates = FindPlumbingElementsInLink(plumbingLink);
+            if (candidates.Count == 0) return result;
+
+            var solvedKeys = ReadSolvedPlumbingClashKeys(doc);
+            const double clashToleranceFt = 5.0 / 304.8; // ~5mm, geometry-rounding allowance only
+
+            foreach (var run in runs)
+            {
+                try
+                {
+                    var runBox = run.get_BoundingBox(null);
+                    if (runBox == null) continue;
+                    var outline = new Outline(runBox.Min, runBox.Max);
+
+                    ElementId levelId = ElementId.InvalidElementId;
+                    string levelName = "";
+                    try
+                    {
+                        levelId = ResolveLevelId(doc, run);
+                        levelName = (doc.GetElement(levelId) as Level)?.Name ?? "";
+                    }
+                    catch { }
+
+                    foreach (var cand in candidates)
+                    {
+                        try
+                        {
+                            if (cand.HostBBox == null) continue;
+                            if (!outline.Intersects(new Outline(cand.HostBBox.Min, cand.HostBBox.Max), clashToleranceFt)) continue;
+
+                            // The overlap region's own center -- roughly
+                            // where the two systems actually meet, rather
+                            // than either element's unrelated centroid.
+                            var ovMin = new XYZ(
+                                Math.Max(runBox.Min.X, cand.HostBBox.Min.X),
+                                Math.Max(runBox.Min.Y, cand.HostBBox.Min.Y),
+                                Math.Max(runBox.Min.Z, cand.HostBBox.Min.Z));
+                            var ovMax = new XYZ(
+                                Math.Min(runBox.Max.X, cand.HostBBox.Max.X),
+                                Math.Min(runBox.Max.Y, cand.HostBBox.Max.Y),
+                                Math.Min(runBox.Max.Z, cand.HostBBox.Max.Z));
+                            var clashPoint = new XYZ((ovMin.X + ovMax.X) / 2.0, (ovMin.Y + ovMax.Y) / 2.0, (ovMin.Z + ovMax.Z) / 2.0);
+                            var combinedKey = $"{run.UniqueId}|{cand.UniqueId}";
+
+                            result.Add(new CollisionInfo
+                            {
+                                Kind = CollisionKind.PlumbingClash,
+                                ElementId = run.Id,
+                                ElementCategory = run.Category?.Name ?? "",
+                                ElementTypeName = (doc.GetElement(run.GetTypeId()) as ElementType)?.Name ?? "",
+                                PlumbingElementDescription = cand.Description,
+                                PlumbingElementUniqueId = cand.UniqueId,
+                                IsSolved = solvedKeys.Contains(combinedKey),
+                                LevelId = levelId,
+                                LevelName = levelName,
+                                Point = clashPoint,
+                                IsExternalGeometry = true, // no host-document Wall/hole placement applies to this kind of row either
+                            });
+                        }
+                        catch { }
+                    }
+                }
+                catch { }
+            }
+            return result;
+        }
+
         // GetInstanceGeometry() (used here, not GetSymbolGeometry()) returns
         // geometry already in the project's own coordinate system -- exactly
         // what's needed to compare directly against host-document run
@@ -389,7 +579,7 @@ namespace METools.CollisionChecker
         // wall in the whole model is always considered as a potential
         // obstacle regardless of scope, since a run in view/selection scope
         // can still be crossing a wall that itself isn't in that scope.
-        public static List<CollisionInfo> ScanForCollisions(Document doc, UIDocument uiDoc, ScanScope scope, ElementId architectureSourceId = null, bool architectureSourceIsLink = false, ElementId holeSymbolId = null)
+        public static List<CollisionInfo> ScanForCollisions(Document doc, UIDocument uiDoc, ScanScope scope, ElementId architectureSourceId = null, bool architectureSourceIsLink = false, ElementId holeSymbolId = null, ElementId plumbingLinkId = null)
         {
             var result = new List<CollisionInfo>();
             try
@@ -421,6 +611,18 @@ namespace METools.CollisionChecker
                         if (chosenImport != null)
                             importedCandidates.AddRange(FindWallLikeSolidsInImport(chosenImport));
                     }
+                }
+
+                // Independent of the wall-crossing check below -- appended
+                // to result before the early-return guard on the next line,
+                // so plumbing clashes still get found even on a scan where
+                // there happen to be no walls or architecture candidates at
+                // all (someone checking ONLY for plumbing clashes, say).
+                if (plumbingLinkId != null && plumbingLinkId != ElementId.InvalidElementId)
+                {
+                    var plumbingLink = doc.GetElement(plumbingLinkId) as RevitLinkInstance;
+                    if (plumbingLink != null)
+                        result.AddRange(ScanForPlumbingClashes(doc, runs, plumbingLink));
                 }
 
                 if (runs.Count == 0 || (walls.Count == 0 && importedCandidates.Count == 0)) return result;
@@ -911,6 +1113,8 @@ namespace METools.CollisionChecker
                                 var impDimAttempts = new List<string>();
                                 try { ApplyHoleDimensions(impInstance, impRun, c.ImportedWallThicknessFt, impDimAttempts); }
                                 catch (Exception ex) { impDimAttempts.Add("dimensions: " + ex.Message); }
+                                ApplyHoleHeight(impInstance, c.Point, impLevel, impDimAttempts);
+                                InheritPropertiesFromExistingHole(doc, impInstance, req.HoleSymbolId, c.Point, c.LevelId, impDimAttempts);
                                 if (impDimAttempts.Count > 0)
                                 {
                                     result.DimensionWarnings++;
@@ -1070,6 +1274,8 @@ namespace METools.CollisionChecker
                             var dimAttempts = new List<string>();
                             try { ApplyHoleDimensions(instance, run, wall, dimAttempts); }
                             catch (Exception ex) { dimAttempts.Add("dimensions: " + ex.Message); }
+                            ApplyHoleHeight(instance, c.Point, level, dimAttempts);
+                            InheritPropertiesFromExistingHole(doc, instance, req.HoleSymbolId, c.Point, c.LevelId, dimAttempts);
                             if (dimAttempts.Count > 0)
                             {
                                 result.DimensionWarnings++;
@@ -1174,6 +1380,74 @@ namespace METools.CollisionChecker
         // this used to run directly from the window's OnScanClicked, which
         // is exactly that invalid context. Routed through the ExternalEvent
         // instead, the same way every other write in this file already is.
+        // Writes to Extensible Storage, so this needs a real Transaction
+        // just like every other write in this file -- unlike hole
+        // placement, there's no model geometry being created here, just a
+        // manual acknowledgement being persisted.
+        private void ExecuteMarkPlumbingSolved(Document doc, CollisionCheckerRequest req)
+        {
+            var result = new PlaceHolesResult { ResultAction = CollisionCheckerAction.MarkPlumbingSolved };
+            if (doc == null || req.Collisions == null) { OnDone?.Invoke(result); return; }
+
+            using (var tx = new Transaction(doc, "ME-Tools: Mark plumbing clashes solved"))
+            {
+                tx.Start();
+                try
+                {
+                    foreach (var c in req.Collisions)
+                    {
+                        try
+                        {
+                            if (c.Kind != CollisionKind.PlumbingClash || c.IsSolved) continue;
+                            var run = doc.GetElement(c.ElementId);
+                            // Three genuinely different failure conditions,
+                            // now reported separately instead of one vague
+                            // combined message -- confirmed live that the
+                            // plumbing link itself was still loaded and
+                            // accessible when this fired for a real user,
+                            // so the run-not-found case below is the most
+                            // likely one in practice, but there was no way
+                            // to tell from the old message alone.
+                            if (run == null)
+                            {
+                                result.Errors++;
+                                result.ErrorByRowId[c.Id] = "the conduit/cable tray for this row no longer exists in the model -- try rescanning";
+                                continue;
+                            }
+                            if (string.IsNullOrEmpty(run.UniqueId))
+                            {
+                                result.Errors++;
+                                result.ErrorByRowId[c.Id] = "the conduit/cable tray for this row has no UniqueId (unexpected) -- try rescanning";
+                                continue;
+                            }
+                            if (string.IsNullOrEmpty(c.PlumbingElementUniqueId))
+                            {
+                                result.Errors++;
+                                result.ErrorByRowId[c.Id] = "the plumbing element this row matched at scan time has no recorded ID -- try rescanning";
+                                continue;
+                            }
+                            MarkPlumbingClashSolved(doc, $"{run.UniqueId}|{c.PlumbingElementUniqueId}");
+                            result.Placed++;
+                            result.SolvedRowIds.Add(c.Id);
+                        }
+                        catch (Exception ex)
+                        {
+                            result.Errors++;
+                            result.ErrorByRowId[c.Id] = ex.Message;
+                        }
+                    }
+                    tx.Commit();
+                }
+                catch (Exception ex)
+                {
+                    try { tx.RollBack(); } catch { }
+                    result.Errors++;
+                    result.ErrorMessages.Add(ex.Message);
+                }
+            }
+            OnDone?.Invoke(result);
+        }
+
         private void ExecuteMarkCollisions(Document doc, ElementId activeViewId, CollisionCheckerRequest req)
         {
             var result = new PlaceHolesResult { ResultAction = CollisionCheckerAction.MarkCollisions };
@@ -1194,7 +1468,7 @@ namespace METools.CollisionChecker
                     try { ogs.SetProjectionLineColor(red); ogs.SetProjectionLineWeight(7); } catch { }
                     double radiusFt = 250.0 / 304.8; // ~250mm radius -- visible regardless of view scale
 
-                    var toMark = req.Collisions.Where(c => !c.HasHole && c.Point != null).ToList();
+                    var toMark = req.Collisions.Where(c => !c.IsResolved && c.Point != null).ToList();
                     result.MarksAttempted = toMark.Count;
 
                     // Grouped by the collision's own LevelId (resolved by
@@ -1335,8 +1609,18 @@ namespace METools.CollisionChecker
 
                 if (preferredViewId != null && preferredViewId != ElementId.InvalidElementId)
                 {
-                    var preferred = floorPlans.FirstOrDefault(v => v.Id == preferredViewId)
-                                  ?? candidates.FirstOrDefault(v => v.Id == preferredViewId);
+                    // Only ever matched within floorPlans (the possibly
+                    // visibility-filtered list), never falling back to
+                    // the wider, unfiltered candidates -- confirmed as a
+                    // real bug live: that fallback let a view excluded
+                    // for NOT showing the element (H_EG, discipline-
+                    // filtered away from Cable Trays) sneak right back in
+                    // anyway, since it's still tied to the same level,
+                    // completely undoing the visibility check above. The
+                    // final line below already has its own safe fallback
+                    // for when preferredViewId doesn't match anything
+                    // here at all.
+                    var preferred = floorPlans.FirstOrDefault(v => v.Id == preferredViewId);
                     if (preferred != null) return preferred;
                 }
 
@@ -1362,6 +1646,39 @@ namespace METools.CollisionChecker
                     .Contains(elementId);
             }
             catch { return false; }
+        }
+
+        // For the "3D" go-to button -- same visibility-check reasoning as
+        // FindPlanViewForLevel above, since a custom 3D view someone built
+        // for a specific purpose could just as easily hide a category via
+        // its own V/G overrides as a plan view can via discipline
+        // filtering. Prefers Revit's own auto-created default 3D view
+        // (always named starting with "{3D", e.g. "{3D}" or
+        // "{3D - username}") over a custom one, since a custom 3D view is
+        // more likely to have been set up for some other, narrower
+        // purpose.
+        public static View3D FindDefault3DView(Document doc, ElementId mustShowElementId = null)
+        {
+            if (doc == null) return null;
+            try
+            {
+                var candidates = new FilteredElementCollector(doc)
+                    .OfClass(typeof(View3D))
+                    .Cast<View3D>()
+                    .Where(v => !v.IsTemplate)
+                    .ToList();
+                if (candidates.Count == 0) return null;
+
+                if (mustShowElementId != null && mustShowElementId != ElementId.InvalidElementId)
+                {
+                    var visible = candidates.Where(v => IsElementVisibleInView(doc, v, mustShowElementId)).ToList();
+                    if (visible.Count > 0) candidates = visible;
+                }
+
+                return candidates.FirstOrDefault(v => (v.Name ?? "").StartsWith("{3D", StringComparison.OrdinalIgnoreCase))
+                    ?? candidates.FirstOrDefault();
+            }
+            catch { return null; }
         }
 
         // The Z-height detail curves must be drawn at for this view to
@@ -1452,6 +1769,128 @@ namespace METools.CollisionChecker
                     attempts.Add($"no writable '{name}' parameter found on the hole family");
             }
             catch (Exception ex) { attempts.Add($"'{name}': {ex.Message}"); }
+        }
+
+        // Confirmed live against the real model: this family's insertion
+        // point always ends up at Z=0 relative to its Base Level/Offset,
+        // regardless of what XYZ point NewFamilyInstance was actually
+        // given -- Location.Point.Z came back as exactly 0.00 on a placed
+        // instance despite passing in the real 3D collision point. The
+        // family's real vertical position instead comes from two
+        // instance parameters, OKB_zu_Achse and CAx_Versatzhöhe_Bauteil
+        // (both found holding the identical value, 3385mm, on a real
+        // pre-existing hole placed by hand) -- neither of which this tool
+        // was setting, so every hole it placed fell back to the family
+        // TYPE's own generic default (2000mm) instead of the real
+        // crossing height. Setting both (rather than guessing which one
+        // actually drives the geometry) is a safe, low-cost way to not
+        // depend on knowing the family's internal formula.
+        private static void ApplyHoleHeight(Element instance, XYZ point, Level level, List<string> attempts)
+        {
+            if (level == null) { attempts.Add("no level resolved to compute the hole's height from"); return; }
+            try
+            {
+                double heightAboveLevelFt = point.Z - level.Elevation;
+                SetDoubleParam(instance, "OKB_zu_Achse", heightAboveLevelFt, attempts);
+                SetDoubleParam(instance, "CAx_Versatzhöhe_Bauteil", heightAboveLevelFt, attempts);
+            }
+            catch (Exception ex) { attempts.Add("height: " + ex.Message); }
+        }
+
+        // Every parameter this tool computes itself, either directly
+        // (dimensions, height) or because it's one of the protected
+        // clearance overrides this tool must never touch -- excluded from
+        // inheritance below so a template value can never overwrite what
+        // this specific hole's own geometry actually needs. Also excludes
+        // Mark/Comments, since those read as hole-specific notes ("checked
+        // by X on date Y") rather than generic template metadata, and
+        // blindly copying one hole's note onto every other hole would be
+        // actively wrong, not just unhelpful.
+        private static readonly HashSet<string> ExcludedFromInheritance = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "Tiefe", "Trassenbreite", "Trassenhöhe", "OKB_zu_Achse", "CAx_Versatzhöhe_Bauteil",
+            "X_Überstand", "Z_Überstand",
+            "X_Überstand_1_User", "X_Überstand_2_User", "Z_Überstand_1_User", "Z_Überstand_2_User",
+            "Mark", "Comments",
+        };
+
+        // Confirmed live: pre-existing holes placed by hand before this
+        // tool existed carry a lot of generic metadata (trade
+        // classification, manufacturer, fire-stop rating, etc.) that this
+        // tool has no way to know on its own -- every hole it places
+        // instead starts from the family TYPE's own generic defaults,
+        // which can be simply wrong for the actual context (confirmed: a
+        // fresh placement came out with CAx_Gewerk="A" while a real
+        // nearby hole says "E" for Elektro). This copies every writable
+        // parameter from the nearest EXISTING hole of the same family,
+        // preferring one on the same Level first (a hole one floor up or
+        // down could easily belong to a different trade/room/context
+        // even if it happens to be close in plan) and falling back to a
+        // global nearest-match only if none exist on this level yet.
+        private static void InheritPropertiesFromExistingHole(Document doc, Element instance, ElementId holeSymbolId, XYZ point, ElementId levelId, List<string> attempts)
+        {
+            try
+            {
+                var familyId = (doc.GetElement(holeSymbolId) as FamilySymbol)?.Family?.Id;
+                if (familyId == null || familyId == ElementId.InvalidElementId) return;
+
+                var candidates = new List<FamilyInstance>();
+                foreach (var el in new FilteredElementCollector(doc).OfClass(typeof(FamilyInstance)))
+                {
+                    try
+                    {
+                        if (el.Id == instance.Id) continue;
+                        var fi = el as FamilyInstance;
+                        if (fi?.Symbol?.Family?.Id == familyId) candidates.Add(fi);
+                    }
+                    catch { }
+                }
+                if (candidates.Count == 0) { attempts.Add("no existing hole of this family found to inherit properties from"); return; }
+
+                var sameLevel = levelId != null && levelId != ElementId.InvalidElementId
+                    ? candidates.Where(fi => fi.LevelId == levelId).ToList()
+                    : new List<FamilyInstance>();
+                var pool = sameLevel.Count > 0 ? sameLevel : candidates;
+
+                FamilyInstance closest = null;
+                double closestDistSq = double.MaxValue;
+                foreach (var fi in pool)
+                {
+                    try
+                    {
+                        var loc = (fi.Location as LocationPoint)?.Point;
+                        if (loc == null) continue;
+                        double d = loc.DistanceTo(point);
+                        double dSq = d * d;
+                        if (dSq < closestDistSq) { closestDistSq = dSq; closest = fi; }
+                    }
+                    catch { }
+                }
+                if (closest == null) { attempts.Add("no existing hole with a resolvable location found to inherit properties from"); return; }
+
+                foreach (Parameter srcParam in closest.Parameters)
+                {
+                    try
+                    {
+                        if (srcParam == null || srcParam.IsReadOnly || !srcParam.HasValue) continue;
+                        var name = srcParam.Definition?.Name;
+                        if (string.IsNullOrEmpty(name) || ExcludedFromInheritance.Contains(name)) continue;
+
+                        var dstParam = instance.LookupParameter(name);
+                        if (dstParam == null || dstParam.IsReadOnly || dstParam.StorageType != srcParam.StorageType) continue;
+
+                        switch (dstParam.StorageType)
+                        {
+                            case StorageType.Double: dstParam.Set(srcParam.AsDouble()); break;
+                            case StorageType.Integer: dstParam.Set(srcParam.AsInteger()); break;
+                            case StorageType.String: dstParam.Set(srcParam.AsString() ?? ""); break;
+                            case StorageType.ElementId: dstParam.Set(srcParam.AsElementId()); break;
+                        }
+                    }
+                    catch { } // one bad parameter shouldn't abort the whole inheritance pass
+                }
+            }
+            catch (Exception ex) { attempts.Add("inherit properties: " + ex.Message); }
         }
 
         // Cable tray width/height come from the confirmed BuiltInParameters
@@ -1660,6 +2099,97 @@ namespace METools.CollisionChecker
                 }
                 map[holeUniqueId] = $"{runUniqueId}|{wallUniqueId}";
                 entity.Set(schema.GetField(SchemaFieldName), map);
+                ds.SetEntity(entity);
+            }
+            catch { }
+        }
+
+        // ═════════════════════════════════════════════════════════════════
+        // SOLVED PLUMBING CLASHES -- a separate schema/storage from the
+        // hole-link one above, kept deliberately distinct rather than
+        // reused: a plumbing clash has no host-document hole element to
+        // link to (the pipe it clashes with lives inside a LINKED
+        // document, and there's no "hole" at all for this kind of
+        // finding -- see the remarks on CollisionKind.PlumbingClash), so
+        // this tracks a plain manual "marked as solved" acknowledgement
+        // instead. Keyed by "runUniqueId|pipeUniqueId" -- the pipe's
+        // UniqueId is only unique WITHIN its own link document, not
+        // globally, but this project only has one plumbing link in
+        // practice and the run half of the key makes a cross-link
+        // collision exceedingly unlikely even if that ever changes.
+        // ═════════════════════════════════════════════════════════════════
+        private static readonly Guid SolvedClashSchemaGuid = new Guid("8A2E4F19-3B7D-4E1A-9C5F-1D6E8B4A2F73");
+        private const string SolvedClashFieldName = "SolvedPlumbingClashes";
+        private const string SolvedClashDataStorageName = "ME-Tools_SolvedPlumbingClashes";
+
+        private static Schema GetOrCreateSolvedClashSchema()
+        {
+            var schema = Schema.Lookup(SolvedClashSchemaGuid);
+            if (schema != null) return schema;
+            var builder = new SchemaBuilder(SolvedClashSchemaGuid);
+            builder.SetSchemaName("METoolsSolvedPlumbingClashes");
+            builder.SetReadAccessLevel(AccessLevel.Public);
+            builder.SetWriteAccessLevel(AccessLevel.Public);
+            builder.AddMapField(SolvedClashFieldName, typeof(string), typeof(string));
+            return builder.Finish();
+        }
+
+        private static DataStorage FindOrCreateSolvedClashDataStorage(Document doc)
+        {
+            var existing = new FilteredElementCollector(doc).OfClass(typeof(DataStorage))
+                .Cast<DataStorage>()
+                .FirstOrDefault(ds => ds.Name == SolvedClashDataStorageName);
+            if (existing != null) return existing;
+            var created = DataStorage.Create(doc);
+            created.Name = SolvedClashDataStorageName;
+            return created;
+        }
+
+        // Read-only, no Transaction -- safe to call directly from
+        // ScanForPlumbingClashes the same way ReadHoleLinkMap is called
+        // directly from the wall-crossing scan.
+        internal static HashSet<string> ReadSolvedPlumbingClashKeys(Document doc)
+        {
+            var result = new HashSet<string>();
+            try
+            {
+                var ds = new FilteredElementCollector(doc).OfClass(typeof(DataStorage))
+                    .Cast<DataStorage>().FirstOrDefault(d => d.Name == SolvedClashDataStorageName);
+                if (ds == null) return result;
+                var schema = Schema.Lookup(SolvedClashSchemaGuid);
+                if (schema == null) return result;
+                var entity = ds.GetEntity(schema);
+                if (entity == null || !entity.IsValid()) return result;
+                var map = entity.Get<IDictionary<string, string>>(schema.GetField(SolvedClashFieldName));
+                if (map == null) return result;
+                foreach (var key in map.Keys) result.Add(key);
+            }
+            catch { }
+            return result;
+        }
+
+        // Must be called from inside an already-open transaction --
+        // called from ExecuteMarkPlumbingSolved below.
+        private static void MarkPlumbingClashSolved(Document doc, string combinedKey)
+        {
+            try
+            {
+                var schema = GetOrCreateSolvedClashSchema();
+                var ds = FindOrCreateSolvedClashDataStorage(doc);
+                var entity = ds.GetEntity(schema);
+                Dictionary<string, string> map;
+                if (entity != null && entity.IsValid())
+                {
+                    var existing = entity.Get<IDictionary<string, string>>(schema.GetField(SolvedClashFieldName));
+                    map = existing != null ? new Dictionary<string, string>(existing) : new Dictionary<string, string>();
+                }
+                else
+                {
+                    entity = new Entity(schema);
+                    map = new Dictionary<string, string>();
+                }
+                map[combinedKey] = "1";
+                entity.Set(schema.GetField(SolvedClashFieldName), map);
                 ds.SetEntity(entity);
             }
             catch { }

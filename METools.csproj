@@ -19,6 +19,17 @@
     <Company>Mayer E-Concept SRL</Company>
     <Product>ElecTriX for Autodesk Revit</Product>
     <Copyright>© 2026 Mayer E-Concept SRL</Copyright>
+    <!-- MSB3277: Revit's own DLLs (RevitAPI.dll etc.) are built against
+         older assembly references than the .NET 8 reference assemblies
+         this project targets, so MSBuild always reports a version
+         conflict for Microsoft.VisualBasic/System.Drawing here — a
+         well-known, expected situation for Revit add-ins on .NET 8, not
+         a real problem: Revit's own assembly loader resolves the actual
+         version used at runtime regardless of what this build-time
+         warning reports. Suppressed rather than "fixed", since there's
+         no code change that resolves it — it comes from Revit's own
+         SDK DLLs, which this project can't modify. -->
+    <NoWarn>MSB3277</NoWarn>
   </PropertyGroup>
 
   <!--

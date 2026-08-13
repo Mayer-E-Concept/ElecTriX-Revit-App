@@ -1257,7 +1257,7 @@ namespace METools
             try
             {
                 topLevel = doc.Settings.Categories.Cast<Autodesk.Revit.DB.Category>()
-                    .Where(c => c != null && c.Parent == null && c.Id != null && c.Id.IntegerValue > 0)
+                    .Where(c => c != null && c.Parent == null && c.Id != null && c.Id.Value > 0)
                     .OrderBy(c => c.Name, StringComparer.OrdinalIgnoreCase)
                     .ToList();
 
@@ -1267,7 +1267,7 @@ namespace METools
                 {
                     var cid = ii.Category?.Id;
                     if (cid == null) continue;
-                    liveInstanceCounts[cid.IntegerValue] = liveInstanceCounts.TryGetValue(cid.IntegerValue, out var n) ? n + 1 : 1;
+                    liveInstanceCounts[cid.Value] = liveInstanceCounts.TryGetValue(cid.Value, out var n) ? n + 1 : 1;
                 }
             }
             catch (Exception ex)
@@ -1294,7 +1294,7 @@ namespace METools
             {
                 int subCount = 0;
                 try { subCount = cat.SubCategories?.Size ?? 0; } catch { }
-                liveInstanceCounts.TryGetValue(cat.Id.IntegerValue, out var liveCount);
+                liveInstanceCounts.TryGetValue(cat.Id.Value, out var liveCount);
 
                 var row = new ImportedCategoryRow
                 {
@@ -1334,16 +1334,16 @@ namespace METools
                 Text = row.Name, FontSize = 12, FontWeight = FontWeights.SemiBold, Foreground = MeToolsTheme.BrText,
             });
 
-            bool hasNote = _stubbornCategoryNotes.TryGetValue(row.CategoryId.IntegerValue, out var stubbornNote)
+            bool hasNote = _stubbornCategoryNotes.TryGetValue(row.CategoryId.Value, out var stubbornNote)
                            && !string.IsNullOrWhiteSpace(stubbornNote);
             string statusText = row.LiveInstanceCount > 0
                 ? string.Format(S._("settings.imports.row_in_use"), row.SubCategoryCount, row.LiveInstanceCount)
                 : hasNote
                     ? string.Format(S._("settings.imports.row_stubborn_note"), row.SubCategoryCount, stubbornNote)
-                    : _stubbornCategoryNotes.ContainsKey(row.CategoryId.IntegerValue)
+                    : _stubbornCategoryNotes.ContainsKey(row.CategoryId.Value)
                         ? string.Format(S._("settings.imports.row_stubborn"), row.SubCategoryCount)
                         : string.Format(S._("settings.imports.row_orphaned"), row.SubCategoryCount);
-            bool isStubborn = _stubbornCategoryNotes.ContainsKey(row.CategoryId.IntegerValue);
+            bool isStubborn = _stubbornCategoryNotes.ContainsKey(row.CategoryId.Value);
             textStack.Children.Add(new TextBlock
             {
                 Text = statusText, FontSize = 10.5, TextWrapping = TextWrapping.Wrap,
@@ -1453,11 +1453,11 @@ namespace METools
                         {
                             try
                             {
-                                if (deletedInstanceIds.Contains(ii.Id.IntegerValue)) continue;
-                                if (ii.Category?.Id?.IntegerValue == row.CategoryId.IntegerValue)
+                                if (deletedInstanceIds.Contains(ii.Id.Value)) continue;
+                                if (ii.Category?.Id?.Value == row.CategoryId.Value)
                                 {
                                     doc.Delete(ii.Id);
-                                    deletedInstanceIds.Add(ii.Id.IntegerValue);
+                                    deletedInstanceIds.Add(ii.Id.Value);
                                 }
                             }
                             catch { }
@@ -1471,7 +1471,7 @@ namespace METools
                         try
                         {
                             var cat = doc.Settings.Categories.Cast<Autodesk.Revit.DB.Category>()
-                                .FirstOrDefault(c => c.Id.IntegerValue == row.CategoryId.IntegerValue);
+                                .FirstOrDefault(c => c.Id.Value == row.CategoryId.Value);
                             if (cat == null) continue;
 
                             try
@@ -1505,7 +1505,7 @@ namespace METools
             {
                 stillExisting = doc.Settings.Categories.Cast<Autodesk.Revit.DB.Category>()
                     .Where(c => c.Parent == null)
-                    .Select(c => (long)c.Id.IntegerValue)
+                    .Select(c => c.Id.Value)
                     .ToHashSet();
             }
             catch { stillExisting = new HashSet<long>(); }
@@ -1514,7 +1514,7 @@ namespace METools
             var stillPresentNames = new List<string>();
             foreach (var row in selected)
             {
-                if (stillExisting.Contains(row.CategoryId.IntegerValue))
+                if (stillExisting.Contains(row.CategoryId.Value))
                 {
                     stillPresent++;
                     stillPresentNames.Add(row.Name);
@@ -1523,8 +1523,8 @@ namespace METools
                     // file (e.g. from a previous Find & Remove from
                     // Families attempt), so this doesn't erase a more
                     // useful note with a blank one.
-                    if (!_stubbornCategoryNotes.ContainsKey(row.CategoryId.IntegerValue))
-                        _stubbornCategoryNotes[row.CategoryId.IntegerValue] = "";
+                    if (!_stubbornCategoryNotes.ContainsKey(row.CategoryId.Value))
+                        _stubbornCategoryNotes[row.CategoryId.Value] = "";
                 }
                 else
                 {
@@ -1533,7 +1533,7 @@ namespace METools
                     // family edit since a previous attempt) -- stop
                     // remembering it as stubborn, or a later re-import
                     // reusing the same id would wrongly inherit the old label.
-                    _stubbornCategoryNotes.Remove(row.CategoryId.IntegerValue);
+                    _stubbornCategoryNotes.Remove(row.CategoryId.Value);
                 }
             }
             SaveStubbornCategoryIds(doc);
@@ -1690,7 +1690,7 @@ namespace METools
             var visitedThisPass = new HashSet<long>(); // separate from _visitedFamilyIds -- this one only guards against infinite loops on circular nesting WITHIN this single call
             foreach (var fam in families)
             {
-                if (_visitedFamilyIds.Contains(fam.Id.IntegerValue)) continue; // already checked in an earlier attempt -- never reopened
+                if (_visitedFamilyIds.Contains(fam.Id.Value)) continue; // already checked in an earlier attempt -- never reopened
 
                 Autodesk.Revit.DB.Document famDoc = null;
                 try
@@ -1702,7 +1702,7 @@ namespace METools
                 catch { }
                 finally { try { famDoc?.Close(false); } catch { } }
 
-                _visitedFamilyIds.Add(fam.Id.IntegerValue);
+                _visitedFamilyIds.Add(fam.Id.Value);
 
                 if (wanted.All(w => _familyCategoryIndex.TryGetValue(w, out var m) && m.Count > 0))
                     break; // everything currently being asked about is already found -- stop here
@@ -1769,7 +1769,7 @@ namespace METools
             try
             {
                 var famCatNames = famDocToScan.Settings.Categories.Cast<Autodesk.Revit.DB.Category>()
-                    .Where(c => c != null && c.Parent == null && c.Id != null && c.Id.IntegerValue > 0)
+                    .Where(c => c != null && c.Parent == null && c.Id != null && c.Id.Value > 0)
                     .Select(c => c.Name)
                     .ToList();
 
@@ -1798,7 +1798,7 @@ namespace METools
 
                 foreach (var nf in nested)
                 {
-                    if (!visitedFamilyIds.Add(nf.Id.IntegerValue)) continue;
+                    if (!visitedFamilyIds.Add(nf.Id.Value)) continue;
                     Autodesk.Revit.DB.Document nestedDoc = null;
                     try
                     {
@@ -1994,7 +1994,7 @@ namespace METools
                     {
                         fixedCount++;
                         var row = _importRows.FirstOrDefault(r => string.Equals(r.Name, name, StringComparison.OrdinalIgnoreCase));
-                        if (row != null) _stubbornCategoryNotes.Remove(row.CategoryId.IntegerValue);
+                        if (row != null) _stubbornCategoryNotes.Remove(row.CategoryId.Value);
                     }
                     else
                     {
@@ -2031,7 +2031,7 @@ namespace METools
 
                         var row = _importRows.FirstOrDefault(r => string.Equals(r.Name, name, StringComparison.OrdinalIgnoreCase));
                         if (row != null)
-                            _stubbornCategoryNotes[row.CategoryId.IntegerValue] =
+                            _stubbornCategoryNotes[row.CategoryId.Value] =
                                 string.Format(S._("settings.imports.note_found_in"), string.Join("; ", noteParts));
                     }
                 }

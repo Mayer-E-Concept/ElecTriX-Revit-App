@@ -260,7 +260,6 @@ namespace METools
             try
             {
                 if (string.IsNullOrWhiteSpace(code)) return false;
-                if (PublicKeyB64 == "PASTE_PUBLIC_KEY_HERE") return false; // not configured yet
 
                 string clean = code.Trim().ToUpperInvariant();
                 int dot = clean.IndexOf('.');

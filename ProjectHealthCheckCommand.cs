@@ -142,7 +142,7 @@ namespace METools
                     var ids = new HashSet<int>();
                     foreach (Category c in binding.Categories)
                     {
-                        try { ids.Add(c.Id.IntegerValue); } catch { }
+                        try { ids.Add((int)c.Id.Value); } catch { }
                     }
                     boundCategoryIdsByParam[paramName] = ids;
                 }

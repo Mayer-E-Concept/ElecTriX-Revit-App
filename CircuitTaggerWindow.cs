@@ -40,7 +40,6 @@ namespace METools.FamilyPlacer
         private ComboBox  _cbApartment, _cbBuilding;
         private ComboBox  _cbTagFamily;
         private List<TagFamilyOption> _tagFamilyOptions = new List<TagFamilyOption>();
-        private TextBox   _tbGapMm, _tbStackGapMm;
         // Settings tab controls
         private TextBox   _tbSetGapMm, _tbSetOffsetYMm, _tbSetStackGapMm;
         private TextBox   _tbSetFontName, _tbSetFontSizeMm, _tbSetColorHex;
@@ -1404,7 +1403,7 @@ namespace METools.FamilyPlacer
                     {
                         ElementId    = picked.ElementId,
                         CategoryName = el.Category?.Name ?? "Element",
-                        CategoryId   = el.Category?.Id?.IntegerValue ?? 0,
+                        CategoryId   = (int)(el.Category?.Id?.Value ?? 0),
                         FamilyName   = (el as FamilyInstance)?.Symbol?.Family?.Name ?? el.Name ?? "",
                         RoomName     = GetRoomNameForEl(doc, el as FamilyInstance, phase),
                     });
@@ -1888,7 +1887,7 @@ namespace METools.FamilyPlacer
         public bool AllowElement(Element elem)
         {
             if (elem?.Category == null) return false;
-            return Allowed.Contains((BuiltInCategory)elem.Category.Id.IntegerValue);
+            return Allowed.Contains((BuiltInCategory)elem.Category.Id.Value);
         }
         public bool AllowReference(Reference reference, XYZ position) => false;
     }

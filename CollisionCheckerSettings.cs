@@ -43,6 +43,22 @@ namespace METools.CollisionChecker
         // while other disciplines' backgrounds tend to be plain DWG
         // imports, so a project can easily have both kinds at once.
         public bool ImportArchitectureIsLink { get; set; } = false;
+
+        // Off by default, same reasoning as IncludeImportedArchitecture --
+        // this is a bounding-box-overlap heuristic against generic
+        // DirectShape geometry from a linked plumbing model (confirmed
+        // live: pipes/fittings in an IFC-linked plumbing model come
+        // through as DirectShapes, not real Pipe-class instances with a
+        // Diameter to read), not a guaranteed-precise solid intersection,
+        // so it stays opt-in.
+        public bool IncludePlumbing { get; set; } = false;
+
+        // Which link is the plumbing/MEP model -- matched by name at scan
+        // time, same convention as ImportArchitectureName. Unlike
+        // architecture, this is always a link (there's no "imported CAD
+        // file" case for plumbing clash detection), so there's no
+        // matching IsLink flag to go with it.
+        public string PlumbingLinkName { get; set; } = "";
     }
 
     public static class CollisionCheckerSettings
@@ -91,7 +107,9 @@ namespace METools.CollisionChecker
             sb.AppendLine($"  \"HoleTypeName\": \"{Esc(d.HoleTypeName)}\",");
             sb.AppendLine($"  \"IncludeImportedArchitecture\": {(d.IncludeImportedArchitecture ? "true" : "false")},");
             sb.AppendLine($"  \"ImportArchitectureName\": \"{Esc(d.ImportArchitectureName)}\",");
-            sb.AppendLine($"  \"ImportArchitectureIsLink\": {(d.ImportArchitectureIsLink ? "true" : "false")}");
+            sb.AppendLine($"  \"ImportArchitectureIsLink\": {(d.ImportArchitectureIsLink ? "true" : "false")},");
+            sb.AppendLine($"  \"IncludePlumbing\": {(d.IncludePlumbing ? "true" : "false")},");
+            sb.AppendLine($"  \"PlumbingLinkName\": \"{Esc(d.PlumbingLinkName)}\"");
             sb.AppendLine("}");
             return sb.ToString();
         }
@@ -109,6 +127,8 @@ namespace METools.CollisionChecker
                 if (TryReadBool(trim, "IncludeImportedArchitecture", out var ia)) d.IncludeImportedArchitecture = ia;
                 if (TryReadString(trim, "ImportArchitectureName", out var ian)) d.ImportArchitectureName = ian;
                 if (TryReadBool(trim, "ImportArchitectureIsLink", out var ial)) d.ImportArchitectureIsLink = ial;
+                if (TryReadBool(trim, "IncludePlumbing", out var ip)) d.IncludePlumbing = ip;
+                if (TryReadString(trim, "PlumbingLinkName", out var pln)) d.PlumbingLinkName = pln;
             }
             return d;
         }

@@ -763,7 +763,7 @@ namespace METools.Comments
                 var el = doc.GetElement(r.ElementId);
                 if (el != null)
                 {
-                    _pendingRefElementId = r.ElementId.IntegerValue.ToString();
+                    _pendingRefElementId = r.ElementId.Value.ToString();
 
                     string family = "", typeName = "";
                     if (el is Autodesk.Revit.DB.FamilyInstance fi)

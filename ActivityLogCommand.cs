@@ -59,7 +59,7 @@ namespace METools.ActivityLog
                 if (string.IsNullOrWhiteSpace(TargetLevelId) || !int.TryParse(TargetLevelId, out int idInt))
                 { OnDone?.Invoke(false, "No level recorded for this entry."); return; }
 
-                var levelId = new Autodesk.Revit.DB.ElementId(idInt);
+                var levelId = new Autodesk.Revit.DB.ElementId((long)idInt);
                 var level = doc.GetElement(levelId) as Autodesk.Revit.DB.Level;
                 if (level == null)
                 { OnDone?.Invoke(false, "That level no longer exists in this project."); return; }
