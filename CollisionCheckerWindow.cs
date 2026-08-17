@@ -77,7 +77,14 @@ namespace METools.CollisionChecker
             S.SetLanguage(SettingsStore.Language ?? "en");
             _settingsData = CollisionCheckerSettings.Load();
             InitWindow(S._("collisioncheck.title"), 660);
-            MaxHeight = Math.Min(780, SystemParameters.WorkArea.Height - 60);
+            // BUG FIXED HERE: this used to cap at a flat 780px regardless of
+            // actual screen size, and opened already AT that cap -- so on
+            // any screen taller than ~840px there was no way to drag it any
+            // taller at all; the resize grip had nowhere to go. Now uses the
+            // real available height (matching InitWindow's own Loaded-time
+            // safety clamp), so a taller screen genuinely gives a taller
+            // starting window and real room left to drag further if wanted.
+            MaxHeight = SystemParameters.WorkArea.Height - 40;
             // Fixed height, not auto-measured: the results section below
             // uses a star-sized row so it always gets whatever space is
             // left after the (short, fixed) intro/scope/family section --

@@ -399,6 +399,56 @@ namespace METools.CollisionChecker
         // occasionally flagging a near-miss for an oddly-angled run as if
         // it were a real clash -- worth a quick visual check on each
         // flagged row rather than trusting this as pixel-precise.
+        // ROOT CAUSE OF A SECOND, DISTINCT FALSE POSITIVE, confirmed live
+        // against this project's actual data: a drainage pipe here has a
+        // real, confirmed 1% slope (Pset MEP.Tech-Slope (%) = 1.00) on a
+        // 100mm-diameter run. A sloped pipe's bounding box Z-extent reflects
+        // the RISE across its length from that slope, not its true
+        // diameter -- for a several-meter segment at 1% grade, that rise
+        // alone can be several times the pipe's actual 100mm diameter.
+        // Deriving VerticalHalfExtentFt from dz/2 (as the fallback below
+        // still does) massively overestimates a sloped pipe's real radius
+        // for exactly the same underlying reason the run side's old
+        // Math.Max(width,height) bug did -- using an axis-aligned bounding
+        // box as a stand-in for a linear element's true cross-section
+        // breaks down whenever that element isn't short and axis-aligned.
+        // Confirmed this project's IFC export reliably carries the real
+        // nominal diameter in "Pset MEP.Geom-DN" (a plain, unitless
+        // "General"-formatted number in millimeters -- not a Length-typed
+        // parameter, so no internal-feet conversion applies here, just a
+        // straight mm value) -- reading that directly sidesteps the
+        // bounding-box problem entirely instead of trying to compensate
+        // for slope/length in the geometry math. Falls back to the old
+        // bounding-box approximation when no such parameter is found
+        // (e.g. structural framing has no "diameter" at all).
+        private static double? TryGetNominalRadiusFt(Element el)
+        {
+            if (el == null) return null;
+            string[] paramNames = { "Pset MEP.Geom-DN", "Pset_PipeSegmentTypeCommon.NominalDiameter" };
+            foreach (var name in paramNames)
+            {
+                try
+                {
+                    var p = el.LookupParameter(name);
+                    if (p == null) continue;
+                    double mm;
+                    if (p.StorageType == StorageType.Double) mm = p.AsDouble();
+                    else if (p.StorageType == StorageType.Integer) mm = p.AsInteger();
+                    else if (p.StorageType == StorageType.String && double.TryParse(p.AsString(), out var parsed)) mm = parsed;
+                    else continue;
+                    // Sanity-bounded (5mm-2000mm) rather than trusted blindly
+                    // -- a wildly out-of-range value here would more likely
+                    // mean a unit-conversion mismatch than a real pipe, and
+                    // silently trusting it could produce the exact opposite
+                    // failure mode (missing genuine clashes instead of
+                    // flagging false ones).
+                    if (mm >= 5 && mm <= 2000) return (mm / 304.8) / 2.0; // mm -> ft, halved for radius
+                }
+                catch { }
+            }
+            return null;
+        }
+
         private static List<PlumbingCandidate> FindLinkedCandidatesByCategory(
             RevitLinkInstance linkInst, BuiltInCategory[] categories, Func<BuiltInCategory, string> labelFor)
         {
@@ -455,14 +505,15 @@ namespace METools.CollisionChecker
                             if (min == null || max == null) continue;
 
                             double dx = max.X - min.X, dy = max.Y - min.Y, dz = max.Z - min.Z;
+                            var nominalRadiusFt = TryGetNominalRadiusFt(el);
 
                             result.Add(new PlumbingCandidate
                             {
                                 Description = catLabel,
                                 UniqueId = el.UniqueId ?? "",
                                 HostBBox = new BoundingBoxXYZ { Min = min, Max = max },
-                                VerticalHalfExtentFt = dz / 2.0,
-                                HorizontalHalfExtentFt = Math.Min(dx, dy) / 2.0,
+                                VerticalHalfExtentFt   = nominalRadiusFt ?? (dz / 2.0),
+                                HorizontalHalfExtentFt = nominalRadiusFt ?? (Math.Min(dx, dy) / 2.0),
                             });
                         }
                         catch { }
@@ -899,7 +950,29 @@ namespace METools.CollisionChecker
                             // apart.
                             if (!info.HasHole && holeUidsByRun.TryGetValue(run.UniqueId, out var candidateHoleUids))
                             {
-                                const double proximityToleranceFt = 300.0 / 304.8; // ~300mm
+                                // Widened from 300mm -- confirmed live this
+                                // project has genuine shaft-style holes
+                                // spanning several levels for a vertical
+                                // riser that goes "up a level or down a
+                                // level through the walls" (cables from
+                                // multiple floors converging into one
+                                // wall opening at the main distribution
+                                // panel). A vertical riser is mathematically
+                                // guaranteed to never intersect a wall's
+                                // side faces directly (any wall's side
+                                // faces are vertical planes containing the
+                                // Z-axis, and a vertical line is parallel
+                                // to any such plane by definition), so
+                                // every one of these always resolves via
+                                // FindNearApproachPoint's closest-line-
+                                // to-line approximation, not a precise
+                                // face intersection -- worth a more
+                                // generous match here since the computed
+                                // point is already an approximation, and
+                                // stacked walls across real floors are
+                                // rarely perfectly X/Y-aligned to begin
+                                // with.
+                                const double proximityToleranceFt = 600.0 / 304.8; // ~600mm
                                 foreach (var candidateUid in candidateHoleUids)
                                 {
                                     try
@@ -2350,7 +2423,13 @@ namespace METools.CollisionChecker
 
         private static ElementId FindNearbyExistingHole(List<(ElementId Id, BoundingBoxXYZ BBox)> existingHoleInstances, XYZ point)
         {
-            const double proximityToleranceFt = 300.0 / 304.8; // ~300mm, applied as padding on every side of each instance's own bounding box
+            // Widened from 300mm -- same reasoning as the run-scoped
+            // fallback above (see its remarks): vertical risers always
+            // resolve via an approximated closest-approach point, not a
+            // precise face intersection, and this project has confirmed
+            // shaft-style holes spanning several levels for exactly that
+            // case.
+            const double proximityToleranceFt = 600.0 / 304.8; // ~600mm, applied as padding on every side of each instance's own bounding box
             foreach (var (id, bbox) in existingHoleInstances)
             {
                 try { if (IsPointNearBoundingBox(point, bbox, proximityToleranceFt)) return id; }
