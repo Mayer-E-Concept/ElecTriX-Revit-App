@@ -8,15 +8,19 @@ namespace METools.CollisionChecker
     public enum ScanScope { WholeModel, ActiveView, CurrentSelection }
 
     // WallCrossing is the original case this whole file was built around --
-    // a run passing through a wall, resolved by placing a hole. PlumbingClash
-    // is a genuinely different kind of finding: two routed MEP systems (a
-    // cable tray/conduit and a pipe) physically overlapping in open space,
-    // not a run meeting a fixed obstacle. There's no equivalent "place a
-    // hole" resolution for that -- the fix is always a human decision to
-    // reroute one system or the other -- so PlumbingClash rows are
-    // informational (Go To only) rather than actionable the way
-    // WallCrossing rows are.
-    public enum CollisionKind { WallCrossing, PlumbingClash }
+    // a run passing through a wall, resolved by placing a hole. The other
+    // two kinds are a genuinely different kind of finding: two routed
+    // systems (a cable tray/conduit and, respectively, a pipe or a
+    // structural beam/column/foundation) physically overlapping in open
+    // space, not a run meeting a fixed obstacle. There's no equivalent
+    // "place a hole" resolution for that -- the fix is always a human
+    // decision to reroute one system or the other -- so PlumbingClash and
+    // StructuralClash rows are informational (Go To only) rather than
+    // actionable the way WallCrossing rows are. Both share the exact same
+    // detection algorithm (see ScanForLinkedClashes) and the same
+    // Mark-as-Solved storage; only which categories get searched for in the
+    // chosen link differs.
+    public enum CollisionKind { WallCrossing, PlumbingClash, StructuralClash }
 
     // One place where a conduit or cable tray run passes through a wall.
     // A single run can cross several walls (a corridor wall + a shaft wall,
@@ -35,13 +39,18 @@ namespace METools.CollisionChecker
         public Autodesk.Revit.DB.ElementId LevelId { get; set; } = Autodesk.Revit.DB.ElementId.InvalidElementId;
         public Autodesk.Revit.DB.XYZ Point { get; set; }               // exact intersection point, model coordinates
 
-        // Only meaningful when Kind == PlumbingClash. The pipe/fitting is a
-        // DirectShape living inside the plumbing LINK's own document (same
-        // situation as walls in an IFC-linked architecture model -- see
-        // FindPlumbingElementsInLink), so there's no host-document
-        // ElementId for it the way WallId is for a real Wall; this is a
-        // human-readable description (category + a rough size if one could
-        // be read) captured at scan time instead.
+        // Only meaningful when Kind == PlumbingClash or StructuralClash. The
+        // linked element (pipe/fitting, or beam/column/foundation) is a
+        // DirectShape or plain element living inside the LINK's own
+        // document (same situation as walls in an IFC-linked architecture
+        // model -- see FindWallLikeElementsInLink), so there's no host-
+        // document ElementId for it the way WallId is for a real Wall; this
+        // is a human-readable description (category + a rough size if one
+        // could be read) captured at scan time instead. Field name kept as
+        // "Plumbing..." even though it's shared with StructuralClash rows --
+        // renaming would ripple through every call site for no functional
+        // gain; the comment here is the source of truth on what it's
+        // actually used for.
         public string PlumbingElementDescription { get; set; } = "";
 
         // Filled in once a hole has been placed for this row -- lets the
@@ -50,25 +59,28 @@ namespace METools.CollisionChecker
         public Autodesk.Revit.DB.ElementId HoleInstanceId { get; set; } = Autodesk.Revit.DB.ElementId.InvalidElementId;
         public bool HasHole => HoleInstanceId != null && HoleInstanceId != Autodesk.Revit.DB.ElementId.InvalidElementId;
 
-        // Only meaningful when Kind == PlumbingClash -- there's no "hole"
-        // to place for two overlapping routed systems, so this is a plain
-        // manual acknowledgement instead ("I've looked at this, someone
-        // rerouted something, it's handled") rather than something this
-        // tool can verify against the model the way HasHole can. Persisted
-        // keyed by (run UniqueId, linked pipe UniqueId) -- see
+        // Only meaningful when Kind == PlumbingClash or StructuralClash --
+        // there's no "hole" to place for two overlapping routed
+        // systems/structural elements, so this is a plain manual
+        // acknowledgement instead ("I've looked at this, someone rerouted
+        // something, it's handled") rather than something this tool can
+        // verify against the model the way HasHole can. Persisted keyed by
+        // (run UniqueId, linked element UniqueId) -- see
         // CollisionCheckerHandler's solved-clash schema -- and reloaded at
-        // the start of every scan.
+        // the start of every scan. The same schema/storage is shared across
+        // both clash kinds since UniqueIds are already globally unique, so
+        // there's no risk of a pipe's key colliding with a beam's.
         public bool IsSolved { get; set; } = false;
 
         // What the filter dropdown and the row's own checkbox actually
         // care about: "is there nothing left to do here", regardless of
-        // whether that's because a hole got placed or because a plumbing
-        // clash got manually marked solved.
+        // whether that's because a hole got placed or because a clash got
+        // manually marked solved.
         public bool IsResolved => HasHole || IsSolved;
 
-        // Only meaningful when Kind == PlumbingClash. Combined with
-        // ElementId (the run) to form the persisted solved-clash key --
-        // see the remarks above IsSolved.
+        // Only meaningful when Kind == PlumbingClash or StructuralClash.
+        // Combined with ElementId (the run) to form the persisted
+        // solved-clash key -- see the remarks above IsSolved.
         public string PlumbingElementUniqueId { get; set; } = "";
 
         // True when WallId points at an ImportInstance (an imported CAD/IFC
@@ -89,7 +101,7 @@ namespace METools.CollisionChecker
         public Autodesk.Revit.DB.XYZ ImportedWallDirection { get; set; } = null;
     }
 
-    public enum CollisionCheckerAction { None, PlaceHoles, MoveHoles, MarkCollisions, MarkPlumbingSolved, Frame3D }
+    public enum CollisionCheckerAction { None, PlaceHoles, MoveHoles, MarkCollisions, MarkClashSolved, Frame3D }
 
     public class CollisionCheckerRequest
     {
@@ -136,7 +148,7 @@ namespace METools.CollisionChecker
         // Row id -> the hole instance that got placed for it, so the window
         // can update HasHole on the matching rows without re-scanning.
         public Dictionary<string, Autodesk.Revit.DB.ElementId> PlacedHoleByRowId { get; set; } = new Dictionary<string, Autodesk.Revit.DB.ElementId>();
-        // Row ids successfully marked solved -- MarkPlumbingSolved's own
+        // Row ids successfully marked solved -- MarkClashSolved's own
         // equivalent of PlacedHoleByRowId, so the window can flip IsSolved
         // on the matching rows without re-scanning.
         public List<string> SolvedRowIds { get; set; } = new List<string>();
@@ -214,6 +226,19 @@ namespace METools.CollisionChecker
     // accidentally get passed into the architecture-crossing code path or
     // vice versa.
     public class PlumbingSourceOption
+    {
+        public Autodesk.Revit.DB.ElementId InstanceId { get; set; }
+        public string Name { get; set; } = "";
+        public override string ToString() => Name;
+    }
+
+    // Same idea again, for structural clash detection (beams, columns,
+    // foundations against a linked structural model) -- kept distinct from
+    // PlumbingSourceOption for the same reason PlumbingSourceOption is kept
+    // distinct from ArchitectureSourceOption: a structural link picked here
+    // can never accidentally end up passed into the plumbing or
+    // architecture code paths.
+    public class StructuralSourceOption
     {
         public Autodesk.Revit.DB.ElementId InstanceId { get; set; }
         public string Name { get; set; } = "";

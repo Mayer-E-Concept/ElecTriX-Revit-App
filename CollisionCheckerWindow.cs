@@ -43,6 +43,8 @@ namespace METools.CollisionChecker
         private ComboBox _cbImportChoice;
         private CheckBox _cbIncludePlumbing;
         private ComboBox _cbPlumbingChoice;
+        private CheckBox _cbIncludeStructural;
+        private ComboBox _cbStructuralChoice;
         private TextBlock _lblSummary;
         private TextBlock _lblLastScanned;
 
@@ -102,7 +104,7 @@ namespace METools.CollisionChecker
             {
                 if (result?.ResultAction == CollisionCheckerAction.MarkCollisions)
                     HandleMarkResult(result);
-                else if (result?.ResultAction == CollisionCheckerAction.MarkPlumbingSolved)
+                else if (result?.ResultAction == CollisionCheckerAction.MarkClashSolved)
                     HandleSolvedResult(result);
                 else if (result?.ResultAction == CollisionCheckerAction.Frame3D)
                     HandleFrame3DResult(result);
@@ -295,6 +297,35 @@ namespace METools.CollisionChecker
             sp.Children.Add(_cbPlumbingChoice);
             RefreshPlumbingChoices();
 
+            _cbIncludeStructural = new CheckBox
+            {
+                Content = S._("collisioncheck.include_structural"),
+                IsChecked = _settingsData?.IncludeStructural ?? false,
+                Foreground = MeToolsTheme.BrText,
+                Margin = new Thickness(0, 2, 0, 4),
+                ToolTip = S._("collisioncheck.include_structural_hint"),
+            };
+            _cbIncludeStructural.Checked   += (s, e) => { SetIncludeStructural(true);  RefreshStructuralChoicesVisibility(); };
+            _cbIncludeStructural.Unchecked += (s, e) => { SetIncludeStructural(false); RefreshStructuralChoicesVisibility(); };
+            sp.Children.Add(_cbIncludeStructural);
+
+            // Same idea as plumbing -- structural clashes only ever look
+            // at a LINKED model, links only.
+            _cbStructuralChoice = StyledCombo();
+            _cbStructuralChoice.DisplayMemberPath = "Name";
+            _cbStructuralChoice.ToolTip = S._("collisioncheck.structural_choice_hint");
+            _cbStructuralChoice.Margin = new Thickness(0, 0, 0, 6);
+            _cbStructuralChoice.Visibility = (_settingsData?.IncludeStructural ?? false) ? Visibility.Visible : Visibility.Collapsed;
+            _cbStructuralChoice.SelectionChanged += (s, e) =>
+            {
+                var chosen = _cbStructuralChoice.SelectedItem as StructuralSourceOption;
+                _settingsData = _settingsData ?? new CollisionCheckerSettingsData();
+                _settingsData.StructuralLinkName = chosen?.Name ?? "";
+                CollisionCheckerSettings.Save(_settingsData);
+            };
+            sp.Children.Add(_cbStructuralChoice);
+            RefreshStructuralChoices();
+
             var scanRow = new Grid { Margin = new Thickness(0, 4, 0, 0) };
             scanRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             scanRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -418,6 +449,52 @@ namespace METools.CollisionChecker
                 : options.FirstOrDefault(o => o.InstanceId != ElementId.InvalidElementId
                     && PlumbingLinkNameHints.Any(hint => o.Name.IndexOf(hint, StringComparison.OrdinalIgnoreCase) >= 0));
             _cbPlumbingChoice.SelectedItem = match ?? options[0];
+        }
+
+        private void SetIncludeStructural(bool on)
+        {
+            _settingsData = _settingsData ?? new CollisionCheckerSettingsData();
+            _settingsData.IncludeStructural = on;
+            CollisionCheckerSettings.Save(_settingsData);
+        }
+
+        private void RefreshStructuralChoicesVisibility()
+        {
+            if (_cbStructuralChoice == null) return;
+            _cbStructuralChoice.Visibility = (_cbIncludeStructural?.IsChecked ?? false) ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        // Same idea as PlumbingLinkNameHints, for structural links -- Rohbau
+        // (shell/structural construction), Tragwerk(smodell) (structural/
+        // load-bearing model), and Statik (structural engineering) are the
+        // common German naming conventions; TWP kept too since it's what
+        // this convention showed up as in a real project's link name.
+        private static readonly string[] StructuralLinkNameHints = { "rohb", "tragwerk", "struktur", "statik", "twp" };
+
+        private void RefreshStructuralChoices()
+        {
+            if (_cbStructuralChoice == null) return;
+            var doc = _uiApp?.ActiveUIDocument?.Document;
+            var options = new List<StructuralSourceOption> { new StructuralSourceOption { InstanceId = ElementId.InvalidElementId, Name = S._("collisioncheck.import_choice_none") } };
+            if (doc != null)
+            {
+                foreach (var link in CollisionCheckerHandler.GetAllLoadedRevitLinks(doc))
+                {
+                    var linkDoc = link.GetLinkDocument();
+                    var typeName = (linkDoc?.GetElement(link.GetTypeId()) as RevitLinkType)?.Name ?? link.Name ?? link.Id.ToString();
+                    if (typeName.EndsWith(".rvt", StringComparison.OrdinalIgnoreCase))
+                        typeName = typeName.Substring(0, typeName.Length - 4);
+                    options.Add(new StructuralSourceOption { InstanceId = link.Id, Name = typeName });
+                }
+            }
+
+            _cbStructuralChoice.ItemsSource = options;
+            var savedName = _settingsData?.StructuralLinkName ?? "";
+            StructuralSourceOption match = !string.IsNullOrEmpty(savedName)
+                ? options.FirstOrDefault(o => string.Equals(o.Name, savedName, StringComparison.OrdinalIgnoreCase))
+                : options.FirstOrDefault(o => o.InstanceId != ElementId.InvalidElementId
+                    && StructuralLinkNameHints.Any(hint => o.Name.IndexOf(hint, StringComparison.OrdinalIgnoreCase) >= 0));
+            _cbStructuralChoice.SelectedItem = match ?? options[0];
         }
 
         // ── Hole family picker ───────────────────────────────────────────
@@ -613,7 +690,14 @@ namespace METools.CollisionChecker
                 if (chosenPlumbing != null && chosenPlumbing.InstanceId != ElementId.InvalidElementId)
                     plumbingLinkId = chosenPlumbing.InstanceId;
             }
-            _collisions = CollisionCheckerHandler.ScanForCollisions(doc, uiDoc, _scope, architectureSourceId, architectureSourceIsLink, (_cbHoleSymbol?.SelectedItem as HoleSymbolOption)?.SymbolId, plumbingLinkId);
+            ElementId structuralLinkId = null;
+            if (_settingsData?.IncludeStructural ?? false)
+            {
+                var chosenStructural = _cbStructuralChoice?.SelectedItem as StructuralSourceOption;
+                if (chosenStructural != null && chosenStructural.InstanceId != ElementId.InvalidElementId)
+                    structuralLinkId = chosenStructural.InstanceId;
+            }
+            _collisions = CollisionCheckerHandler.ScanForCollisions(doc, uiDoc, _scope, architectureSourceId, architectureSourceIsLink, (_cbHoleSymbol?.SelectedItem as HoleSymbolOption)?.SymbolId, plumbingLinkId, structuralLinkId);
             _lblSummary.Text = _collisions.Count == 0
                 ? S._("collisioncheck.none_found")
                 : string.Format(S._("collisioncheck.n_found"), _collisions.Count);
@@ -768,12 +852,13 @@ namespace METools.CollisionChecker
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
-            // Plumbing clashes have no "hole to place" the way a wall
-            // crossing does, but a person can still mark one as manually
-            // handled once they've rerouted whatever needed rerouting --
-            // the checkbox here feeds "Mark Selected as Solved" instead of
-            // "Place Holes for Selected", disabled once IsSolved the same
-            // way a wall-crossing row's checkbox disables once HasHole.
+            // Plumbing/structural clashes have no "hole to place" the way a
+            // wall crossing does, but a person can still mark one as
+            // manually handled once they've rerouted whatever needed
+            // rerouting -- the checkbox here feeds "Mark Selected as
+            // Solved" instead of "Place Holes for Selected", disabled once
+            // IsSolved the same way a wall-crossing row's checkbox disables
+            // once HasHole.
             var cb = new CheckBox { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 0), IsEnabled = !c.IsResolved };
             cb.Checked   += (s, e) => _checkedRowIds.Add(c.Id);
             cb.Unchecked += (s, e) => _checkedRowIds.Remove(c.Id);
@@ -783,11 +868,12 @@ namespace METools.CollisionChecker
             // Level and category are now conveyed by the group headers
             // above this row, so the row itself only needs to say which
             // specific type crossed which specific wall -- or, for a
-            // plumbing clash, which specific type overlaps which kind of
-            // plumbing element.
+            // plumbing/structural clash, which specific type overlaps
+            // which kind of linked element.
+            bool isClash = c.Kind != CollisionKind.WallCrossing;
             var info = new TextBlock
             {
-                Text = c.Kind == CollisionKind.PlumbingClash
+                Text = isClash
                     ? $"\"{c.ElementTypeName}\"  \u2192  {c.PlumbingElementDescription}"
                     : $"\"{c.ElementTypeName}\"  \u2192  {c.WallTypeName}",
                 FontSize = 11, Foreground = MeToolsTheme.BrText,
@@ -797,11 +883,11 @@ namespace METools.CollisionChecker
 
             var status = new TextBlock
             {
-                Text = c.Kind == CollisionKind.PlumbingClash
-                    ? (c.IsSolved ? S._("collisioncheck.plumbing_solved_label") : S._("collisioncheck.plumbing_clash_label"))
+                Text = isClash
+                    ? (c.IsSolved ? S._("collisioncheck.clash_solved_label") : S._("collisioncheck.clash_label"))
                     : (c.HasHole ? S._("collisioncheck.hole_placed") : ""),
                 FontSize = 10,
-                Foreground = c.Kind == CollisionKind.PlumbingClash
+                Foreground = isClash
                     ? (c.IsSolved ? MeToolsTheme.BrAccent : MeToolsTheme.Br(MeToolsTheme.COrange))
                     : MeToolsTheme.BrAccent,
                 FontWeight = FontWeights.SemiBold,
@@ -983,13 +1069,13 @@ namespace METools.CollisionChecker
                 MessageBox.Show(S._("collisioncheck.pick_family_first"), S._("collisioncheck.title"), MessageBoxButton.OK, MessageBoxImage.Information);
                 return;
             }
-            // Kind != PlumbingClash is a deliberate, explicit guard, not
-            // just relying on !HasHole -- a plumbing clash row can now be
-            // checked too (its checkbox feeds Mark Solved instead), so
-            // without this a checked plumbing row would otherwise be
-            // sent into a hole-placement request that makes no sense for
-            // it.
-            var selected = _collisions.Where(c => _checkedRowIds.Contains(c.Id) && !c.HasHole && c.Kind != CollisionKind.PlumbingClash).ToList();
+            // Kind == WallCrossing is a deliberate, explicit guard, not
+            // just relying on !HasHole -- a plumbing/structural clash row
+            // can now be checked too (its checkbox feeds Mark Solved
+            // instead), so without this a checked clash row would
+            // otherwise be sent into a hole-placement request that makes
+            // no sense for it.
+            var selected = _collisions.Where(c => _checkedRowIds.Contains(c.Id) && !c.HasHole && c.Kind == CollisionKind.WallCrossing).ToList();
             if (selected.Count == 0)
             {
                 MessageBox.Show(S._("collisioncheck.nothing_selected"), S._("collisioncheck.title"), MessageBoxButton.OK, MessageBoxImage.Information);
@@ -1008,7 +1094,7 @@ namespace METools.CollisionChecker
 
         private void OnMarkSolvedClicked()
         {
-            var selected = _collisions.Where(c => _checkedRowIds.Contains(c.Id) && c.Kind == CollisionKind.PlumbingClash && !c.IsSolved).ToList();
+            var selected = _collisions.Where(c => _checkedRowIds.Contains(c.Id) && c.Kind != CollisionKind.WallCrossing && !c.IsSolved).ToList();
             if (selected.Count == 0)
             {
                 MessageBox.Show(S._("collisioncheck.nothing_selected"), S._("collisioncheck.title"), MessageBoxButton.OK, MessageBoxImage.Information);
@@ -1017,7 +1103,7 @@ namespace METools.CollisionChecker
 
             _handler.Request = new CollisionCheckerRequest
             {
-                Action     = CollisionCheckerAction.MarkPlumbingSolved,
+                Action     = CollisionCheckerAction.MarkClashSolved,
                 Collisions = selected,
             };
             _extEvent.Raise();
@@ -1114,7 +1200,7 @@ namespace METools.CollisionChecker
             UpdateStatusBar(summary);
         }
 
-        // MarkPlumbingSolved's own equivalent of HandlePlaceResult -- no
+        // MarkClashSolved's own equivalent of HandlePlaceResult -- no
         // watcher notification needed (there's no hole element for a live-
         // follow watcher to track a move on), just flipping IsSolved on
         // the matching in-memory rows and their UI so the list reflects
@@ -1133,7 +1219,7 @@ namespace METools.CollisionChecker
                 if (_rowChecks.TryGetValue(c.Id, out var cb)) { cb.IsChecked = false; cb.IsEnabled = false; }
                 if (_rowStatus.TryGetValue(c.Id, out var st))
                 {
-                    st.Text = S._("collisioncheck.plumbing_solved_label");
+                    st.Text = S._("collisioncheck.clash_solved_label");
                     st.Foreground = MeToolsTheme.BrAccent;
                 }
                 _checkedRowIds.Remove(c.Id);

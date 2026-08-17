@@ -59,6 +59,14 @@ namespace METools.CollisionChecker
         // file" case for plumbing clash detection), so there's no
         // matching IsLink flag to go with it.
         public string PlumbingLinkName { get; set; } = "";
+
+        // Same idea as IncludePlumbing/PlumbingLinkName, for structural
+        // clash detection (beams/columns/foundations from a linked
+        // structural model) -- off by default for the same reason: a
+        // bounding-box + centerline-distance heuristic against generic
+        // linked geometry, not a guaranteed-precise solid intersection.
+        public bool IncludeStructural { get; set; } = false;
+        public string StructuralLinkName { get; set; } = "";
     }
 
     public static class CollisionCheckerSettings
@@ -109,7 +117,9 @@ namespace METools.CollisionChecker
             sb.AppendLine($"  \"ImportArchitectureName\": \"{Esc(d.ImportArchitectureName)}\",");
             sb.AppendLine($"  \"ImportArchitectureIsLink\": {(d.ImportArchitectureIsLink ? "true" : "false")},");
             sb.AppendLine($"  \"IncludePlumbing\": {(d.IncludePlumbing ? "true" : "false")},");
-            sb.AppendLine($"  \"PlumbingLinkName\": \"{Esc(d.PlumbingLinkName)}\"");
+            sb.AppendLine($"  \"PlumbingLinkName\": \"{Esc(d.PlumbingLinkName)}\",");
+            sb.AppendLine($"  \"IncludeStructural\": {(d.IncludeStructural ? "true" : "false")},");
+            sb.AppendLine($"  \"StructuralLinkName\": \"{Esc(d.StructuralLinkName)}\"");
             sb.AppendLine("}");
             return sb.ToString();
         }
@@ -129,6 +139,8 @@ namespace METools.CollisionChecker
                 if (TryReadBool(trim, "ImportArchitectureIsLink", out var ial)) d.ImportArchitectureIsLink = ial;
                 if (TryReadBool(trim, "IncludePlumbing", out var ip)) d.IncludePlumbing = ip;
                 if (TryReadString(trim, "PlumbingLinkName", out var pln)) d.PlumbingLinkName = pln;
+                if (TryReadBool(trim, "IncludeStructural", out var isr)) d.IncludeStructural = isr;
+                if (TryReadString(trim, "StructuralLinkName", out var sln)) d.StructuralLinkName = sln;
             }
             return d;
         }

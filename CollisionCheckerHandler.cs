@@ -59,8 +59,8 @@ namespace METools.CollisionChecker
                 ExecuteMoveHoles(doc, req);
             else if (req.Action == CollisionCheckerAction.MarkCollisions)
                 ExecuteMarkCollisions(doc, app.ActiveUIDocument?.ActiveView?.Id, req);
-            else if (req.Action == CollisionCheckerAction.MarkPlumbingSolved)
-                ExecuteMarkPlumbingSolved(doc, req);
+            else if (req.Action == CollisionCheckerAction.MarkClashSolved)
+                ExecuteMarkClashSolved(doc, req);
             else if (req.Action == CollisionCheckerAction.Frame3D)
                 ExecuteFrame3D(doc, req);
         }
@@ -337,14 +337,22 @@ namespace METools.CollisionChecker
             public string Description = "";
             public string UniqueId = ""; // the linked pipe/fitting's own UniqueId, within its own link document -- see the solved-clash schema below
             public BoundingBoxXYZ HostBBox;
-            // Half the SMALLEST of the box's 3 dimensions -- for a pipe or
-            // fitting aligned along its own axis, two of the three box
-            // dimensions are close to its actual diameter and one (the
-            // length) is larger, so the smallest one is a reasonable
-            // stand-in for its radius. Used by ScanForPlumbingClashes'
-            // centerline-distance check below, not the bounding-box test
-            // this used to rely on alone.
-            public double ApproxRadiusFt;
+            // ROOT CAUSE OF A REAL FALSE POSITIVE, confirmed live against an
+            // actual flagged row: a cable tray is 500mm wide but only 60mm
+            // tall -- collapsing that into one scalar "radius" (the old
+            // ApproxRadiusFt, and worse, the run side used to take
+            // Math.Max(width,height) for its own half-width) treated the
+            // tray's clearance envelope as a 250mm-radius CIRCLE around its
+            // centerline in every direction, including vertically, where the
+            // real clearance is only 30mm. A beam sitting ~150mm above the
+            // tray -- comfortably outside the tray's real physical volume --
+            // was well within that inflated circular radius, so it got
+            // flagged despite there being visibly nothing there in 3D.
+            // Fixed by keeping vertical and horizontal clearance separate on
+            // both sides of the check (see ScanForLinkedClashes) instead of
+            // one combined radius.
+            public double VerticalHalfExtentFt;   // half the candidate's own Z-extent
+            public double HorizontalHalfExtentFt; // half the SMALLER of its X/Y-extents -- see remarks above ApproxRadiusFt's old use for why the smaller one is the reasonable stand-in
         }
 
         private static readonly BuiltInCategory[] PlumbingCategories =
@@ -356,22 +364,43 @@ namespace METools.CollisionChecker
             BuiltInCategory.OST_PlumbingFixtures,
         };
 
-        // Pipes/fittings from a linked plumbing model, with bounding boxes
-        // already transformed into host-document coordinates. Confirmed
-        // live against a real project: like the architecture walls
-        // elsewhere in this file, pipes/fittings from an IFC-linked
-        // plumbing model come through as generic DirectShape elements
-        // (2344 pipe curves, 2295 fittings, all DirectShape, none of them
-        // a real Pipe/MechanicalFitting class instance with a Diameter
-        // parameter to read) -- so there's no exact diameter or precise
-        // centerline to read the way a native Revit Pipe would offer.
-        // A bounding-box overlap test is a reasonable, well-established
-        // first pass for this kind of clash detection (plenty of BIM
-        // coordination tools start exactly here), at the cost of
+        // Structural clash detection's own category list -- beams, columns,
+        // and foundations from a linked structural model. Floors included
+        // too: a conduit/cable tray passing through a structural slab is
+        // exactly as real a coordination issue as passing through a beam,
+        // and this list only ever gets applied against whichever link the
+        // person explicitly picked as "the structural model" in the UI, so
+        // there's no risk of it accidentally matching an architectural
+        // floor from a different link.
+        private static readonly BuiltInCategory[] StructuralCategories =
+        {
+            BuiltInCategory.OST_StructuralFraming,
+            BuiltInCategory.OST_StructuralColumns,
+            BuiltInCategory.OST_StructuralFoundation,
+            BuiltInCategory.OST_Floors,
+        };
+
+        // Elements from ANY category list in a linked model, with bounding
+        // boxes already transformed into host-document coordinates --
+        // shared core behind both FindPlumbingElementsInLink and
+        // FindStructuralElementsInLink below (previously two near-identical
+        // ~70-line copies of this exact loop; the only thing that ever
+        // differed between them was which categories to look for and what
+        // to label each one). Confirmed live against a real project: like
+        // the architecture walls elsewhere in this file, elements from an
+        // IFC-linked model come through as generic DirectShape elements
+        // (2344 pipe curves, 2295 fittings, all DirectShape, none of them a
+        // real Pipe/MechanicalFitting class instance with a Diameter
+        // parameter to read) -- so there's no exact diameter/dimension or
+        // precise centerline to read the way a native Revit element would
+        // offer. A bounding-box overlap test is a reasonable, well-
+        // established first pass for this kind of clash detection (plenty
+        // of BIM coordination tools start exactly here), at the cost of
         // occasionally flagging a near-miss for an oddly-angled run as if
         // it were a real clash -- worth a quick visual check on each
         // flagged row rather than trusting this as pixel-precise.
-        internal static List<PlumbingCandidate> FindPlumbingElementsInLink(RevitLinkInstance linkInst)
+        private static List<PlumbingCandidate> FindLinkedCandidatesByCategory(
+            RevitLinkInstance linkInst, BuiltInCategory[] categories, Func<BuiltInCategory, string> labelFor)
         {
             var result = new List<PlumbingCandidate>();
             try
@@ -380,7 +409,7 @@ namespace METools.CollisionChecker
                 if (linkDoc == null) return result;
                 var transform = linkInst.GetTotalTransform();
 
-                foreach (var cat in PlumbingCategories)
+                foreach (var cat in categories)
                 {
                     List<Element> elements;
                     try
@@ -393,11 +422,7 @@ namespace METools.CollisionChecker
                     }
                     catch { continue; }
 
-                    string catLabel = cat == BuiltInCategory.OST_PipeCurves ? "Pipe"
-                                     : cat == BuiltInCategory.OST_FlexPipeCurves ? "Flex Pipe"
-                                     : cat == BuiltInCategory.OST_PipeFitting ? "Pipe Fitting"
-                                     : cat == BuiltInCategory.OST_PipeAccessory ? "Pipe Accessory"
-                                     : "Plumbing Fixture";
+                    string catLabel = labelFor(cat);
 
                     foreach (var el in elements)
                     {
@@ -430,14 +455,14 @@ namespace METools.CollisionChecker
                             if (min == null || max == null) continue;
 
                             double dx = max.X - min.X, dy = max.Y - min.Y, dz = max.Z - min.Z;
-                            double approxRadius = Math.Min(dx, Math.Min(dy, dz)) / 2.0;
 
                             result.Add(new PlumbingCandidate
                             {
                                 Description = catLabel,
                                 UniqueId = el.UniqueId ?? "",
                                 HostBBox = new BoundingBoxXYZ { Min = min, Max = max },
-                                ApproxRadiusFt = approxRadius,
+                                VerticalHalfExtentFt = dz / 2.0,
+                                HorizontalHalfExtentFt = Math.Min(dx, dy) / 2.0,
                             });
                         }
                         catch { }
@@ -448,24 +473,50 @@ namespace METools.CollisionChecker
             return result;
         }
 
-        // For each run, measures distance from every plumbing candidate to
-        // the run's OWN centerline (clamped to its real bounded length),
-        // not to an axis-aligned box around the whole run -- confirmed
-        // live as a real, reported problem: for a long or diagonally-
-        // angled run, that box can be far larger than the run's actual
-        // (thin) physical volume, so a box-vs-box test flagged pipes that
-        // were nowhere near the run's real geometry, just somewhere
-        // within its oversized box. Looking at a specific flagged case in
-        // 3D confirmed it directly: nothing was actually there.
-        internal static List<CollisionInfo> ScanForPlumbingClashes(Document doc, List<Element> runs, RevitLinkInstance plumbingLink)
+        internal static List<PlumbingCandidate> FindPlumbingElementsInLink(RevitLinkInstance linkInst)
+        {
+            return FindLinkedCandidatesByCategory(linkInst, PlumbingCategories, cat =>
+                cat == BuiltInCategory.OST_PipeCurves ? "Pipe"
+              : cat == BuiltInCategory.OST_FlexPipeCurves ? "Flex Pipe"
+              : cat == BuiltInCategory.OST_PipeFitting ? "Pipe Fitting"
+              : cat == BuiltInCategory.OST_PipeAccessory ? "Pipe Accessory"
+              : "Plumbing Fixture");
+        }
+
+        // Structural clash detection's own candidate finder -- beams,
+        // columns, foundations, and floors from a linked structural model.
+        // Same shared core as plumbing; only the category list and labels
+        // differ.
+        internal static List<PlumbingCandidate> FindStructuralElementsInLink(RevitLinkInstance linkInst)
+        {
+            return FindLinkedCandidatesByCategory(linkInst, StructuralCategories, cat =>
+                cat == BuiltInCategory.OST_StructuralFraming ? "Structural Framing"
+              : cat == BuiltInCategory.OST_StructuralColumns ? "Structural Column"
+              : cat == BuiltInCategory.OST_StructuralFoundation ? "Structural Foundation"
+              : "Structural Floor");
+        }
+
+        // Shared core behind ScanForPlumbingClashes and ScanForStructuralClashes
+        // -- the centerline-distance algorithm itself doesn't care what
+        // discipline the linked candidates came from, only which category
+        // list found them (see FindLinkedCandidatesByCategory) and which
+        // CollisionKind/solved-storage the resulting rows should carry.
+        // For each run, measures distance from every candidate to the
+        // run's OWN centerline (clamped to its real bounded length), not to
+        // an axis-aligned box around the whole run -- confirmed live as a
+        // real, reported problem: for a long or diagonally-angled run,
+        // that box can be far larger than the run's actual (thin) physical
+        // volume, so a box-vs-box test flagged pipes that were nowhere
+        // near the run's real geometry, just somewhere within its
+        // oversized box. Looking at a specific flagged case in 3D
+        // confirmed it directly: nothing was actually there.
+        private static List<CollisionInfo> ScanForLinkedClashes(
+            Document doc, List<Element> runs, List<PlumbingCandidate> candidates, CollisionKind kind)
         {
             var result = new List<CollisionInfo>();
-            if (doc == null || runs == null || plumbingLink == null) return result;
+            if (doc == null || runs == null || candidates == null || candidates.Count == 0) return result;
 
-            var candidates = FindPlumbingElementsInLink(plumbingLink);
-            if (candidates.Count == 0) return result;
-
-            var solvedKeys = ReadSolvedPlumbingClashKeys(doc);
+            var solvedKeys = ReadSolvedClashKeys(doc);
 
             // Generous, quick-reject only -- NOT the actual detection
             // signal (that's the centerline-distance check below). Wide
@@ -473,10 +524,11 @@ namespace METools.CollisionChecker
             // its only job is skipping candidates that are obviously far
             // away before the more precise (and more expensive) check.
             const double quickFilterToleranceFt = 2.0;
-            // Geometry-rounding allowance only, added on top of the run's
-            // own half-width and the candidate's approximate radius --
-            // not a substitute for measuring actual physical proximity.
+            // Geometry-rounding allowance only, added on top of the real
+            // clearances below -- not a substitute for measuring actual
+            // physical proximity.
             const double smallToleranceFt = 15.0 / 304.8;
+            const double fallbackHalfExtentFt = 100.0 / 304.8; // ~100mm, used only when a real dimension couldn't be read
 
             foreach (var run in runs)
             {
@@ -487,9 +539,23 @@ namespace METools.CollisionChecker
                     var outline = new Outline(runBox.Min, runBox.Max);
 
                     var centerline = (run.Location as LocationCurve)?.Curve;
+                    // ROOT CAUSE OF A REAL FALSE POSITIVE, confirmed live
+                    // against an actual flagged row: this used to collapse
+                    // width and height into ONE scalar via Math.Max, then
+                    // apply that single number as a clearance radius in
+                    // EVERY direction from the centerline, including
+                    // vertically. A real cable tray in this project is
+                    // 500mm wide but only 60mm tall -- using 250mm (half
+                    // the width) as the VERTICAL clearance too means a beam
+                    // sitting ~150mm above the tray, comfortably outside
+                    // its real 30mm half-height, was still "within radius"
+                    // and got flagged despite there being nothing there.
+                    // Kept as two separate values now: crossWidth is
+                    // horizontal (perpendicular to the run's own direction,
+                    // in plan), crossHeight is vertical.
                     GetRunCrossDimensions(run, out var crossWidth, out var crossHeight);
-                    double runHalfWidthFt = Math.Max(crossWidth ?? 0, crossHeight ?? 0) / 2.0;
-                    if (runHalfWidthFt <= 0) runHalfWidthFt = 100.0 / 304.8; // ~100mm fallback if the parameter couldn't be read
+                    double runHalfWidthFt  = (crossWidth  ?? 0) > 0 ? crossWidth.Value  / 2.0 : fallbackHalfExtentFt;
+                    double runHalfHeightFt = (crossHeight ?? 0) > 0 ? crossHeight.Value / 2.0 : fallbackHalfExtentFt;
 
                     ElementId levelId = ElementId.InvalidElementId;
                     string levelName = "";
@@ -523,8 +589,26 @@ namespace METools.CollisionChecker
                                 // bounded segment, not an extrapolated one).
                                 var proj = centerline.Project(candCenter);
                                 if (proj == null) continue;
-                                double allowedFt = runHalfWidthFt + cand.ApproxRadiusFt + smallToleranceFt;
-                                if (proj.Distance > allowedFt) continue;
+
+                                // Decomposed into vertical and horizontal
+                                // components instead of one combined 3D
+                                // distance -- see the remarks above
+                                // runHalfHeightFt for why. This assumes the
+                                // run is at most mildly sloped (true for the
+                                // near-totality of cable tray/conduit
+                                // routing); a genuinely vertical riser
+                                // section would need this decomposition
+                                // done differently, since "up" would no
+                                // longer be a meaningful separate axis from
+                                // the run's own direction.
+                                var offset = candCenter - proj.XYZPoint;
+                                double vertOffsetFt  = Math.Abs(offset.Z);
+                                double horizOffsetFt = Math.Sqrt(offset.X * offset.X + offset.Y * offset.Y);
+
+                                double allowedVerticalFt   = runHalfHeightFt + cand.VerticalHalfExtentFt   + smallToleranceFt;
+                                double allowedHorizontalFt = runHalfWidthFt  + cand.HorizontalHalfExtentFt + smallToleranceFt;
+                                if (vertOffsetFt > allowedVerticalFt || horizOffsetFt > allowedHorizontalFt) continue;
+
                                 clashPoint = proj.XYZPoint;
                             }
                             else
@@ -550,7 +634,7 @@ namespace METools.CollisionChecker
 
                             result.Add(new CollisionInfo
                             {
-                                Kind = CollisionKind.PlumbingClash,
+                                Kind = kind,
                                 ElementId = run.Id,
                                 ElementCategory = run.Category?.Name ?? "",
                                 ElementTypeName = (doc.GetElement(run.GetTypeId()) as ElementType)?.Name ?? "",
@@ -569,6 +653,23 @@ namespace METools.CollisionChecker
                 catch { }
             }
             return result;
+        }
+
+        internal static List<CollisionInfo> ScanForPlumbingClashes(Document doc, List<Element> runs, RevitLinkInstance plumbingLink)
+        {
+            if (doc == null || runs == null || plumbingLink == null) return new List<CollisionInfo>();
+            var candidates = FindPlumbingElementsInLink(plumbingLink);
+            return ScanForLinkedClashes(doc, runs, candidates, CollisionKind.PlumbingClash);
+        }
+
+        // Structural clash detection's own scan -- same shared algorithm,
+        // just against StructuralCategories from whichever link the person
+        // picked as "the structural model".
+        internal static List<CollisionInfo> ScanForStructuralClashes(Document doc, List<Element> runs, RevitLinkInstance structuralLink)
+        {
+            if (doc == null || runs == null || structuralLink == null) return new List<CollisionInfo>();
+            var candidates = FindStructuralElementsInLink(structuralLink);
+            return ScanForLinkedClashes(doc, runs, candidates, CollisionKind.StructuralClash);
         }
 
         // GetInstanceGeometry() (used here, not GetSymbolGeometry()) returns
@@ -637,7 +738,7 @@ namespace METools.CollisionChecker
         // wall in the whole model is always considered as a potential
         // obstacle regardless of scope, since a run in view/selection scope
         // can still be crossing a wall that itself isn't in that scope.
-        public static List<CollisionInfo> ScanForCollisions(Document doc, UIDocument uiDoc, ScanScope scope, ElementId architectureSourceId = null, bool architectureSourceIsLink = false, ElementId holeSymbolId = null, ElementId plumbingLinkId = null)
+        public static List<CollisionInfo> ScanForCollisions(Document doc, UIDocument uiDoc, ScanScope scope, ElementId architectureSourceId = null, bool architectureSourceIsLink = false, ElementId holeSymbolId = null, ElementId plumbingLinkId = null, ElementId structuralLinkId = null)
         {
             var result = new List<CollisionInfo>();
             try
@@ -681,6 +782,15 @@ namespace METools.CollisionChecker
                     var plumbingLink = doc.GetElement(plumbingLinkId) as RevitLinkInstance;
                     if (plumbingLink != null)
                         result.AddRange(ScanForPlumbingClashes(doc, runs, plumbingLink));
+                }
+
+                // Same idea, for structural clashes (beams/columns/
+                // foundations/floors from a linked structural model).
+                if (structuralLinkId != null && structuralLinkId != ElementId.InvalidElementId)
+                {
+                    var structuralLink = doc.GetElement(structuralLinkId) as RevitLinkInstance;
+                    if (structuralLink != null)
+                        result.AddRange(ScanForStructuralClashes(doc, runs, structuralLink));
                 }
 
                 if (runs.Count == 0 || (walls.Count == 0 && importedCandidates.Count == 0)) return result;
@@ -1442,12 +1552,12 @@ namespace METools.CollisionChecker
         // just like every other write in this file -- unlike hole
         // placement, there's no model geometry being created here, just a
         // manual acknowledgement being persisted.
-        private void ExecuteMarkPlumbingSolved(Document doc, CollisionCheckerRequest req)
+        private void ExecuteMarkClashSolved(Document doc, CollisionCheckerRequest req)
         {
-            var result = new PlaceHolesResult { ResultAction = CollisionCheckerAction.MarkPlumbingSolved };
+            var result = new PlaceHolesResult { ResultAction = CollisionCheckerAction.MarkClashSolved };
             if (doc == null || req.Collisions == null) { OnDone?.Invoke(result); return; }
 
-            using (var tx = new Transaction(doc, "ME-Tools: Mark plumbing clashes solved"))
+            using (var tx = new Transaction(doc, "ME-Tools: Mark clashes solved"))
             {
                 tx.Start();
                 try
@@ -1456,7 +1566,10 @@ namespace METools.CollisionChecker
                     {
                         try
                         {
-                            if (c.Kind != CollisionKind.PlumbingClash || c.IsSolved) continue;
+                            // Covers both PlumbingClash and StructuralClash --
+                            // WallCrossing rows are never solved this way
+                            // (they get a real hole placed instead).
+                            if (c.Kind == CollisionKind.WallCrossing || c.IsSolved) continue;
                             var run = doc.GetElement(c.ElementId);
                             // Three genuinely different failure conditions,
                             // now reported separately instead of one vague
@@ -1481,10 +1594,10 @@ namespace METools.CollisionChecker
                             if (string.IsNullOrEmpty(c.PlumbingElementUniqueId))
                             {
                                 result.Errors++;
-                                result.ErrorByRowId[c.Id] = "the plumbing element this row matched at scan time has no recorded ID -- try rescanning";
+                                result.ErrorByRowId[c.Id] = "the linked element this row matched at scan time has no recorded ID -- try rescanning";
                                 continue;
                             }
-                            MarkPlumbingClashSolved(doc, $"{run.UniqueId}|{c.PlumbingElementUniqueId}");
+                            MarkClashSolved(doc, $"{run.UniqueId}|{c.PlumbingElementUniqueId}");
                             result.Placed++;
                             result.SolvedRowIds.Add(c.Id);
                         }
@@ -1519,7 +1632,7 @@ namespace METools.CollisionChecker
         // element the window should switch to and select once this
         // actually completes, matches every other action in this file
         // and is the same context PlaceHoles/MarkCollisions/
-        // MarkPlumbingSolved already run in safely.
+        // MarkClashSolved already run in safely.
         private void ExecuteFrame3D(Document doc, CollisionCheckerRequest req)
         {
             var result = new PlaceHolesResult { ResultAction = CollisionCheckerAction.Frame3D };
@@ -2354,9 +2467,12 @@ namespace METools.CollisionChecker
         }
 
         // Read-only, no Transaction -- safe to call directly from
-        // ScanForPlumbingClashes the same way ReadHoleLinkMap is called
-        // directly from the wall-crossing scan.
-        internal static HashSet<string> ReadSolvedPlumbingClashKeys(Document doc)
+        // ScanForLinkedClashes the same way ReadHoleLinkMap is called
+        // directly from the wall-crossing scan. Shared across both
+        // PlumbingClash and StructuralClash rows -- the key is just
+        // "{run UniqueId}|{candidate UniqueId}", and UniqueIds are already
+        // globally unique, so a pipe's key can never collide with a beam's.
+        internal static HashSet<string> ReadSolvedClashKeys(Document doc)
         {
             var result = new HashSet<string>();
             try
@@ -2377,8 +2493,9 @@ namespace METools.CollisionChecker
         }
 
         // Must be called from inside an already-open transaction --
-        // called from ExecuteMarkPlumbingSolved below.
-        private static void MarkPlumbingClashSolved(Document doc, string combinedKey)
+        // called from ExecuteMarkClashSolved below. Shared across both
+        // clash kinds, same reasoning as ReadSolvedClashKeys above.
+        private static void MarkClashSolved(Document doc, string combinedKey)
         {
             try
             {

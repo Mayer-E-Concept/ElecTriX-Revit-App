@@ -42,6 +42,7 @@ namespace METools.BatchParams
 
         // -- Renumber tab -----------------------------------------------------
         private ComboBox _cbRenumberParam;
+        private TextBlock _lblRenumberParamHint;
         private TextBox  _tbPrefix, _tbSuffix, _tbStart, _tbStep, _tbPadding;
         private TextBlock _lblPreview;
         private RenumberOrderMode _orderMode = RenumberOrderMode.Manual;
@@ -57,9 +58,12 @@ namespace METools.BatchParams
         private TextBlock  _lblRenumberSummary;
         private StackPanel _renumberResultList;
         private Button     _btnRenumberConfirm, _btnRenumberCancel;
+        private Button     _btnApplyRenumber;
+        private Button     _btnPickPath;
 
         // -- Bulk Edit tab -----------------------------------------------------
         private ComboBox _cbBulkParam;
+        private TextBlock _lblBulkParamHint;
         private Button _btnActPrefix, _btnActSuffix, _btnActReplace, _btnActSet, _btnActClear;
         private BulkEditAction _bulkAction = BulkEditAction.AddPrefix;
         private TextBox _tbBulkPrefix, _tbBulkSuffix, _tbFind, _tbReplace, _tbSetValue, _tbValueFilter;
@@ -69,9 +73,11 @@ namespace METools.BatchParams
         private TextBlock  _lblBulkSummary;
         private StackPanel _bulkResultList;
         private Button     _btnBulkConfirm, _btnBulkCancel;
+        private Button     _btnApplyBulk;
 
         // -- Completeness tab -----------------------------------------------
         private ComboBox _cbCompletenessParam;
+        private TextBlock _lblCompletenessParamHint;
         private TextBlock _lblCompletenessSummary;
         private StackPanel _completenessResultList;
         private Button _btnSelectMissing;
@@ -132,6 +138,9 @@ namespace METools.BatchParams
             RootDock.Children.Add(contentGrid);
 
             ShowRenumberTab();
+            UpdateApplyRenumberEnabled();
+            UpdateApplyBulkEnabled();
+            UpdatePickPathEnabled();
         }
 
         // ── Shared filter section: scope + category checklist + Scan ──────
@@ -206,6 +215,14 @@ namespace METools.BatchParams
                 {
                     Content = c.DisplayName, Tag = c.CategoryId,
                     Foreground = MeToolsTheme.BrText, Margin = new Thickness(4, 3, 4, 3),
+                    // Defaults to checked -- "scan everything found in this
+                    // scope" is the overwhelmingly common case, and having
+                    // every category start unchecked meant that case always
+                    // needed an extra manual check-first click (and, if
+                    // skipped, a blocking "pick a category first" message)
+                    // before Scan would do anything at all. Still just as
+                    // easy to uncheck the ones you don't want.
+                    IsChecked = true,
                 };
                 _categoryChecks.Add(cb);
                 _categoryList.Children.Add(cb);
@@ -258,6 +275,8 @@ namespace METools.BatchParams
             if (_completenessResultList != null) _completenessResultList.Children.Clear();
             if (_lblCompletenessSummary != null) _lblCompletenessSummary.Text = "";
             if (_btnSelectMissing != null) _btnSelectMissing.Visibility = Visibility.Collapsed;
+
+            UpdateStatusBar(string.Format(S._("batchparams.scan_complete_status"), _matchedElements.Count));
         }
 
         private void RefreshParamCombos()
@@ -268,19 +287,69 @@ namespace METools.BatchParams
                 _cbRenumberParam.ItemsSource = null;
                 _cbRenumberParam.ItemsSource = instanceOnly;
                 if (instanceOnly.Count > 0) _cbRenumberParam.SelectedIndex = 0;
+                if (_lblRenumberParamHint != null)
+                    _lblRenumberParamHint.Visibility = instanceOnly.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
             }
             if (_cbBulkParam != null)
             {
                 _cbBulkParam.ItemsSource = null;
                 _cbBulkParam.ItemsSource = _paramOptions;
                 if (_paramOptions.Count > 0) _cbBulkParam.SelectedIndex = 0;
+                if (_lblBulkParamHint != null)
+                    _lblBulkParamHint.Visibility = _paramOptions.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
             }
             if (_cbCompletenessParam != null)
             {
                 _cbCompletenessParam.ItemsSource = null;
                 _cbCompletenessParam.ItemsSource = _paramOptions;
                 if (_paramOptions.Count > 0) _cbCompletenessParam.SelectedIndex = 0;
+                if (_lblCompletenessParamHint != null)
+                    _lblCompletenessParamHint.Visibility = _paramOptions.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
             }
+            UpdateApplyRenumberEnabled();
+            UpdateApplyBulkEnabled();
+            UpdatePickPathEnabled();
+        }
+
+        // Enabled only once there's actually something for it to do:
+        // a parameter chosen, AND either a manual order with at least one
+        // element or a path line already picked. Previously always
+        // enabled, relying entirely on a click-time MessageBox to explain
+        // what was missing -- greying it out (with a tooltip explaining
+        // why) tells the person that up front instead of after a click
+        // that was never going to succeed.
+        private void UpdateApplyRenumberEnabled()
+        {
+            if (_btnApplyRenumber == null) return;
+            bool hasParam = _cbRenumberParam?.SelectedItem is ParamOption;
+            bool hasOrder = _orderMode == RenumberOrderMode.Manual
+                ? _manualOrder.Count > 0
+                : _pathCurveId != ElementId.InvalidElementId;
+            bool ready = hasParam && hasOrder;
+            _btnApplyRenumber.IsEnabled = ready;
+            _btnApplyRenumber.ToolTip = ready ? null : S._("batchparams.apply_renumber_disabled_hint");
+        }
+
+        // Same idea as UpdateApplyRenumberEnabled -- Path mode's "Pick Line"
+        // hard-requires a Scan to have already run (it orders _matchedElements,
+        // not an arbitrary pick), so grey it out until that's true instead of
+        // only explaining it via a click-time MessageBox.
+        private void UpdatePickPathEnabled()
+        {
+            if (_btnPickPath == null) return;
+            bool ready = _matchedElements.Count > 0;
+            _btnPickPath.IsEnabled = ready;
+            _btnPickPath.ToolTip = ready ? null : S._("batchparams.scan_first");
+        }
+
+        // Same idea for Bulk Edit -- just needs a parameter chosen, no
+        // order to worry about.
+        private void UpdateApplyBulkEnabled()
+        {
+            if (_btnApplyBulk == null) return;
+            bool ready = _cbBulkParam?.SelectedItem is ParamOption;
+            _btnApplyBulk.IsEnabled = ready;
+            _btnApplyBulk.ToolTip = ready ? null : S._("batchparams.apply_bulk_disabled_hint");
         }
 
         // ── Tab row (two toggle buttons, not a full colored tab bar --
@@ -343,9 +412,16 @@ namespace METools.BatchParams
             sp.Children.Add(SecH(S._("batchparams.parameter")));
             _cbRenumberParam = StyledCombo();
             _cbRenumberParam.DisplayMemberPath = "DisplayName";
-            _cbRenumberParam.Margin  = new Thickness(0, 0, 0, 10);
+            _cbRenumberParam.Margin  = new Thickness(0, 0, 0, 4);
             _cbRenumberParam.ToolTip = S._("batchparams.param_combo_hint");
+            _cbRenumberParam.SelectionChanged += (s, e) => UpdateApplyRenumberEnabled();
             sp.Children.Add(_cbRenumberParam);
+            _lblRenumberParamHint = new TextBlock
+            {
+                Text = S._("batchparams.scan_first"), FontSize = 10.5, FontStyle = FontStyles.Italic,
+                Foreground = MeToolsTheme.BrMuted, Margin = new Thickness(1, 0, 0, 10),
+            };
+            sp.Children.Add(_lblRenumberParamHint);
 
             sp.Children.Add(SecH(S._("batchparams.numbering")));
             var numRow = new WrapPanel { Orientation = Orientation.Horizontal };
@@ -422,15 +498,15 @@ namespace METools.BatchParams
             _lblPathStatus = new TextBlock { Text = S._("batchparams.path_not_picked"), FontSize = 11,
                 Foreground = MeToolsTheme.BrMuted, VerticalAlignment = VerticalAlignment.Center, TextWrapping = TextWrapping.Wrap };
             Grid.SetColumn(_lblPathStatus, 0); pathRow.Children.Add(_lblPathStatus);
-            var btnPickPath = ActionBtn(S._("batchparams.pick_line"), true, OnPickPathClicked);
-            Grid.SetColumn(btnPickPath, 1); pathRow.Children.Add(btnPickPath);
+            _btnPickPath = ActionBtn(S._("batchparams.pick_line"), true, OnPickPathClicked);
+            Grid.SetColumn(_btnPickPath, 1); pathRow.Children.Add(_btnPickPath);
             _panPath.Children.Add(pathRow);
             sp.Children.Add(_panPath);
 
             sp.Children.Add(Div());
-            var btnApplyRenumber = ActionBtn(S._("batchparams.apply_renumber"), false, OnApplyRenumberClicked);
-            btnApplyRenumber.HorizontalAlignment = HorizontalAlignment.Left;
-            sp.Children.Add(btnApplyRenumber);
+            _btnApplyRenumber = ActionBtn(S._("batchparams.apply_renumber"), false, OnApplyRenumberClicked);
+            _btnApplyRenumber.HorizontalAlignment = HorizontalAlignment.Left;
+            sp.Children.Add(_btnApplyRenumber);
 
             _panRenumberResult = BuildResultPanel(
                 out _lblRenumberSummary, out _renumberResultList,
@@ -449,6 +525,7 @@ namespace METools.BatchParams
             _panManual.Visibility = mode == RenumberOrderMode.Manual ? Visibility.Visible : Visibility.Collapsed;
             _panPath.Visibility   = mode == RenumberOrderMode.Path   ? Visibility.Visible : Visibility.Collapsed;
             UpdateRenumberPreview();
+            UpdateApplyRenumberEnabled();
         }
 
         private void UpdateRenumberPreview()
@@ -642,6 +719,7 @@ namespace METools.BatchParams
             }
 
             UpdateRenumberPreview();
+            UpdateApplyRenumberEnabled();
         }
 
         // Small square icon-only button for the row up/down/remove
@@ -718,6 +796,7 @@ namespace METools.BatchParams
                     _lblPathStatus.Text = _pathCurveId != ElementId.InvalidElementId
                         ? S._("batchparams.path_picked")
                         : S._("batchparams.path_not_picked");
+                UpdateApplyRenumberEnabled();
             }
         }
 
@@ -835,9 +914,16 @@ namespace METools.BatchParams
             sp.Children.Add(SecH(S._("batchparams.parameter")));
             _cbBulkParam = StyledCombo();
             _cbBulkParam.DisplayMemberPath = "DisplayName";
-            _cbBulkParam.Margin  = new Thickness(0, 0, 0, 10);
+            _cbBulkParam.Margin  = new Thickness(0, 0, 0, 4);
             _cbBulkParam.ToolTip = S._("batchparams.param_combo_bulk_hint");
+            _cbBulkParam.SelectionChanged += (s, e) => UpdateApplyBulkEnabled();
             sp.Children.Add(_cbBulkParam);
+            _lblBulkParamHint = new TextBlock
+            {
+                Text = S._("batchparams.scan_first"), FontSize = 10.5, FontStyle = FontStyles.Italic,
+                Foreground = MeToolsTheme.BrMuted, Margin = new Thickness(1, 0, 0, 10),
+            };
+            sp.Children.Add(_lblBulkParamHint);
 
             sp.Children.Add(CompactField(S._("batchparams.value_filter"), S._("batchparams.value_filter_hint"), 180, out _tbValueFilter));
 
@@ -879,9 +965,9 @@ namespace METools.BatchParams
             sp.Children.Add(_panBulkSet);
 
             sp.Children.Add(Div());
-            var btnApplyBulk = ActionBtn(S._("batchparams.apply_bulkedit"), false, OnApplyBulkEditClicked);
-            btnApplyBulk.HorizontalAlignment = HorizontalAlignment.Left;
-            sp.Children.Add(btnApplyBulk);
+            _btnApplyBulk = ActionBtn(S._("batchparams.apply_bulkedit"), false, OnApplyBulkEditClicked);
+            _btnApplyBulk.HorizontalAlignment = HorizontalAlignment.Left;
+            sp.Children.Add(_btnApplyBulk);
 
             _panBulkResult = BuildResultPanel(
                 out _lblBulkSummary, out _bulkResultList,
@@ -974,9 +1060,15 @@ namespace METools.BatchParams
             sp.Children.Add(SecH(S._("batchparams.parameter")));
             _cbCompletenessParam = StyledCombo();
             _cbCompletenessParam.DisplayMemberPath = "DisplayName";
-            _cbCompletenessParam.Margin  = new Thickness(0, 0, 0, 10);
+            _cbCompletenessParam.Margin  = new Thickness(0, 0, 0, 4);
             _cbCompletenessParam.ToolTip = S._("batchparams.param_combo_bulk_hint");
             sp.Children.Add(_cbCompletenessParam);
+            _lblCompletenessParamHint = new TextBlock
+            {
+                Text = S._("batchparams.scan_first"), FontSize = 10.5, FontStyle = FontStyles.Italic,
+                Foreground = MeToolsTheme.BrMuted, Margin = new Thickness(1, 0, 0, 10),
+            };
+            sp.Children.Add(_lblCompletenessParamHint);
 
             sp.Children.Add(Div());
             var btnCheck = ActionBtn(S._("batchparams.check_completeness"), false, OnCheckCompletenessClicked);
