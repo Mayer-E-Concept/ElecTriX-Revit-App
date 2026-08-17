@@ -13,20 +13,131 @@ namespace METools.BatchParams
         public BatchParamsRequest  Request  { get; set; } = new BatchParamsRequest();
         public Action<string>      OnStatus { get; set; }
         public Action<ApplyResult> OnDone   { get; set; }
+        // Called once the interactive manual-pick session ends (Esc, or an
+        // error). Args: newly-picked ElementIds this session, error or null.
+        public Action<List<ElementId>, string> OnPickSessionDone { get; set; }
 
         public string GetName() => "ME-Tools Batch Params";
 
         public void Execute(UIApplication app)
         {
-            var req = Request;
-            var doc = app.ActiveUIDocument?.Document;
+            var req   = Request;
+            var doc   = app.ActiveUIDocument?.Document;
+            var uiDoc = app.ActiveUIDocument;
             if (doc == null || req == null || req.Action == BatchParamsAction.None) return;
 
             switch (req.Action)
             {
                 case BatchParamsAction.ApplyRenumber: ExecuteRenumber(doc, req); break;
                 case BatchParamsAction.ApplyBulkEdit: ExecuteBulkEdit(doc, req); break;
+                case BatchParamsAction.PickElementsInteractive: ExecutePickElementsInteractive(doc, uiDoc, req); break;
+                case BatchParamsAction.SetPendingMarks: ExecuteSetPendingMarks(doc, uiDoc, req); break;
             }
+        }
+
+        // ── Pending-mark ("already picked") graphic override ───────────────
+        // ROOT CAUSE FIX: same issue as CircuitTaggerWindow.SetPendingMark --
+        // this used to be a Transaction opened directly from OnPickManualClicked,
+        // a plain WPF click handler on a window shown via .Show() (no valid
+        // Revit API context). Confirmed live: nothing highlighted, because
+        // Revit silently refuses the transaction there and the surrounding
+        // try/catch swallowed the exception. Moved here so it runs inside
+        // Execute(), which has valid API context throughout.
+        private static readonly Color PendingPickColor = new Color(255, 60, 170); // bold magenta -- matches Circuit Tagger's choice
+
+        private void SetPendingMark(Document doc, View view, IEnumerable<ElementId> ids, bool on)
+        {
+            if (doc == null || view == null) return;
+            var idList = ids?.Where(id => id != null && id != ElementId.InvalidElementId).ToList();
+            if (idList == null || idList.Count == 0) return;
+            using (var tx = new Transaction(doc, on ? "ME-Tools: Mark picked element" : "ME-Tools: Clear picked element mark"))
+            {
+                tx.Start();
+                foreach (var id in idList)
+                {
+                    try
+                    {
+                        var ogs = new OverrideGraphicSettings();
+                        if (on)
+                        {
+                            ogs.SetProjectionLineColor(PendingPickColor);
+                            ogs.SetProjectionLineWeight(6);
+                        }
+                        view.SetElementOverrides(id, ogs);
+                    }
+                    catch { }
+                }
+                tx.Commit();
+            }
+        }
+
+        private void ExecuteSetPendingMarks(Document doc, UIDocument uiDoc, BatchParamsRequest req)
+        {
+            if (doc == null || uiDoc == null) return;
+            SetPendingMark(doc, uiDoc.ActiveView, req.ElementIds, req.MarkOn);
+            try { uiDoc.RefreshActiveView(); } catch { }
+        }
+
+        // Manual-order incremental pick loop, moved here in full (not just
+        // the marking) so PickObject and every mark share one continuous
+        // valid API context for the whole session -- same fix and same
+        // reasoning as CircuitTaggerHandler.ExecutePickElementsInteractive.
+        private void ExecutePickElementsInteractive(Document doc, UIDocument uiDoc, BatchParamsRequest req)
+        {
+            var newlyPicked = new List<ElementId>();
+            if (doc == null || uiDoc == null) { OnPickSessionDone?.Invoke(newlyPicked, "No active document."); return; }
+
+            var view = uiDoc.ActiveView;
+            var alreadyPicked = new HashSet<long>((req?.ElementIds ?? new List<ElementId>()).Select(id => id.Value));
+            string errorMessage = null;
+
+            SetPendingMark(doc, view, req?.ElementIds, true);
+            try { uiDoc.RefreshActiveView(); } catch { }
+
+            try
+            {
+                while (true)
+                {
+                    Reference r;
+                    try
+                    {
+                        r = uiDoc.Selection.PickObject(Autodesk.Revit.UI.Selection.ObjectType.Element,
+                            "Click elements in the order you want them numbered. Press Esc when done.");
+                    }
+                    catch (Autodesk.Revit.Exceptions.OperationCanceledException) { break; }
+
+                    if (r == null) break;
+                    if (alreadyPicked.Contains(r.ElementId.Value) || newlyPicked.Contains(r.ElementId)) continue;
+
+                    newlyPicked.Add(r.ElementId);
+                    SetPendingMark(doc, view, new[] { r.ElementId }, true);
+                    try { uiDoc.RefreshActiveView(); } catch { }
+                }
+            }
+            catch (Exception ex) { errorMessage = ex.Message; }
+
+            OnPickSessionDone?.Invoke(newlyPicked, errorMessage);
+        }
+
+        // Shared by ExecuteRenumber and the Window's live preview label, so
+        // the two can't drift apart. Handles negative numbers correctly --
+        // the old inline "n.ToString().PadLeft(padding, '0')" produced
+        // malformed results like "0-5" for n=-5, padding=3 (the minus sign
+        // ends up in the middle of the padded digits instead of in front).
+        public static string FormatRenumberValue(string prefix, int n, int padding, string suffix)
+        {
+            string numStr;
+            if (padding > 0)
+            {
+                bool neg = n < 0;
+                string digits = Math.Abs((long)n).ToString().PadLeft(padding, '0');
+                numStr = neg ? "-" + digits : digits;
+            }
+            else
+            {
+                numStr = n.ToString();
+            }
+            return (prefix ?? "") + numStr + (suffix ?? "");
         }
 
         // -- Renumber: prefix + zero-padded counter + suffix, in whatever
@@ -41,6 +152,23 @@ namespace METools.BatchParams
             if (ids.Count == 0) { Report("No elements to renumber."); OnDone?.Invoke(result); return; }
             if (string.IsNullOrEmpty(cfg.ParameterName)) { Report("No parameter selected."); OnDone?.Invoke(result); return; }
 
+            // Path-mode elements that couldn't be positioned along the
+            // picked line -- reported up front as explicit skips, not
+            // counted against the numbering sequence (they were never in
+            // "ids" to begin with).
+            foreach (var exId in req.PathExcludedElementIds ?? new List<ElementId>())
+            {
+                var exEl = doc.GetElement(exId);
+                result.Skipped++;
+                result.Changes.Add(new ElementChangeInfo
+                {
+                    ElementId = exId,
+                    ElementLabel = ElementLabel(exEl),
+                    Status = ChangeStatus.Skipped,
+                    Reason = "could not be positioned along the picked line",
+                });
+            }
+
             using (var tx = new Transaction(doc, "ME-Tools: Batch Renumber"))
             {
                 tx.Start();
@@ -52,8 +180,7 @@ namespace METools.BatchParams
                     try
                     {
                         var el = doc.GetElement(id);
-                        string numStr = cfg.Padding > 0 ? n.ToString().PadLeft(cfg.Padding, '0') : n.ToString();
-                        newVal = (cfg.Prefix ?? "") + numStr + (cfg.Suffix ?? "");
+                        newVal = FormatRenumberValue(cfg.Prefix, n, cfg.Padding, cfg.Suffix);
                         label  = ElementLabel(el);
 
                         if (el == null)
@@ -348,21 +475,26 @@ namespace METools.BatchParams
         // needing exact intersection geometry, and it works uniformly for
         // any element with a location point or a bounding box, not just
         // ones the line happens to touch precisely.
-        public static List<ElementId> OrderByPath(Document doc, IEnumerable<ElementId> elementIds, Curve curve)
+        // excluded gets every id that couldn't be given a position (no
+        // location/bounding box, or a failed projection) -- the caller
+        // reports these explicitly instead of them just quietly not being
+        // in the result with no trace of why the count came up short.
+        public static List<ElementId> OrderByPath(Document doc, IEnumerable<ElementId> elementIds, Curve curve, out List<ElementId> excluded)
         {
             var withT = new List<(ElementId Id, double T)>();
+            excluded = new List<ElementId>();
             foreach (var id in elementIds)
             {
                 try
                 {
                     var el = doc.GetElement(id);
                     var center = GetElementCenter(el);
-                    if (center == null) continue;
+                    if (center == null) { excluded.Add(id); continue; }
                     var proj = curve.Project(center);
-                    if (proj == null) continue;
+                    if (proj == null) { excluded.Add(id); continue; }
                     withT.Add((id, proj.Parameter));
                 }
-                catch { }
+                catch { excluded.Add(id); }
             }
             return withT.OrderBy(x => x.T).Select(x => x.Id).ToList();
         }

@@ -94,6 +94,15 @@ namespace METools.FamilyPlacer
         ReadApartmentValues,
         LoadParamsFromSelection,
         ClearCircuitData,
+        // Runs the whole incremental PickObject loop for "Select in Revit"
+        // inside Execute() -- see CircuitTaggerHandler.ExecutePickElementsInteractive
+        // for why this moved here from a direct WPF click handler call.
+        PickElementsInteractive,
+        // One-shot apply/clear of the magenta "already queued" graphic
+        // override for a specific set of ElementIds (Request.ElementIds),
+        // using Request.MarkOn. Used by Clear-all and the per-row remove
+        // button, which don't need the interactive pick loop.
+        SetPendingMarks,
     }
 
     public class CircuitTaggerRequest
@@ -118,5 +127,10 @@ namespace METools.FamilyPlacer
         // trip, one transaction, and one stats refresh, instead of the user
         // having to click Clear + confirm a dialog once per circuit.
         public List<string> CircuitLabelsToClear { get; set; } = new List<string>();
+        // Used by SetPendingMarks -- true to apply the magenta override,
+        // false to clear it back to default. ElementIds above carries which
+        // elements to affect for both this and PickElementsInteractive
+        // (there, ElementIds is the already-queued set to mark on entry).
+        public bool MarkOn { get; set; } = true;
     }
 }

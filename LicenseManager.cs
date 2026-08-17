@@ -1,10 +1,11 @@
 // LicenseManager.cs — ME-Tools Trial License Management
 // Mayer E-Concept SRL
 // -----------------------------------------------------------------
-// Handles 14-day beta trial enforcement and holds the stub API used
-// by LicenseWindow / LicenseCheck. The real activation logic is a
-// clean seam: Activate(code) currently rejects all codes — replace
-// the body with real validation once the licensing backend is ready.
+// Handles 14-day beta trial enforcement and offline license activation.
+// Activate(code)/VerifyCode() do real validation: ECDSA P-256 signature
+// check against the embedded public key, plus machine-ID binding and
+// expiry. Codes are minted by the separate KeyGenerator tool, which
+// holds the matching private key (never distributed with the app).
 // -----------------------------------------------------------------
 using System;
 using System.Collections.Generic;
@@ -102,8 +103,9 @@ namespace METools
         // ── Public API ────────────────────────────────────────────────────
 
         /// <summary>
-        /// Stub for future full-license key validation.
-        /// Returns true only when a previously-activated key is on disk.
+        /// True when a key is on disk AND it verifies (signature, machine
+        /// binding, expiry) -- see VerifyCode. Re-checked every call, not
+        /// cached, so an expired or tampered key stops counting immediately.
         /// </summary>
         public static bool IsLicensed()
         {
@@ -220,10 +222,11 @@ namespace METools
         }
 
         /// <summary>
-        /// STUB — real activation not yet implemented. Returns LicenseType.None
-        /// for any input. Replace the body with real server/offline validation
-        /// when the licensing backend is ready. The seam on LicenseWindow and
-        /// the persistence in KeyFile already work.
+        /// Validates and, if valid, activates a license code -- real offline
+        /// verification via VerifyCode (ECDSA signature + machine binding +
+        /// expiry), no server round trip. Returns LicenseType.None if the
+        /// code fails any check. On success, persists the code to KeyFile;
+        /// IsLicensed() re-verifies it from scratch on every subsequent call.
         /// </summary>
         public static LicenseType Activate(string code)
         {
@@ -362,10 +365,8 @@ namespace METools
             return bytes.ToArray();
         }
 
-        // ── Key persistence seam used by SettingsWindow ───────────────────
+        // ── Key persistence seam used by SettingsWindow ────────────────────
         // These three members are the contract the Settings UI relies on.
-        // Replace the inner logic once the real license server is wired up;
-        // the UI code will not need to change.
 
         /// <summary>The key currently persisted on disk, empty string if none.</summary>
         public static string SavedKey
@@ -378,8 +379,9 @@ namespace METools
         }
 
         /// <summary>
-        /// Attempts to activate with the given key. Returns true on success.
-        /// Current stub: accepts no keys — replace with real validator.
+        /// Validates and activates via Activate(key) (real ECDSA/machine/expiry
+        /// check, see there), then persists the key itself. Returns true only
+        /// on a genuinely valid code.
         /// </summary>
         public static bool TryActivate(string key)
         {

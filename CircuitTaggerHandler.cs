@@ -35,6 +35,10 @@ namespace METools.FamilyPlacer
         public Action                       OnDone            { get; set; }
         public Action<string>               OnError           { get; set; }
         public Action<CircuitTaggerRequest> OnParamsLoaded    { get; set; }
+        // Called once the interactive pick session (Esc, or an error) ends.
+        // Args: newly-picked ElementIds this session (not including whatever
+        // was already queued beforehand), and an error message or null.
+        public Action<List<ElementId>, string> OnPickSessionDone { get; set; }
 
         public string GetName() => "ME-Tools Circuit Tagger";
 
@@ -55,7 +59,116 @@ namespace METools.FamilyPlacer
                     ExecuteLoadParams(doc, uiDoc); break;
                 case CircuitTaggerAction.ClearCircuitData:
                     ExecuteClearCircuitData(doc, req.CircuitLabelsToClear); break;
+                case CircuitTaggerAction.PickElementsInteractive:
+                    ExecutePickElementsInteractive(doc, uiDoc, req); break;
+                case CircuitTaggerAction.SetPendingMarks:
+                    ExecuteSetPendingMarks(doc, uiDoc, req); break;
             }
+        }
+
+        // ── Pending-mark ("already queued") graphic override ──────────────
+        // ROOT CAUSE FIX: this used to be a Transaction opened directly from
+        // a WPF button-click handler in CircuitTaggerWindow (OnSelectClicked /
+        // OnClearClicked / the per-row remove button). Windows shown via
+        // .Show() are genuinely modeless and have no valid Revit API context
+        // -- confirmed against Autodesk's own forum guidance (the same rule
+        // already confirmed live this session for the Collision Checker's 3D
+        // button, which hit "blocked by another command" for the identical
+        // reason). Revit's actual behavior here is to throw "Starting a
+        // transaction from an external application running outside of API
+        // context is not allowed" -- the surrounding try/catch swallowed
+        // that silently, so the mark looked like it just "didn't do
+        // anything" instead of visibly failing. Moved here so every call
+        // happens inside Execute(), which IS a valid API context.
+        private static readonly Color PendingTagColor = new Color(255, 60, 170); // bold magenta -- distinct from existing red linework and from Revit's own selection blue
+
+        private void SetPendingMark(Document doc, View view, IEnumerable<ElementId> ids, bool on)
+        {
+            if (doc == null || view == null) return;
+            var idList = ids?.Where(id => id != null && id != ElementId.InvalidElementId).ToList();
+            if (idList == null || idList.Count == 0) return;
+            using (var tx = new Transaction(doc, on ? "ME-Tools: Mark Pending Tag" : "ME-Tools: Clear Pending Tag Mark"))
+            {
+                tx.Start();
+                foreach (var id in idList)
+                {
+                    try
+                    {
+                        var ogs = new OverrideGraphicSettings();
+                        if (on)
+                        {
+                            ogs.SetProjectionLineColor(PendingTagColor);
+                            ogs.SetProjectionLineWeight(6);
+                        }
+                        view.SetElementOverrides(id, ogs); // no color/weight set = reset to default when on == false
+                    }
+                    catch { }
+                }
+                tx.Commit();
+            }
+        }
+
+        // One-shot apply/clear for Clear-all and the per-row remove button
+        // -- no picking involved, just needs valid API context to touch the
+        // view's graphic overrides.
+        private void ExecuteSetPendingMarks(Document doc, UIDocument uiDoc, CircuitTaggerRequest req)
+        {
+            if (doc == null || uiDoc == null) return;
+            SetPendingMark(doc, uiDoc.ActiveView, req.ElementIds, req.MarkOn);
+            try { uiDoc.RefreshActiveView(); } catch { }
+        }
+
+        // The incremental "Select in Revit" pick loop itself, moved here in
+        // full (not just the marking) so PickObject and every SetPendingMark
+        // call in between share one continuous valid API context for the
+        // whole session -- exactly the pattern Autodesk's own modeless-dialog
+        // samples use (ExternalEvent.Execute driving an interactive loop).
+        // req.ElementIds carries whatever's already queued (from the Window's
+        // _selected list) so those get marked immediately too, matching the
+        // old behavior. Only the newly-picked ids are handed back; the Window
+        // still builds each TaggedElementInfo (category/family/room) itself,
+        // same as before, just from a completion callback now instead of
+        // inline in the loop.
+        private void ExecutePickElementsInteractive(Document doc, UIDocument uiDoc, CircuitTaggerRequest req)
+        {
+            var newlyPicked = new List<ElementId>();
+            if (doc == null || uiDoc == null) { OnPickSessionDone?.Invoke(newlyPicked, "No active document."); return; }
+
+            var view = uiDoc.ActiveView;
+            var filter = new ElectricalElementFilter();
+            var alreadyQueued = new HashSet<long>((req?.ElementIds ?? new List<ElementId>()).Select(id => id.Value));
+            string errorMessage = null;
+
+            SetPendingMark(doc, view, req?.ElementIds, true);
+            try { uiDoc.RefreshActiveView(); } catch { }
+
+            try
+            {
+                while (true)
+                {
+                    Reference picked;
+                    try
+                    {
+                        picked = uiDoc.Selection.PickObject(
+                            Autodesk.Revit.UI.Selection.ObjectType.Element, filter,
+                            S._("circuittagger.select_prompt"));
+                    }
+                    catch (Autodesk.Revit.Exceptions.OperationCanceledException) { break; }
+
+                    if (picked == null) continue;
+                    if (alreadyQueued.Contains(picked.ElementId.Value)) continue; // already queued -- ignore, don't duplicate
+                    if (newlyPicked.Contains(picked.ElementId)) continue;
+                    var el = doc.GetElement(picked.ElementId);
+                    if (el == null) continue;
+
+                    newlyPicked.Add(picked.ElementId);
+                    SetPendingMark(doc, view, new[] { picked.ElementId }, true); // mark the just-added element right away
+                    try { uiDoc.RefreshActiveView(); } catch { }
+                }
+            }
+            catch (Exception ex) { errorMessage = ex.Message; }
+
+            OnPickSessionDone?.Invoke(newlyPicked, errorMessage);
         }
 
         // -- Read dropdown values for Apartment and Building ---------------

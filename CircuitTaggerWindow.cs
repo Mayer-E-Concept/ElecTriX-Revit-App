@@ -111,6 +111,7 @@ namespace METools.FamilyPlacer
             _handler.OnDone = () => Dispatcher.Invoke(() => { RefreshStats(); });
             _handler.OnError = msg => Dispatcher.Invoke(() =>
                 MessageBox.Show(msg, S._("circuittagger.title"), MessageBoxButton.OK, MessageBoxImage.Warning));
+            _handler.OnPickSessionDone = (ids, err) => Dispatcher.Invoke(() => HandlePickSessionDone(ids, err));
             _handler.OnParamsLoaded = loaded => Dispatcher.Invoke(() =>
             {
                 if (_tbVorsicherung      != null) _tbVorsicherung.Text      = loaded.Vorsicherung      ?? "";
@@ -1340,141 +1341,90 @@ namespace METools.FamilyPlacer
         // ???????????????????????????????????????????????????????????????????
         // ACTIONS
         // ???????????????????????????????????????????????????????????????????
+        // BUG FIXED HERE: this used to call PickObjects (plural) once
+        // and only ever add anything to _selected after the WHOLE pick
+        // loop finished. PickObjects is all-or-nothing -- a stray click
+        // on empty space mid-loop (missing an intended element, or just
+        // clicking the plan by mistake) can silently clear everything
+        // picked so far IN THAT SAME LOOP, a real and well-known Revit
+        // quirk, not something this app was doing. With a large
+        // selection, that meant one bad click near the end could wipe
+        // the entire batch, which read as "there's a limit" -- there
+        // isn't one, it just needed a more robust picking loop.
+        //
+        // ROOT CAUSE FIX (this pass): the pick loop AND the magenta
+        // "already queued" marking both used to run directly here, in a
+        // plain WPF click handler, on a window shown via .Show() (genuinely
+        // modeless -- no valid Revit API context). Marking used a
+        // Transaction, which Revit silently refuses outside a valid API
+        // context; the surrounding try/catch swallowed the resulting
+        // exception, so it looked like the mark "just didn't paint" rather
+        // than visibly failing every time. Confirmed live: nothing ever
+        // highlighted. The whole loop, including every mark, now runs
+        // inside CircuitTaggerHandler.ExecutePickElementsInteractive via the
+        // ExternalEvent, which genuinely has valid API context for the
+        // entire session. This method just kicks that off and hands back
+        // the already-queued ids so they get (re-)marked on entry, exactly
+        // as before.
         private void OnSelectClicked()
         {
             Hide();
-            var uiDoc = _uiApp?.ActiveUIDocument;
-            if (uiDoc == null) { Show(); return; }
-            var doc   = uiDoc.Document;
-            var view  = uiDoc.ActiveView;
-            var phase = new FilteredElementCollector(doc).OfClass(typeof(Phase)).Cast<Phase>().LastOrDefault();
-            var filter = new ElectricalElementFilter();
-
-            // BUG FIXED HERE: this used to call PickObjects (plural) once
-            // and only ever add anything to _selected after the WHOLE pick
-            // loop finished. PickObjects is all-or-nothing -- a stray click
-            // on empty space mid-loop (missing an intended element, or just
-            // clicking the plan by mistake) can silently clear everything
-            // picked so far IN THAT SAME LOOP, a real and well-known Revit
-            // quirk, not something this app was doing. With a large
-            // selection, that meant one bad click near the end could wipe
-            // the entire batch, which read as "there's a limit" -- there
-            // isn't one, it just needed a more robust picking loop.
-            //
-            // Now: pick ONE element at a time and commit it to _selected
-            // immediately, so a later stray click can only ever cost that
-            // one attempt, never anything already committed. Also marks
-            // already-queued elements with a graphic override (see
-            // SetPendingMark) before the first pick and after every new
-            // one, so it's visually obvious what's already queued when
-            // coming back to add more after a previous round.
-            // BUG FIXED HERE (again): the mark itself was applying correctly
-            // (confirmed -- this isn't the same "wiped by PickObject" issue
-            // as the old ambient-selection approach), but it was never
-            // actually PAINTED before the next blocking PickObject call
-            // seized the interactive loop. Committing a transaction queues a
-            // repaint; it doesn't force one to happen immediately, and
-            // jumping straight into a modal pick call can mean that queued
-            // repaint never gets flushed. RefreshActiveView() forces it
-            // synchronously right now, before Revit's own pick-mode cursor
-            // takes over -- the same fix Autodesk's own forum recommends for
-            // this exact "highlight during PickObjects" scenario.
-            SetPendingMark(doc, view, _selected.Select(x => x.ElementId), true);
-            try { uiDoc.RefreshActiveView(); } catch { }
-            try
+            _handler.Request = new CircuitTaggerRequest
             {
-                while (true)
+                Action     = CircuitTaggerAction.PickElementsInteractive,
+                ElementIds = _selected.Select(x => x.ElementId).ToList(),
+            };
+            _extEvent.Raise();
+        }
+
+        // Called once the pick session in the handler finishes (Esc, or an
+        // error). Builds the same TaggedElementInfo the old inline loop did,
+        // for each newly-picked id -- category/family/room resolution is a
+        // read, not a document modification, so it's fine to do here rather
+        // than in the handler.
+        private void HandlePickSessionDone(List<ElementId> newlyPickedIds, string errorMessage)
+        {
+            if (!string.IsNullOrEmpty(errorMessage))
+                MessageBox.Show(errorMessage, S._("circuittagger.select_elements_title"));
+
+            var uiDoc = _uiApp?.ActiveUIDocument;
+            var doc   = uiDoc?.Document;
+            if (doc != null && newlyPickedIds != null && newlyPickedIds.Count > 0)
+            {
+                var phase = new FilteredElementCollector(doc).OfClass(typeof(Phase)).Cast<Phase>().LastOrDefault();
+                foreach (var id in newlyPickedIds)
                 {
-                    Reference picked;
-                    try
-                    {
-                        picked = uiDoc.Selection.PickObject(
-                            Autodesk.Revit.UI.Selection.ObjectType.Element, filter,
-                            S._("circuittagger.select_prompt"));
-                    }
-                    catch (Autodesk.Revit.Exceptions.OperationCanceledException) { break; }
-
-                    if (picked == null) continue;
-                    if (_selected.Any(x => x.ElementId == picked.ElementId)) continue; // already queued -- ignore, don't duplicate
-                    var el = doc.GetElement(picked.ElementId);
+                    var el = doc.GetElement(id);
                     if (el == null) continue;
-
                     _selected.Add(new TaggedElementInfo
                     {
-                        ElementId    = picked.ElementId,
+                        ElementId    = id,
                         CategoryName = el.Category?.Name ?? "Element",
                         CategoryId   = (int)(el.Category?.Id?.Value ?? 0),
                         FamilyName   = (el as FamilyInstance)?.Symbol?.Family?.Name ?? el.Name ?? "",
                         RoomName     = GetRoomNameForEl(doc, el as FamilyInstance, phase),
                     });
-                    SetPendingMark(doc, view, new[] { picked.ElementId }, true); // mark the just-added element right away
-                    try { uiDoc.RefreshActiveView(); } catch { }
                 }
             }
-            catch (Exception ex) { MessageBox.Show(ex.Message, S._("circuittagger.select_elements_title")); }
-            finally
-            {
-                Show();
-                RefreshSelectionList();
-                // Deliberately NOT cleared here -- the whole point is that
-                // the mark stays visible after this picking session ends,
-                // so coming back later to add more still shows what's
-                // already queued. See OnClearClicked and the per-row
-                // remove button for where it actually gets cleared.
-            }
-        }
 
-        // BUG FIXED HERE: this used to call Selection.SetElementIds() to
-        // highlight already-queued elements, refreshed before and during
-        // the pick loop. That never actually worked -- confirmed against
-        // Autodesk's own Revit API forum (a long-standing, documented
-        // behavior, not a bug specific to this app): calling PickObject or
-        // PickObjects clears whatever's in the active Selection set the
-        // instant the pick loop starts, so anything set via SetElementIds
-        // right before it is wiped before it can ever be seen.
-        //
-        // Graphic overrides on the view are a genuinely different
-        // mechanism -- they're a property of the view/element pair, not
-        // of "selection" at all, so entering or leaving a pick loop has no
-        // effect on them. Same technique already used elsewhere in this
-        // file for the sub-label color override.
-        private static readonly Autodesk.Revit.DB.Color PendingTagColor = new Autodesk.Revit.DB.Color(255, 60, 170); // bold magenta -- distinct from existing red linework and from Revit's own selection blue
-
-        private void SetPendingMark(Document doc, View view, IEnumerable<ElementId> ids, bool on)
-        {
-            if (doc == null || view == null) return;
-            var idList = ids?.Where(id => id != null && id != ElementId.InvalidElementId).ToList();
-            if (idList == null || idList.Count == 0) return;
-            try
-            {
-                using (var tx = new Transaction(doc, on ? "ME-Tools: Mark Pending Tag" : "ME-Tools: Clear Pending Tag Mark"))
-                {
-                    tx.Start();
-                    foreach (var id in idList)
-                    {
-                        try
-                        {
-                            var ogs = new OverrideGraphicSettings();
-                            if (on)
-                            {
-                                ogs.SetProjectionLineColor(PendingTagColor);
-                                ogs.SetProjectionLineWeight(6);
-                            }
-                            view.SetElementOverrides(id, ogs); // no color/weight set = reset to default when on == false
-                        }
-                        catch { }
-                    }
-                    tx.Commit();
-                }
-            }
-            catch { }
+            Show();
+            RefreshSelectionList();
+            // Deliberately NOT clearing marks here -- the whole point is
+            // that the mark stays visible after this picking session ends,
+            // so coming back later to add more still shows what's already
+            // queued. See OnClearClicked and the per-row remove button for
+            // where it actually gets cleared.
         }
 
         private void OnClearClicked()
         {
-            var uiDoc = _uiApp?.ActiveUIDocument;
-            SetPendingMark(uiDoc?.Document, uiDoc?.ActiveView, _selected.Select(x => x.ElementId), false);
-            try { uiDoc?.RefreshActiveView(); } catch { }
+            _handler.Request = new CircuitTaggerRequest
+            {
+                Action     = CircuitTaggerAction.SetPendingMarks,
+                ElementIds = _selected.Select(x => x.ElementId).ToList(),
+                MarkOn     = false,
+            };
+            _extEvent.Raise();
             _selected.Clear();
             RefreshSelectionList();
         }
@@ -1611,9 +1561,13 @@ namespace METools.FamilyPlacer
                     };
                     removeBtn.Click += (s, e) =>
                     {
-                        var uiDoc = _uiApp?.ActiveUIDocument;
-                        SetPendingMark(uiDoc?.Document, uiDoc?.ActiveView, new[] { captured.ElementId }, false);
-                        try { uiDoc?.RefreshActiveView(); } catch { }
+                        _handler.Request = new CircuitTaggerRequest
+                        {
+                            Action     = CircuitTaggerAction.SetPendingMarks,
+                            ElementIds = new List<ElementId> { captured.ElementId },
+                            MarkOn     = false,
+                        };
+                        _extEvent.Raise();
                         _selected.Remove(captured);
                         RefreshSelectionList();
                     };

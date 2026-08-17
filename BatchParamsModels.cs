@@ -72,7 +72,16 @@ namespace METools.BatchParams
         public string ValueFilter   { get; set; } = "";
     }
 
-    public enum BatchParamsAction { None, ApplyRenumber, ApplyBulkEdit }
+    public enum BatchParamsAction
+    {
+        None, ApplyRenumber, ApplyBulkEdit,
+        // Runs the manual-order incremental PickObject loop inside
+        // Execute() -- see BatchParamsHandler.ExecutePickElementsInteractive.
+        PickElementsInteractive,
+        // One-shot apply/clear of the magenta "already picked" graphic
+        // override for ElementIds below, using MarkOn.
+        SetPendingMarks,
+    }
 
     public class BatchParamsRequest
     {
@@ -85,12 +94,26 @@ namespace METools.BatchParams
         public RenumberConfig Renumber { get; set; } = new RenumberConfig();
         public BulkEditConfig BulkEdit { get; set; } = new BulkEditConfig();
 
+        // Path mode only: elements from the matched set that OrderByPath
+        // couldn't place (no location point/bounding box, or projection
+        // failed) -- reported to the handler so they show up in the review
+        // panel as an explicit, reasoned skip instead of just silently not
+        // being in OrderedElementIds with no visible explanation.
+        public List<Autodesk.Revit.DB.ElementId> PathExcludedElementIds { get; set; } = new List<Autodesk.Revit.DB.ElementId>();
+
         // When true, the handler runs the exact same logic (including
         // attempting every write, so read-only/missing-parameter detection
         // is accurate) inside a transaction that gets rolled back instead of
         // committed -- a preview of exactly what Apply would do, using the
         // same code path so it can't drift from the real thing.
         public bool DryRun { get; set; } = false;
+
+        // Used by PickElementsInteractive (already-queued set to mark on
+        // entry) and SetPendingMarks (the set to mark/clear). Kept separate
+        // from OrderedElementIds above, which is specifically the renumber
+        // write order.
+        public List<Autodesk.Revit.DB.ElementId> ElementIds { get; set; } = new List<Autodesk.Revit.DB.ElementId>();
+        public bool MarkOn { get; set; } = true;
     }
 
     public enum ChangeStatus { Updated, Skipped, Error }

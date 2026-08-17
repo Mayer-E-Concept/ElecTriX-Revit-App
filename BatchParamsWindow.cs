@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Media;
 using Autodesk.Revit.DB;
 using Autodesk.Revit.UI;
@@ -46,7 +47,8 @@ namespace METools.BatchParams
         private RenumberOrderMode _orderMode = RenumberOrderMode.Manual;
         private Button _btnOrderManual, _btnOrderPath;
         private StackPanel _panManual, _panPath;
-        private readonly List<ElementId> _manualOrder = new List<ElementId>();
+        private readonly List<ManualPickInfo> _manualOrder = new List<ManualPickInfo>();
+        private StackPanel _manualListPanel;
         private TextBlock _lblManualCount;
         private ElementId _pathCurveId = ElementId.InvalidElementId;
         private TextBlock _lblPathStatus;
@@ -84,12 +86,21 @@ namespace METools.BatchParams
             WireHandler();
             Build();
             RunScope();
+            // Hide() during a pick session doesn't raise Closed, only an
+            // actual window close does -- so this only fires when the user
+            // is genuinely done with the tool, not mid-pick. Without this, a
+            // manual order picked but never applied or cleared would leave
+            // its marks in the view forever: the next window instance
+            // starts with a fresh, empty _manualOrder that knows nothing
+            // about them.
+            Closed += (s, e) => ClearManualMarks();
         }
 
         private void WireHandler()
         {
             _handler.OnStatus = msg => Dispatcher.Invoke(() => UpdateStatusBar(msg));
             _handler.OnDone   = result => Dispatcher.Invoke(() => HandleApplyResult(result));
+            _handler.OnPickSessionDone = (ids, err) => Dispatcher.Invoke(() => HandlePickSessionDone(ids, err));
         }
 
         // ── Build ─────────────────────────────────────────────────────────
@@ -227,8 +238,13 @@ namespace METools.BatchParams
 
             // A new scan invalidates any earlier manual pick order / path
             // pick, since the underlying matched set may have changed.
+            // BUG FIXED HERE: this used to clear _manualOrder without
+            // clearing the marks first -- the magenta overrides on those
+            // elements were left in the view forever, since nothing in the
+            // tool still referenced them afterward to ever turn them off.
+            ClearManualMarks();
             _manualOrder.Clear();
-            UpdateManualCountLabel();
+            RefreshManualOrderList();
             _pathCurveId = ElementId.InvalidElementId;
             if (_lblPathStatus != null) _lblPathStatus.Text = S._("batchparams.path_not_picked");
 
@@ -378,6 +394,20 @@ namespace METools.BatchParams
             var btnPickManual = ActionBtn(S._("batchparams.pick_elements"), true, OnPickManualClicked);
             Grid.SetColumn(btnPickManual, 1); manualRow.Children.Add(btnPickManual);
             _panManual.Children.Add(manualRow);
+
+            var manualListBox = new Border
+            {
+                BorderBrush = MeToolsTheme.BrBorder, BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(5), MaxHeight = 160, ClipToBounds = true,
+                Margin = new Thickness(0, 6, 0, 0),
+            };
+            var manualListScroll = new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
+            _manualListPanel = new StackPanel();
+            manualListScroll.Content = _manualListPanel;
+            manualListBox.Child = manualListScroll;
+            _panManual.Children.Add(manualListBox);
+
             var btnClearManual = FooterBtn(S._("batchparams.clear_order"), false, OnClearManualClicked);
             btnClearManual.Margin = new Thickness(0, 6, 0, 0);
             btnClearManual.HorizontalAlignment = HorizontalAlignment.Left;
@@ -418,107 +448,124 @@ namespace METools.BatchParams
             UpdateToggle(_btnOrderPath,   mode == RenumberOrderMode.Path);
             _panManual.Visibility = mode == RenumberOrderMode.Manual ? Visibility.Visible : Visibility.Collapsed;
             _panPath.Visibility   = mode == RenumberOrderMode.Path   ? Visibility.Visible : Visibility.Collapsed;
+            UpdateRenumberPreview();
         }
 
         private void UpdateRenumberPreview()
         {
             if (_lblPreview == null) return;
-            int start = int.TryParse(_tbStart?.Text, out var s) ? s : 1;
+            int start = int.TryParse(_tbStart?.Text,   out var s) ? s : 1;
+            int step  = int.TryParse(_tbStep?.Text,    out var st) ? st : 1;
             int pad   = int.TryParse(_tbPadding?.Text, out var p) ? p : 0;
-            string numStr = pad > 0 ? start.ToString().PadLeft(pad, '0') : start.ToString();
-            _lblPreview.Text = (_tbPrefix?.Text ?? "") + numStr + (_tbSuffix?.Text ?? "");
-        }
+            if (pad < 0) pad = 0;
+            string prefix = _tbPrefix?.Text ?? "";
+            string suffix = _tbSuffix?.Text ?? "";
 
-        // Same idea as CircuitTaggerWindow.SetPendingMark, kept as its own
-        // independent copy here rather than shared -- lower risk than
-        // refactoring that tool's existing, working mechanism into a
-        // shared base-class method just to reuse it here. Bold magenta,
-        // matching Circuit Tagger's own choice, for the same reason: it
-        // needs to read clearly against both this app's red collision
-        // markers and Revit's own selection blue.
-        private static readonly Autodesk.Revit.DB.Color PendingPickColor = new Autodesk.Revit.DB.Color(255, 60, 170);
+            string first = BatchParamsHandler.FormatRenumberValue(prefix, start, pad, suffix);
 
-        private void SetPendingMark(Document doc, View view, ElementId id, bool on)
-        {
-            if (doc == null || view == null || id == null || id == ElementId.InvalidElementId) return;
-            try
+            // Only Manual mode has a live, known count before Apply (Path
+            // mode's final count depends on the picked line, resolved later)
+            // -- show the full resulting range there so a step/count mistake
+            // is visible before spending a pick session, e.g. "F01 -> F10"
+            // rather than just the first value in isolation.
+            int count = _orderMode == RenumberOrderMode.Manual ? _manualOrder.Count : 0;
+            if (count > 1 && step != 0)
             {
-                using (var tx = new Transaction(doc, on ? "ME-Tools: Mark picked element" : "ME-Tools: Clear picked element mark"))
-                {
-                    tx.Start();
-                    try
-                    {
-                        var ogs = new OverrideGraphicSettings();
-                        if (on)
-                        {
-                            ogs.SetProjectionLineColor(PendingPickColor);
-                            ogs.SetProjectionLineWeight(6);
-                        }
-                        view.SetElementOverrides(id, ogs); // no color/weight set = reset to default when on == false
-                    }
-                    catch { }
-                    tx.Commit();
-                }
+                int lastN = start + step * (count - 1);
+                string last = BatchParamsHandler.FormatRenumberValue(prefix, lastN, pad, suffix);
+                _lblPreview.Text = $"{first} \u2192 {last}";
             }
-            catch { }
+            else
+            {
+                _lblPreview.Text = first;
+            }
         }
 
-        // Incremental single-object picking loop, exactly like Circuit
-        // Tagger's element selection (see CircuitTaggerWindow.OnSelectClicked)
-        // -- one PickObject at a time, committed to the order list
-        // immediately, rather than PickObjects' all-or-nothing behavior.
-        // Runs directly here (not via ExternalEvent) since PickObject is an
-        // interactive call that has to happen on the calling/main thread.
+        // One manually-picked element, in queue order -- gives the manual
+        // order an actual visible list (index, category, label) instead of
+        // just an opaque count, and lets each entry be removed or moved
+        // without clearing and re-picking the whole batch. Mirrors
+        // CircuitTaggerWindow.TaggedElementInfo.
+        private class ManualPickInfo
+        {
+            public ElementId ElementId    { get; set; }
+            public string    CategoryName { get; set; } = "";
+            public string    Label        { get; set; } = "";
+        }
+
+        // ROOT CAUSE FIX: the magenta "already picked" mark used to be a
+        // Transaction opened directly from this click handler, on a window
+        // shown via .Show() (no valid Revit API context) -- Revit silently
+        // refuses it there, and the try/catch swallowed the exception, so
+        // nothing ever visibly highlighted. The whole pick loop, including
+        // every mark, now runs inside BatchParamsHandler.ExecutePickElementsInteractive
+        // via the ExternalEvent, which has valid API context throughout.
         private void OnPickManualClicked()
         {
             Hide();
-            var uiDoc = _uiApp?.ActiveUIDocument;
-            if (uiDoc == null) { Show(); return; }
-            var doc = uiDoc.Document;
-            try
+            _handler.Request = new BatchParamsRequest
             {
-                while (true)
+                Action     = BatchParamsAction.PickElementsInteractive,
+                ElementIds = _manualOrder.Select(x => x.ElementId).ToList(),
+            };
+            _extEvent.Raise();
+        }
+
+        // Called once the handler's pick session finishes (Esc, or an
+        // error). Resolves category/label per newly-picked id, same as
+        // CircuitTaggerWindow.HandlePickSessionDone -- a read, not a
+        // document modification, so it's fine to do here rather than in
+        // the handler.
+        private void HandlePickSessionDone(List<ElementId> newlyPickedIds, string errorMessage)
+        {
+            if (!string.IsNullOrEmpty(errorMessage))
+                MessageBox.Show(errorMessage, S._("batchparams.title"));
+
+            var doc = _uiApp?.ActiveUIDocument?.Document;
+            if (doc != null && newlyPickedIds != null)
+            {
+                foreach (var id in newlyPickedIds)
                 {
-                    var r = uiDoc.Selection.PickObject(ObjectType.Element,
-                        "Click elements in the order you want them numbered. Press Esc when done.");
-                    if (r == null) break;
-                    // Marks the element the instant it's picked, so with a
-                    // long run (30+ items) it's immediately visible in the
-                    // model which ones are already in the list and which
-                    // aren't -- confirmed as a real, requested gap: this
-                    // loop previously gave no visual feedback at all beyond
-                    // the count label.
-                    if (!_manualOrder.Contains(r.ElementId))
+                    if (_manualOrder.Any(x => x.ElementId == id)) continue;
+                    var el = doc.GetElement(id);
+                    if (el == null) continue;
+                    _manualOrder.Add(new ManualPickInfo
                     {
-                        _manualOrder.Add(r.ElementId);
-                        SetPendingMark(doc, uiDoc.ActiveView, r.ElementId, true);
-                    }
+                        ElementId    = id,
+                        CategoryName = el.Category?.Name ?? "Element",
+                        Label        = (el as FamilyInstance)?.Symbol?.Family?.Name ?? el.Name ?? "",
+                    });
                 }
             }
-            catch (Autodesk.Revit.Exceptions.OperationCanceledException) { /* Esc -- normal way to finish */ }
-            catch { }
-            finally
-            {
-                Show();
-                UpdateManualCountLabel();
-            }
+
+            Show();
+            RefreshManualOrderList();
         }
 
         private void OnClearManualClicked()
         {
-            // Clears the marks too, not just the list -- otherwise the
-            // highlight from a previous manual pick would linger in the
-            // view even after "Clear" says there's nothing selected.
-            var uiDoc = _uiApp?.ActiveUIDocument;
-            if (uiDoc != null)
-            {
-                foreach (var id in _manualOrder)
-                    SetPendingMark(uiDoc.Document, uiDoc.ActiveView, id, false);
-            }
+            ClearManualMarks();
             _manualOrder.Clear();
-            UpdateManualCountLabel();
+            RefreshManualOrderList();
         }
 
+        // Clears the magenta override for whatever's currently in
+        // _manualOrder, without touching the list itself -- shared by every
+        // place that empties the order (Clear button, a new Scan, a
+        // successful Apply, and the window closing) so none of them can
+        // leave a stray mark behind with nothing left in the tool that
+        // still knows about it.
+        private void ClearManualMarks()
+        {
+            if (_manualOrder.Count == 0) return;
+            _handler.Request = new BatchParamsRequest
+            {
+                Action     = BatchParamsAction.SetPendingMarks,
+                ElementIds = _manualOrder.Select(x => x.ElementId).ToList(),
+                MarkOn     = false,
+            };
+            _extEvent.Raise();
+        }
 
         private void UpdateManualCountLabel()
         {
@@ -526,6 +573,117 @@ namespace METools.BatchParams
             _lblManualCount.Text = _manualOrder.Count == 0
                 ? S._("batchparams.manual_none_picked")
                 : string.Format(S._("batchparams.manual_n_picked"), _manualOrder.Count);
+        }
+
+        // Rebuilds the visible, reorderable manual-order list -- the whole
+        // point of a REORDERING tool is being able to see the order you've
+        // built, not just a count. Each row shows its position, category,
+        // and label, with move up/down and a remove button, matching
+        // CircuitTaggerWindow's row style.
+        private void RefreshManualOrderList()
+        {
+            UpdateManualCountLabel();
+            if (_manualListPanel == null) return;
+            _manualListPanel.Children.Clear();
+
+            for (int i = 0; i < _manualOrder.Count; i++)
+            {
+                var info = _manualOrder[i];
+                int index = i; // captured per-row
+
+                var row = new Grid { MinHeight = 26 };
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(22) });
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(20) });
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(20) });
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(20) });
+
+                var idxTb = new TextBlock
+                {
+                    Text = (index + 1).ToString(), FontSize = 10, FontWeight = FontWeights.SemiBold,
+                    Foreground = MeToolsTheme.BrMuted, VerticalAlignment = VerticalAlignment.Center,
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                };
+                var catBadge = new Border
+                {
+                    CornerRadius = new CornerRadius(3), Padding = new Thickness(5, 1, 5, 1),
+                    Margin = new Thickness(4, 0, 6, 0), VerticalAlignment = VerticalAlignment.Center,
+                    Background = MeToolsTheme.BrActiveBg, BorderBrush = MeToolsTheme.BrAccent, BorderThickness = new Thickness(1),
+                    Child = new TextBlock { Text = info.CategoryName, FontSize = 9,
+                        Foreground = MeToolsTheme.BrAccent, FontWeight = FontWeights.SemiBold },
+                };
+                var labelTb = new TextBlock
+                {
+                    Text = info.Label, FontSize = 11, Foreground = MeToolsTheme.BrText,
+                    VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis,
+                    Margin = new Thickness(0, 0, 4, 0),
+                };
+
+                var upBtn = MiniRowBtn("\u25B2", index > 0, () => MoveManualItem(index, -1));
+                var downBtn = MiniRowBtn("\u25BC", index < _manualOrder.Count - 1, () => MoveManualItem(index, 1));
+                var removeBtn = MiniRowBtn("\u00D7", true, () => RemoveManualItem(info));
+
+                Grid.SetColumn(idxTb,     0); row.Children.Add(idxTb);
+                Grid.SetColumn(catBadge,  1); row.Children.Add(catBadge);
+                Grid.SetColumn(labelTb,   2); row.Children.Add(labelTb);
+                Grid.SetColumn(upBtn,     3); row.Children.Add(upBtn);
+                Grid.SetColumn(downBtn,   4); row.Children.Add(downBtn);
+                Grid.SetColumn(removeBtn, 5); row.Children.Add(removeBtn);
+
+                var rowBorder = new Border
+                {
+                    BorderBrush = MeToolsTheme.BrBorder, BorderThickness = new Thickness(0, 0, 0, 1),
+                    Background = MeToolsTheme.BrRow, Child = row,
+                };
+                rowBorder.MouseEnter += (s, e) => rowBorder.Background = MeToolsTheme.BrActiveBg;
+                rowBorder.MouseLeave += (s, e) => rowBorder.Background = MeToolsTheme.BrRow;
+                _manualListPanel.Children.Add(rowBorder);
+            }
+
+            UpdateRenumberPreview();
+        }
+
+        // Small square icon-only button for the row up/down/remove
+        // controls -- distinct from SmallBtn/ActionBtn/FooterBtn (those are
+        // all sized for text labels), matching the compact removeBtn style
+        // CircuitTaggerWindow uses for its own per-row remove button.
+        private Button MiniRowBtn(string glyph, bool enabled, Action onClick)
+        {
+            var btn = new Button
+            {
+                Content = glyph, Width = 18, Height = 18, FontSize = 9,
+                Background = Brushes.Transparent, BorderBrush = Brushes.Transparent,
+                Foreground = enabled ? MeToolsTheme.BrMuted : MeToolsTheme.BrBorder,
+                Cursor = enabled ? Cursors.Hand : Cursors.Arrow,
+                IsEnabled = enabled, VerticalAlignment = VerticalAlignment.Center,
+                Padding = new Thickness(0), Margin = new Thickness(1, 0, 1, 0),
+            };
+            if (enabled) btn.Click += (s, e) => onClick();
+            return btn;
+        }
+
+        private void MoveManualItem(int index, int direction)
+        {
+            int target = index + direction;
+            if (target < 0 || target >= _manualOrder.Count) return;
+            var item = _manualOrder[index];
+            _manualOrder.RemoveAt(index);
+            _manualOrder.Insert(target, item);
+            RefreshManualOrderList();
+        }
+
+        private void RemoveManualItem(ManualPickInfo info)
+        {
+            _handler.Request = new BatchParamsRequest
+            {
+                Action     = BatchParamsAction.SetPendingMarks,
+                ElementIds = new List<ElementId> { info.ElementId },
+                MarkOn     = false,
+            };
+            _extEvent.Raise();
+            _manualOrder.Remove(info);
+            RefreshManualOrderList();
         }
 
         // Restricts the pick to detail lines only.
@@ -573,6 +731,7 @@ namespace METools.BatchParams
             }
 
             List<ElementId> ordered;
+            List<ElementId> pathExcluded = new List<ElementId>();
             if (_orderMode == RenumberOrderMode.Manual)
             {
                 if (_manualOrder.Count == 0)
@@ -580,7 +739,7 @@ namespace METools.BatchParams
                     MessageBox.Show(S._("batchparams.manual_none_picked_warn"), S._("batchparams.title"), MessageBoxButton.OK, MessageBoxImage.Information);
                     return;
                 }
-                ordered = new List<ElementId>(_manualOrder);
+                ordered = _manualOrder.Select(x => x.ElementId).ToList();
             }
             else
             {
@@ -598,7 +757,12 @@ namespace METools.BatchParams
                     return;
                 }
                 var matchedIds = _matchedElements.Select(e => e.Id).ToList();
-                ordered = BatchParamsHandler.OrderByPath(doc, matchedIds, curve);
+                // BUG FIXED HERE: elements that couldn't be positioned along
+                // the line used to just silently vanish from the result --
+                // if 47 of 50 matched, there was no visible reason why.
+                // pathExcluded now gets reported to the handler so they show
+                // up in the review panel as an explicit, reasoned skip.
+                ordered = BatchParamsHandler.OrderByPath(doc, matchedIds, curve, out pathExcluded);
             }
 
             if (ordered.Count == 0)
@@ -610,11 +774,24 @@ namespace METools.BatchParams
             int start = int.TryParse(_tbStart?.Text,   out var s0) ? s0 : 1;
             int step  = int.TryParse(_tbStep?.Text,    out var s1) ? s1 : 1;
             int pad   = int.TryParse(_tbPadding?.Text, out var s2) ? s2 : 0;
+            if (pad < 0) pad = 0;
+
+            // BUG FIXED HERE: Step == 0 used to sail straight through and
+            // silently write the exact same value to every single element
+            // in the batch -- a serious, easy-to-typo "oops" that looked
+            // like a normal successful run. Now caught before it ever
+            // reaches the handler.
+            if (step == 0)
+            {
+                MessageBox.Show(S._("batchparams.step_zero_warn"), S._("batchparams.title"), MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
 
             _pendingRenumberRequest = new BatchParamsRequest
             {
-                Action            = BatchParamsAction.ApplyRenumber,
-                OrderedElementIds = ordered,
+                Action                 = BatchParamsAction.ApplyRenumber,
+                OrderedElementIds      = ordered,
+                PathExcludedElementIds = pathExcluded,
                 Renumber = new RenumberConfig
                 {
                     ParameterName = chosen.Name,
@@ -933,12 +1110,16 @@ namespace METools.BatchParams
             // Only once the renumber genuinely commits, not during the
             // dry-run preview -- the highlight is still useful while
             // reviewing the preview before confirming.
-            if (result.WhichAction == BatchParamsAction.ApplyRenumber && !result.WasDryRun && _orderMode == RenumberOrderMode.Manual)
+            // BUG FIXED HERE: this used to clear the marks but leave
+            // _manualOrder itself populated -- the count label kept
+            // showing stale entries, and a follow-up Apply would silently
+            // re-include the same already-renumbered elements. Now clears
+            // both together.
+            if (result.WhichAction == BatchParamsAction.ApplyRenumber && !result.WasDryRun && _orderMode == RenumberOrderMode.Manual && _manualOrder.Count > 0)
             {
-                var uiDoc = _uiApp?.ActiveUIDocument;
-                if (uiDoc != null)
-                    foreach (var id in _manualOrder)
-                        SetPendingMark(uiDoc.Document, uiDoc.ActiveView, id, false);
+                ClearManualMarks();
+                _manualOrder.Clear();
+                RefreshManualOrderList();
             }
 
             if (result.WhichAction == BatchParamsAction.ApplyRenumber)
