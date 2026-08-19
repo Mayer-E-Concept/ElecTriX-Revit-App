@@ -41,10 +41,13 @@ namespace METools.CollisionChecker
         private Button _btnScopeModel, _btnScopeView, _btnScopeSel;
         private CheckBox _cbIncludeImported;
         private ComboBox _cbImportChoice;
+        private TextBlock _lblArchSuggestion;
         private CheckBox _cbIncludePlumbing;
         private ComboBox _cbPlumbingChoice;
+        private TextBlock _lblPlumbingSuggestion;
         private CheckBox _cbIncludeStructural;
         private ComboBox _cbStructuralChoice;
+        private TextBlock _lblStructuralSuggestion;
         private TextBlock _lblSummary;
         private TextBlock _lblLastScanned;
 
@@ -70,6 +73,12 @@ namespace METools.CollisionChecker
 
         private Button _btnPlaceHoles;
         private Button _btnMarkSolved;
+        // Scan vs Manual mode -- see BuildResultsSectionInto/SetCheckerMode.
+        private Button _btnModeScan, _btnModeManual;
+        private DockPanel _scanResultsPanel;
+        private StackPanel _manualPanel;
+        private TextBlock _lblManualStatus;
+        private Button _btnManualStart;
 
         public CollisionCheckerWindow(UIApplication uiApp, ExternalEvent extEvent, CollisionCheckerHandler handler)
         {
@@ -106,10 +115,22 @@ namespace METools.CollisionChecker
 
         private void WireHandler()
         {
-            _handler.OnStatus = msg => Dispatcher.Invoke(() => UpdateStatusBar(msg));
+            _handler.OnStatus  = msg => Dispatcher.Invoke(() => UpdateStatusBar(msg));
+            _handler.OnWaiting = w   => Dispatcher.Invoke(() => { if (w) Hide(); else Show(); });
             _handler.OnDone   = result => Dispatcher.Invoke(() =>
             {
-                if (result?.ResultAction == CollisionCheckerAction.MarkCollisions)
+                if (result?.ResultAction == CollisionCheckerAction.ManualPickAndPlace)
+                {
+                    if (_lblManualStatus != null)
+                    {
+                        var summary = string.Format(S._("collisioncheck.placed_summary"), result.Placed);
+                        if (result.Skipped > 0) summary += string.Format(S._("collisioncheck.n_skipped"), result.Skipped);
+                        if (result.Errors  > 0) summary += string.Format(S._("collisioncheck.n_errors"), result.Errors);
+                        _lblManualStatus.Text = summary;
+                    }
+                    HandlePlaceResult(result); // harmless no-op bookkeeping for rows that were never in _collisions to begin with
+                }
+                else if (result?.ResultAction == CollisionCheckerAction.MarkCollisions)
                     HandleMarkResult(result);
                 else if (result?.ResultAction == CollisionCheckerAction.MarkClashSolved)
                     HandleSolvedResult(result);
@@ -146,6 +167,7 @@ namespace METools.CollisionChecker
             topStack.Children.Add(InfoBox(S._("collisioncheck.intro_hint")));
             topStack.Children.Add(BuildScopeSection());
             topStack.Children.Add(Div());
+            topStack.Children.Add(BuildCheckerModeSection());
             topStack.Children.Add(BuildHoleFamilySection());
             topScroll.Content = topStack;
             Grid.SetRow(topScroll, 0);
@@ -270,8 +292,15 @@ namespace METools.CollisionChecker
                 _settingsData.ImportArchitectureName   = chosen?.Name ?? "";
                 _settingsData.ImportArchitectureIsLink = chosen?.IsLink ?? false;
                 CollisionCheckerSettings.Save(_settingsData);
+                if (_lblArchSuggestion != null) _lblArchSuggestion.Visibility = Visibility.Collapsed;
             };
             sp.Children.Add(_cbImportChoice);
+            _lblArchSuggestion = new TextBlock
+            {
+                Text = S._("collisioncheck.suggested_hint"), FontSize = 10.5, FontStyle = FontStyles.Italic,
+                Foreground = MeToolsTheme.BrAccent, Margin = new Thickness(1, 0, 0, 6), Visibility = Visibility.Collapsed,
+            };
+            sp.Children.Add(_lblArchSuggestion);
             RefreshImportChoices();
 
             _cbIncludePlumbing = new CheckBox
@@ -300,8 +329,15 @@ namespace METools.CollisionChecker
                 _settingsData = _settingsData ?? new CollisionCheckerSettingsData();
                 _settingsData.PlumbingLinkName = chosen?.Name ?? "";
                 CollisionCheckerSettings.Save(_settingsData);
+                if (_lblPlumbingSuggestion != null) _lblPlumbingSuggestion.Visibility = Visibility.Collapsed;
             };
             sp.Children.Add(_cbPlumbingChoice);
+            _lblPlumbingSuggestion = new TextBlock
+            {
+                Text = S._("collisioncheck.suggested_hint"), FontSize = 10.5, FontStyle = FontStyles.Italic,
+                Foreground = MeToolsTheme.BrAccent, Margin = new Thickness(1, 0, 0, 6), Visibility = Visibility.Collapsed,
+            };
+            sp.Children.Add(_lblPlumbingSuggestion);
             RefreshPlumbingChoices();
 
             _cbIncludeStructural = new CheckBox
@@ -329,8 +365,15 @@ namespace METools.CollisionChecker
                 _settingsData = _settingsData ?? new CollisionCheckerSettingsData();
                 _settingsData.StructuralLinkName = chosen?.Name ?? "";
                 CollisionCheckerSettings.Save(_settingsData);
+                if (_lblStructuralSuggestion != null) _lblStructuralSuggestion.Visibility = Visibility.Collapsed;
             };
             sp.Children.Add(_cbStructuralChoice);
+            _lblStructuralSuggestion = new TextBlock
+            {
+                Text = S._("collisioncheck.suggested_hint"), FontSize = 10.5, FontStyle = FontStyles.Italic,
+                Foreground = MeToolsTheme.BrAccent, Margin = new Thickness(1, 0, 0, 6), Visibility = Visibility.Collapsed,
+            };
+            sp.Children.Add(_lblStructuralSuggestion);
             RefreshStructuralChoices();
 
             var scanRow = new Grid { Margin = new Thickness(0, 4, 0, 0) };
@@ -377,6 +420,21 @@ namespace METools.CollisionChecker
         // so this always re-resolves ImportArchitectureName against
         // whatever's actually in front of the person right now rather than
         // trusting a stale id from a previous session).
+        // Same idea as PlumbingLinkNameHints/StructuralLinkNameHints below --
+        // a one-time, non-binding guess when nothing's been saved yet.
+        // Deliberately narrower and lower-confidence than the other two:
+        // an earlier pass across two real, unrelated projects found neither
+        // used ".ifc" naming or any single reliable convention for
+        // architecture specifically (one used "ARC_", the other "ARH_",
+        // and either could just as easily be someone's furniture or
+        // structural export instead) -- which is exactly why this always
+        // renders with the visible "(suggested)" label rather than quietly
+        // becoming the selection the way a completely confident default
+        // would. Still worth attempting: matches this project's own naming
+        // convention, and a wrong guess costs nothing since it's never
+        // presented as more than a starting point to check.
+        private static readonly string[] ArchitectureLinkNameHints = { "arch", "architektur", "gebaeude", "gebäude", "hochbau" };
+
         private void RefreshImportChoices()
         {
             if (_cbImportChoice == null) return;
@@ -385,7 +443,7 @@ namespace METools.CollisionChecker
             if (doc != null)
             {
                 foreach (var inst in CollisionCheckerHandler.GetAllImportInstances(doc))
-                    options.Add(new ArchitectureSourceOption { InstanceId = inst.Id, Name = inst.Name ?? inst.Id.ToString(), IsLink = false });
+                    options.Add(new ArchitectureSourceOption { InstanceId = inst.Id, Name = inst.Category?.Name ?? inst.Id.ToString(), IsLink = false });
                 foreach (var link in CollisionCheckerHandler.GetAllLoadedRevitLinks(doc))
                 {
                     var linkDoc = link.GetLinkDocument();
@@ -399,10 +457,14 @@ namespace METools.CollisionChecker
             _cbImportChoice.ItemsSource = options;
             var savedName = _settingsData?.ImportArchitectureName ?? "";
             var savedIsLink = _settingsData?.ImportArchitectureIsLink ?? false;
-            var match = !string.IsNullOrEmpty(savedName)
+            bool hadSavedName = !string.IsNullOrEmpty(savedName);
+            var match = hadSavedName
                 ? options.FirstOrDefault(o => o.IsLink == savedIsLink && string.Equals(o.Name, savedName, StringComparison.OrdinalIgnoreCase))
-                : null;
+                : options.FirstOrDefault(o => o.InstanceId != ElementId.InvalidElementId
+                    && ArchitectureLinkNameHints.Any(hint => o.Name.IndexOf(hint, StringComparison.OrdinalIgnoreCase) >= 0));
             _cbImportChoice.SelectedItem = match ?? options[0];
+            if (_lblArchSuggestion != null)
+                _lblArchSuggestion.Visibility = (!hadSavedName && match != null) ? Visibility.Visible : Visibility.Collapsed;
         }
 
         private void SetIncludePlumbing(bool on)
@@ -451,11 +513,14 @@ namespace METools.CollisionChecker
 
             _cbPlumbingChoice.ItemsSource = options;
             var savedName = _settingsData?.PlumbingLinkName ?? "";
-            PlumbingSourceOption match = !string.IsNullOrEmpty(savedName)
+            bool hadSavedName = !string.IsNullOrEmpty(savedName);
+            PlumbingSourceOption match = hadSavedName
                 ? options.FirstOrDefault(o => string.Equals(o.Name, savedName, StringComparison.OrdinalIgnoreCase))
                 : options.FirstOrDefault(o => o.InstanceId != ElementId.InvalidElementId
                     && PlumbingLinkNameHints.Any(hint => o.Name.IndexOf(hint, StringComparison.OrdinalIgnoreCase) >= 0));
             _cbPlumbingChoice.SelectedItem = match ?? options[0];
+            if (_lblPlumbingSuggestion != null)
+                _lblPlumbingSuggestion.Visibility = (!hadSavedName && match != null) ? Visibility.Visible : Visibility.Collapsed;
         }
 
         private void SetIncludeStructural(bool on)
@@ -497,11 +562,87 @@ namespace METools.CollisionChecker
 
             _cbStructuralChoice.ItemsSource = options;
             var savedName = _settingsData?.StructuralLinkName ?? "";
-            StructuralSourceOption match = !string.IsNullOrEmpty(savedName)
+            bool hadSavedName = !string.IsNullOrEmpty(savedName);
+            StructuralSourceOption match = hadSavedName
                 ? options.FirstOrDefault(o => string.Equals(o.Name, savedName, StringComparison.OrdinalIgnoreCase))
                 : options.FirstOrDefault(o => o.InstanceId != ElementId.InvalidElementId
                     && StructuralLinkNameHints.Any(hint => o.Name.IndexOf(hint, StringComparison.OrdinalIgnoreCase) >= 0));
             _cbStructuralChoice.SelectedItem = match ?? options[0];
+            if (_lblStructuralSuggestion != null)
+                _lblStructuralSuggestion.Visibility = (!hadSavedName && match != null) ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        // ── Scan vs Manual mode ──────────────────────────────────────────
+        // "Scan" for the existing find-everything-then-review-a-list
+        // workflow (unchanged); "Manual" for clicking one run and one wall
+        // at a time, e.g. for a single one-off crossing that isn't worth a
+        // whole-model scan for, or when the person already knows exactly
+        // where a hole is needed. Named after the two actual mechanisms,
+        // not "List"/"Manual", since "Scan" already matches the existing
+        // button of the same name right above this section.
+        private StackPanel BuildCheckerModeSection()
+        {
+            var sp = new StackPanel();
+            sp.Children.Add(SecH(S._("collisioncheck.mode")));
+            var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 10) };
+            _btnModeScan   = ToggleBtn(S._("collisioncheck.mode_scan"),   true,  () => SetCheckerMode(false));
+            _btnModeManual = ToggleBtn(S._("collisioncheck.mode_manual"), false, () => SetCheckerMode(true));
+            _btnModeScan.Margin = new Thickness(0, 0, 5, 0);
+            row.Children.Add(_btnModeScan);
+            row.Children.Add(_btnModeManual);
+            sp.Children.Add(row);
+            return sp;
+        }
+
+        private void SetCheckerMode(bool manual)
+        {
+            UpdateToggle(_btnModeScan,   !manual);
+            UpdateToggle(_btnModeManual, manual);
+            if (_scanResultsPanel != null) _scanResultsPanel.Visibility = manual ? Visibility.Collapsed : Visibility.Visible;
+            if (_manualPanel      != null) _manualPanel.Visibility      = manual ? Visibility.Visible   : Visibility.Collapsed;
+        }
+
+        // Deliberately minimal -- a short explanation, a status line, and
+        // one button. The Hole Family picker right above this (shared with
+        // Scan mode, not duplicated here) is still how this mode knows
+        // which family to place; this panel is only the pick-and-place
+        // trigger itself.
+        private StackPanel BuildManualModePanel()
+        {
+            var sp = new StackPanel { Margin = new Thickness(0, 4, 0, 0) };
+            var info = new TextBlock
+            {
+                Text = S._("collisioncheck.manual_hint"), FontSize = 11, TextWrapping = TextWrapping.Wrap,
+                Foreground = MeToolsTheme.BrMuted, Margin = new Thickness(0, 0, 0, 10),
+            };
+            sp.Children.Add(info);
+            _btnManualStart = ActionBtn(S._("collisioncheck.manual_start"), false, OnManualStartClicked);
+            _btnManualStart.HorizontalAlignment = HorizontalAlignment.Left;
+            sp.Children.Add(_btnManualStart);
+            _lblManualStatus = new TextBlock
+            {
+                Text = "", FontSize = 11, Foreground = MeToolsTheme.BrMuted,
+                TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 8, 0, 0),
+            };
+            sp.Children.Add(_lblManualStatus);
+            return sp;
+        }
+
+        private void OnManualStartClicked()
+        {
+            var chosenHole = _cbHoleSymbol?.SelectedItem as HoleSymbolOption;
+            if (chosenHole == null)
+            {
+                MessageBox.Show(S._("collisioncheck.pick_family_first"), S._("collisioncheck.title"), MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+            _handler.Request = new CollisionCheckerRequest
+            {
+                Action       = CollisionCheckerAction.ManualPickAndPlace,
+                HoleSymbolId = chosenHole.SymbolId,
+            };
+            if (_lblManualStatus != null) _lblManualStatus.Text = "";
+            _extEvent.Raise();
         }
 
         // ── Hole family picker ───────────────────────────────────────────
@@ -600,6 +741,18 @@ namespace METools.CollisionChecker
         // ── Results ───────────────────────────────────────────────────────
         private void BuildResultsSectionInto(DockPanel dock)
         {
+            var modeGrid = new Grid();
+            dock.Children.Add(modeGrid); // single child of dock -- gets the whole LastChildFill space regardless of which of the two panels below is actually visible
+
+            // Everything that already existed here, now nested one level
+            // inside its own DockPanel instead of directly inside the
+            // caller's -- lets Scan-mode content be shown/hidden as a
+            // single unit (see SetCheckerMode) without changing anything
+            // about its own internal Dock.Top/Dock.Bottom/fill layout.
+            _scanResultsPanel = new DockPanel { LastChildFill = true };
+            modeGrid.Children.Add(_scanResultsPanel);
+            var dock2 = _scanResultsPanel; // local alias so the body below is otherwise unchanged
+
             var header = new StackPanel();
             header.Children.Add(SecH(S._("collisioncheck.results")));
 
@@ -635,7 +788,7 @@ namespace METools.CollisionChecker
 
             header.Children.Add(selRow);
             DockPanel.SetDock(header, Dock.Top);
-            dock.Children.Add(header);
+            dock2.Children.Add(header);
 
             var bottomBtnRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 8, 0, 0) };
             _btnPlaceHoles = ActionBtn(S._("collisioncheck.place_holes"), false, OnPlaceHolesClicked);
@@ -654,7 +807,7 @@ namespace METools.CollisionChecker
             bottomBtnRow.Children.Add(_btnMarkSolved);
             bottomBtnRow.HorizontalAlignment = HorizontalAlignment.Left;
             DockPanel.SetDock(bottomBtnRow, Dock.Bottom);
-            dock.Children.Add(bottomBtnRow);
+            dock2.Children.Add(bottomBtnRow);
 
             // Last child in the DockPanel -- with LastChildFill=true, this
             // one gets whatever space is left after the header above and
@@ -669,9 +822,15 @@ namespace METools.CollisionChecker
                 HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
             _resultList = new StackPanel { Margin = new Thickness(6) };
             scroll.Content = _resultList; box.Child = scroll;
-            dock.Children.Add(box);
+            dock2.Children.Add(box);
 
             RenderResultList();
+
+            // Manual mode -- same Grid cell as _scanResultsPanel above, only
+            // one of the two ever visible at a time (see SetCheckerMode).
+            _manualPanel = BuildManualModePanel();
+            _manualPanel.Visibility = Visibility.Collapsed; // Scan is the default mode
+            modeGrid.Children.Add(_manualPanel);
         }
 
         private void OnScanClicked()

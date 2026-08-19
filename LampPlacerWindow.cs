@@ -46,6 +46,7 @@ namespace METools.LampPlacer
 
         Button     _btnFace, _btnWP;
         TextBlock  _placeDetectTb;
+        CheckBox   _cbOrientToLine;
         Button     _btnLineSpacing, _btnLineCount;
         Button     _btnLineAlong, _btnLinePerp;
         StackPanel _lineSpacingRow, _lineCountRow;
@@ -122,6 +123,19 @@ namespace METools.LampPlacer
                 Foreground = MeToolsTheme.BrMuted, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 14) };
             _body.Children.Add(_placeDetectTb);
             UpdatePlacementDetection();
+
+            // Only takes effect in Line distribution mode -- see the
+            // remarks on LampConfig.OrientToLine. Off by default, matching
+            // the existing, unchanged behavior for every mode.
+            _cbOrientToLine = new CheckBox
+            {
+                Content = S.Get("lamp.orient_to_line"), IsChecked = false,
+                Foreground = MeToolsTheme.BrText, Margin = new Thickness(0, 0, 0, 14),
+                ToolTip = S.Get("lamp.orient_to_line_hint"),
+            };
+            _cbOrientToLine.Checked   += (s, e) => _cfg.OrientToLine = true;
+            _cbOrientToLine.Unchecked += (s, e) => _cfg.OrientToLine = false;
+            _body.Children.Add(_cbOrientToLine);
 
             // DISTRIBUTION MODE
             _body.Children.Add(Sec(S.Get("lamp.distribution")));

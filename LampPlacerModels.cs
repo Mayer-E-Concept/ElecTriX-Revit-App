@@ -51,6 +51,21 @@ namespace METools.LampPlacer
         public double           OverlapThreshold { get; set; } = 300;   // mm, min gap to existing fixtures
         public double           UKDOffset    { get; set; } = 0.0;
 
+        // Off by default -- matches the existing, unchanged behavior
+        // (Line-mode rotation always comes from Rotation/CalcAngle, the
+        // same fixed plan-orientation angle every other distribution mode
+        // uses, regardless of the actual guide line's own direction --
+        // confirmed as a real, pre-existing gap: PlaceAlongLine already
+        // computes each point's real tangent along the guide line for
+        // POSITIONING, but never used it for ROTATION). Only affects Line
+        // distribution mode -- Area-based and Manual Grid are untouched by
+        // this flag either way, since there's no "line placed on" for them.
+        // When on, PlaceAlongLine uses that same already-computed tangent
+        // as each lamp's rotation instead of the fixed angle -- no separate
+        // pick step, no extra state to keep in sync: it's exactly the guide
+        // line already selected as part of running Line-mode placement.
+        public bool              OrientToLine { get; set; } = false;
+
         // Reference level — reliable fallback when no slab face is found at the UKD
         public ElementId        FallbackLevelId { get; set; } = ElementId.InvalidElementId;
     }

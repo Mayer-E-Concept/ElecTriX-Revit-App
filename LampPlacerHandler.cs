@@ -1288,12 +1288,17 @@ namespace METools.LampPlacer
                 }
                 else { continue; }
 
-                // Rotation: use CalcAngle (respects the selected rotation mode / Project North)
-                // as the lamp's orientation. For "Perpendicular to line" we add 90deg to the
-                // base angle so the lamp faces across the guide line instead of along it.
-                // We do NOT use the raw tangent as the rotation — that would rotate every lamp
-                // to face the guide line direction, ignoring the chosen orientation.
-                double baseAngle = CalcAngle(cfg.Rotation, 1, 1);
+                // Rotation: normally CalcAngle (the fixed plan-orientation
+                // angle every other distribution mode also uses) is the
+                // lamp's base rotation, same as always. When OrientToLine is
+                // on, the base rotation is instead this point's own real
+                // tangent along the guide line -- already computed above for
+                // POSITIONING (see PointAtArcLength) but, before this,
+                // never actually used for rotation. "Perpendicular to line"
+                // still adds 90deg on top of whichever base angle applies,
+                // so the two settings compose the way their names suggest
+                // regardless of which one supplies the base.
+                double baseAngle = cfg.OrientToLine ? tangent : CalcAngle(cfg.Rotation, 1, 1);
                 double rotAngle  = cfg.LineRotation == LineRotation.Perpendicular
                     ? baseAngle + Math.PI / 2.0 : baseAngle;
                 plan.Add(new Planned { Pt = new XYZ(pt2d.X, pt2d.Y, ukdZ), Angle = rotAngle, Lvl = level, Rm = room, Ukd = ukdZ });

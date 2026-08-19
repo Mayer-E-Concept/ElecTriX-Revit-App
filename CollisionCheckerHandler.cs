@@ -36,6 +36,8 @@ using Autodesk.Revit.DB.Electrical;
 using Autodesk.Revit.DB.ExtensibleStorage;
 using Autodesk.Revit.DB.Structure;
 using Autodesk.Revit.UI;
+using Autodesk.Revit.UI.Selection;
+using OperationCanceledException = Autodesk.Revit.Exceptions.OperationCanceledException;
 
 namespace METools.CollisionChecker
 {
@@ -44,13 +46,19 @@ namespace METools.CollisionChecker
         public CollisionCheckerRequest Request { get; set; } = new CollisionCheckerRequest();
         public Action<string>            OnStatus { get; set; }
         public Action<PlaceHolesResult>  OnDone   { get; set; }
+        // true right before the manual pick loop starts (so the Window can
+        // Hide() itself and not block clicks in the Revit view), false once
+        // it's fully done (Esc at the run-pick step) -- no other action in
+        // this Handler involves live picking, so nothing else raises this.
+        public Action<bool>              OnWaiting { get; set; }
 
         public string GetName() => "ME-Tools Collision Checker";
 
         public void Execute(UIApplication app)
         {
-            var req = Request;
-            var doc = app.ActiveUIDocument?.Document;
+            var req   = Request;
+            var uiDoc = app.ActiveUIDocument;
+            var doc   = uiDoc?.Document;
             if (doc == null || req == null || req.Action == CollisionCheckerAction.None) return;
 
             if (req.Action == CollisionCheckerAction.PlaceHoles)
@@ -63,6 +71,8 @@ namespace METools.CollisionChecker
                 ExecuteMarkClashSolved(doc, req);
             else if (req.Action == CollisionCheckerAction.Frame3D)
                 ExecuteFrame3D(doc, req);
+            else if (req.Action == CollisionCheckerAction.ManualPickAndPlace)
+                ExecuteManualPickAndPlace(uiDoc, doc, req);
         }
 
         // ═════════════════════════════════════════════════════════════════
@@ -154,9 +164,35 @@ namespace METools.CollisionChecker
         {
             try
             {
+                // ROOT CAUSE of a real, reported problem: ImportInstance.Name
+                // does NOT return the CAD file's name -- it's a well-known
+                // Revit API gotcha (confirmed against multiple independent
+                // reports of the exact same symptom) that Name instead
+                // reflects the document's shared-coordinate location status,
+                // defaulting to "<file-ish text> <Not Shared>" for the
+                // overwhelming majority of CAD imports, since Shared
+                // Coordinates is a rarely-used feature for a simple
+                // background import. Category.Name is the correct property
+                // -- Revit auto-creates a dedicated category per imported
+                // file specifically so it can be overridden/filtered, and
+                // that category is reliably named after the file.
+                //
+                // Also: ViewSpecific imports (a CAD file dropped onto one
+                // specific 2D drafting view/sheet) are excluded -- they have
+                // no real 3D geometry to check a wall-crossing against, so
+                // they're not just unhelpfully named, they're not usable
+                // here at all regardless of name. And the same underlying
+                // file dropped onto several different views each creates
+                // its own separate ImportInstance sharing the same
+                // Category -- degrouped here to one entry per distinct
+                // file instead of one per placement, which is what was
+                // actually producing "A LOT" of near-identical entries.
                 return new FilteredElementCollector(doc)
                     .OfClass(typeof(ImportInstance))
                     .Cast<ImportInstance>()
+                    .Where(i => !i.ViewSpecific)
+                    .GroupBy(i => i.Category?.Id?.Value ?? i.Id.Value)
+                    .Select(g => g.First())
                     .ToList();
             }
             catch { return new List<ImportInstance>(); }
@@ -1258,6 +1294,239 @@ namespace METools.CollisionChecker
                     .ToList();
             }
             catch { return new List<HoleSymbolOption>(); }
+        }
+
+        // ═════════════════════════════════════════════════════════════════
+        // WRITE: manual pick-and-place -- the person clicks a run, then the
+        // wall it should get a hole in, instead of a Scan finding every
+        // crossing in the model at once. Deliberately reuses every geometry
+        // helper the Scan-mode path already uses (FindCrossingPoint,
+        // FindCrossingPointOnFacePair, TryFindWallFacePair) and delegates
+        // the actual hole creation to ExecutePlaceHoles itself via a
+        // synthesized single-row request, rather than a second, separately-
+        // maintained copy of that placement logic.
+        // ═════════════════════════════════════════════════════════════════
+
+        private class ManualRunFilter : ISelectionFilter
+        {
+            public bool AllowElement(Element e) => e?.Category != null
+                && (e.Category.Id.Value == (long)BuiltInCategory.OST_Conduit
+                 || e.Category.Id.Value == (long)BuiltInCategory.OST_CableTray);
+            public bool AllowReference(Reference r, XYZ p) => false; // never inside a link -- a run always lives in the host doc
+        }
+
+        // ObjectType.PointOnElement, not Element -- confirmed this is the
+        // documented way to let one single pick accept EITHER a host-
+        // document element OR a reference into a linked model (Element
+        // alone only ever allows the host document; LinkedElement alone
+        // only ever allows links; there's no version that accepts both).
+        // AllowElement covers a genuine native Wall; AllowReference covers
+        // a wall living inside a linked architecture model, resolved by
+        // category the same way FindWallLikeElementsInLink already does
+        // (an IFC-linked wall is very often a DirectShape correctly
+        // categorized OST_Walls rather than a real Wall-class instance).
+        private class ManualWallFilter : ISelectionFilter
+        {
+            private readonly Document _doc;
+            public ManualWallFilter(Document doc) { _doc = doc; }
+            public bool AllowElement(Element e) => e is Wall;
+            public bool AllowReference(Reference r, XYZ p)
+            {
+                try
+                {
+                    var link = _doc.GetElement(r) as RevitLinkInstance;
+                    var linkedEl = link?.GetLinkDocument()?.GetElement(r.LinkedElementId);
+                    return linkedEl?.Category != null && linkedEl.Category.Id.Value == (long)BuiltInCategory.OST_Walls;
+                }
+                catch { return false; }
+            }
+        }
+
+        private void ExecuteManualPickAndPlace(UIDocument uiDoc, Document doc, CollisionCheckerRequest req)
+        {
+            var symbol = doc.GetElement(req.HoleSymbolId) as FamilySymbol;
+            if (symbol == null) { OnStatus?.Invoke("No hole family/type selected."); return; }
+
+            OnWaiting?.Invoke(true);
+
+            // Every individual hole placed below runs through the exact
+            // same ExecutePlaceHoles path a Scan-mode placement does (see
+            // the remarks above this section), which means it also calls
+            // OnDone once per hole -- fine for a single bulk call, but not
+            // for a loop where the window stays hidden across several
+            // picks: firing the Window's "show results" handling mid-loop
+            // would fight with the loop still running. Intercepted here and
+            // replaced with a plain accumulator; restored and invoked
+            // exactly once, with the whole session's totals, right before
+            // returning.
+            var aggregate = new PlaceHolesResult();
+            var originalOnDone = OnDone;
+            OnDone = r =>
+            {
+                if (r == null) return;
+                aggregate.Placed += r.Placed;
+                aggregate.Skipped += r.Skipped;
+                aggregate.Errors += r.Errors;
+                aggregate.DimensionWarnings += r.DimensionWarnings;
+                if (aggregate.FirstDimensionWarning == null) aggregate.FirstDimensionWarning = r.FirstDimensionWarning;
+                aggregate.ErrorMessages.AddRange(r.ErrorMessages ?? new List<string>());
+            };
+
+            try
+            {
+                while (true)
+                {
+                    Reference runRef;
+                    try
+                    {
+                        runRef = uiDoc.Selection.PickObject(ObjectType.Element, new ManualRunFilter(),
+                            "Click a cable tray or conduit (Esc when done)");
+                    }
+                    catch (OperationCanceledException) { break; }
+
+                    var run      = doc.GetElement(runRef.ElementId);
+                    var runCurve = (run?.Location as LocationCurve)?.Curve;
+                    if (run == null || runCurve == null)
+                    {
+                        OnStatus?.Invoke("That element has no usable centerline -- skipped.");
+                        continue;
+                    }
+
+                    Reference wallRef;
+                    try
+                    {
+                        wallRef = uiDoc.Selection.PickObject(ObjectType.PointOnElement, new ManualWallFilter(doc),
+                            "Now click the wall for this run");
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        OnStatus?.Invoke("Wall pick cancelled -- pick another run, or Esc to finish.");
+                        continue;
+                    }
+
+                    CollisionInfo info;
+                    try { info = BuildManualCollisionInfo(doc, run, runCurve, wallRef); }
+                    catch (Exception ex) { OnStatus?.Invoke("Error: " + ex.Message); continue; }
+
+                    if (info == null)
+                    {
+                        OnStatus?.Invoke("That run doesn't actually reach that wall -- nothing placed. Pick another pair, or Esc to finish.");
+                        continue;
+                    }
+
+                    ExecutePlaceHoles(doc, new CollisionCheckerRequest
+                    {
+                        Collisions   = new List<CollisionInfo> { info },
+                        HoleSymbolId = req.HoleSymbolId,
+                    });
+                }
+            }
+            finally
+            {
+                OnDone = originalOnDone;
+                aggregate.ResultAction = CollisionCheckerAction.ManualPickAndPlace;
+                OnWaiting?.Invoke(false);
+                var summary = $"Manual placement: {aggregate.Placed} hole(s) placed";
+                if (aggregate.Skipped > 0) summary += $", {aggregate.Skipped} skipped";
+                if (aggregate.Errors  > 0) summary += $", {aggregate.Errors} errors: " + aggregate.ErrorMessages.FirstOrDefault();
+                Report(summary);
+                OnDone?.Invoke(aggregate);
+            }
+        }
+
+        // Resolves the actual crossing point for one manually-picked
+        // run+wall pair, and packages it into the same CollisionInfo shape
+        // ScanForCollisions would have produced for an equivalent
+        // automatically-found crossing -- ExecutePlaceHoles can't tell the
+        // difference, which is the whole point (one hole-creation code
+        // path, not two). Returns null if the run genuinely doesn't reach
+        // the picked wall (e.g. it stops short, or was never going to cross
+        // it in the first place) -- not an error, just nothing to place.
+        private CollisionInfo BuildManualCollisionInfo(Document doc, Element run, Curve runCurve, Reference wallRef)
+        {
+            ElementId runLevelId = ElementId.InvalidElementId;
+            try { runLevelId = ResolveLevelId(doc, run); } catch { }
+            string elCategory = run.Category?.Name ?? "";
+            string elTypeName = TypeNameOf(doc, run);
+
+            var hostEl = doc.GetElement(wallRef);
+
+            if (hostEl is Wall wall)
+            {
+                var point = FindCrossingPoint(doc, wall, runCurve);
+                if (point == null) return null;
+                return new CollisionInfo
+                {
+                    Kind            = CollisionKind.WallCrossing,
+                    ElementId       = run.Id,
+                    WallId          = wall.Id,
+                    ElementCategory = elCategory,
+                    ElementTypeName = elTypeName,
+                    WallTypeName    = TypeNameOf(doc, wall),
+                    LevelId         = runLevelId,
+                    LevelName       = ResolveLevelName(doc, runLevelId),
+                    Point           = point,
+                    IsExternalGeometry = false,
+                };
+            }
+
+            if (hostEl is RevitLinkInstance link)
+            {
+                var linkDoc = link.GetLinkDocument();
+                var linkedEl = linkDoc?.GetElement(wallRef.LinkedElementId);
+                if (linkedEl == null) return null;
+
+                var transform = link.GetTotalTransform();
+                var options = new Options { ComputeReferences = false, IncludeNonVisibleObjects = false };
+                var geomElem = linkedEl.get_Geometry(options);
+                if (geomElem == null) return null;
+
+                foreach (var localSolid in FlattenToSolids(geomElem))
+                {
+                    Solid hostSolid;
+                    try { hostSolid = SolidUtils.CreateTransformed(localSolid, transform); }
+                    catch { continue; }
+
+                    if (!TryFindWallFacePair(hostSolid, out var faceA, out var faceB, out var thickness)) continue;
+
+                    var point = FindCrossingPointOnFacePair(faceA, faceB, runCurve);
+                    if (point == null) continue;
+
+                    // Same face-normal-rotated-90-degrees convention
+                    // ScanForCollisions already uses for imported/linked
+                    // walls (see its own remarks) -- there's no centerline
+                    // to take a direction from the way a real Wall has one,
+                    // only the face's own normal.
+                    var n = faceA.FaceNormal;
+                    var horiz = new XYZ(n.X, n.Y, 0);
+                    var wallDir = horiz.GetLength() > 1e-6
+                        ? new XYZ(-horiz.Y, horiz.X, 0).Normalize()
+                        : XYZ.BasisX;
+
+                    var typeName = (linkDoc.GetElement(link.GetTypeId()) as RevitLinkType)?.Name ?? link.Name ?? "";
+                    if (typeName.EndsWith(".rvt", StringComparison.OrdinalIgnoreCase))
+                        typeName = typeName.Substring(0, typeName.Length - 4);
+
+                    return new CollisionInfo
+                    {
+                        Kind            = CollisionKind.WallCrossing,
+                        ElementId       = run.Id,
+                        WallId          = link.Id,
+                        ElementCategory = elCategory,
+                        ElementTypeName = elTypeName,
+                        WallTypeName    = string.IsNullOrEmpty(typeName) ? "Linked architecture" : typeName,
+                        Point           = point,
+                        LevelId         = ResolveLevelIdByElevation(doc, point.Z),
+                        LevelName       = ResolveLevelName(doc, ResolveLevelIdByElevation(doc, point.Z)),
+                        IsExternalGeometry      = true,
+                        ImportedWallThicknessFt = thickness,
+                        ImportedWallDirection   = wallDir,
+                    };
+                }
+                return null; // the picked wall's geometry didn't yield a usable face pair
+            }
+
+            return null;
         }
 
         // ═════════════════════════════════════════════════════════════════

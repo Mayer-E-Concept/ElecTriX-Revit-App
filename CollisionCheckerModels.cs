@@ -101,7 +101,7 @@ namespace METools.CollisionChecker
         public Autodesk.Revit.DB.XYZ ImportedWallDirection { get; set; } = null;
     }
 
-    public enum CollisionCheckerAction { None, PlaceHoles, MoveHoles, MarkCollisions, MarkClashSolved, Frame3D }
+    public enum CollisionCheckerAction { None, PlaceHoles, MoveHoles, MarkCollisions, MarkClashSolved, Frame3D, ManualPickAndPlace }
 
     public class CollisionCheckerRequest
     {
