@@ -144,6 +144,44 @@ namespace METools.FamilyPlacer
                 // once here and searched in-memory per point instead.
                 var allWalls = new FilteredElementCollector(doc).OfClass(typeof(Wall)).Cast<Wall>().ToList();
 
+                // BUG FIXED HERE: every item placed by this tool had its
+                // Work Plane and Level locked, and Revit's own "Change Work
+                // Plane" command couldn't touch them either -- confirmed as
+                // a real, independently-documented Revit API behavior, not
+                // specific to this app: hosting a work-plane-based family
+                // directly to Level.GetPlaneReference() produces an
+                // instance whose Edit Work Plane is grayed out, because the
+                // host is tied to the Level element itself rather than to
+                // an independent, freely-reassignable plane. The confirmed
+                // fix is to host to a SketchPlane CREATED FROM the level
+                // (SketchPlane.Create(doc, level.Id)) instead of the
+                // level's own raw reference -- same elevation, same
+                // orientation, but no longer special-cased to the Level
+                // object, so Edit Work Plane works normally afterward. The
+                // one visible trade-off: the instance's host shows as
+                // "Reference Plane: <LevelName>" instead of "Level:
+                // <LevelName>" in the Properties palette -- a real
+                // difference, but a purely cosmetic one against getting a
+                // genuinely locked, uneditable instance.
+                // Cached by level here rather than created fresh per item --
+                // SketchPlane.Create makes a real, permanent element, and
+                // this method places many items per level, not one.
+                var levelSketchPlaneRefs = new Dictionary<long, Reference>();
+                Reference GetHostableLevelPlaneRef(Level lvl)
+                {
+                    if (lvl == null) return null;
+                    if (levelSketchPlaneRefs.TryGetValue(lvl.Id.Value, out var cached)) return cached;
+                    Reference result = null;
+                    try
+                    {
+                        var sp = Autodesk.Revit.DB.SketchPlane.Create(doc, lvl.Id);
+                        result = sp?.GetPlaneReference();
+                    }
+                    catch { }
+                    levelSketchPlaneRefs[lvl.Id.Value] = result; // cache the miss too -- don't retry a level that failed once
+                    return result;
+                }
+
                 foreach (var nativeInst in captured)
                 {
                     XYZ pt = GetPt(nativeInst);
@@ -179,11 +217,7 @@ namespace METools.FamilyPlacer
                     // properly wall-attached, just via the overload that
                     // takes Level directly rather than Revit's own
                     // face-hosting default) and finally to a bare level.
-                    Reference levelPlaneRef = null;
-                    if (level != null)
-                    {
-                        try { levelPlaneRef = level.GetPlaneReference(); } catch { }
-                    }
+                    Reference levelPlaneRef = GetHostableLevelPlaneRef(level);
 
                     // Direction along wall or default
                     XYZ placeDir = walkDir.IsZeroLength() ? XYZ.BasisX : walkDir;

@@ -1224,6 +1224,28 @@ namespace METools
             btnDelete.Click += (s, e) => OnDeleteImportsClicked();
             p.Children.Add(btnDelete);
 
+            // Confirmed live against a real project: a fully orphaned
+            // import category (zero elements referencing it anywhere,
+            // verified directly) can still survive Delete Selected --
+            // Document.Delete() on a top-level import category is a
+            // documented Revit limitation, not a bug here, mirroring the
+            // same restriction Revit's own Object Styles dialog has (it
+            // only lets you delete SUBCATEGORIES by hand, never the
+            // top-level heading). Revit's native Purge Unused sometimes
+            // succeeds where the API-only delete can't, since it runs
+            // Revit's own internal cleanup logic rather than the public
+            // Document.Delete() call -- not guaranteed (several real users
+            // report it not helping for this exact category type either),
+            // but worth a try before the much more invasive Find & Remove
+            // from Families below. PostCommand only ever QUEUES the native
+            // command -- it runs after this method returns control to
+            // Revit, and opens Revit's own Purge dialog for the person to
+            // review and confirm, same as running it from the Manage tab
+            // by hand.
+            var btnPurgeUnused = ActionBtn(S._("settings.imports.try_purge_unused"), true, OnTryPurgeUnusedClicked);
+            btnPurgeUnused.Margin = new Thickness(0, 8, 0, 0);
+            p.Children.Add(btnPurgeUnused);
+
             // Everything that survives Delete Selected AND Revit's own
             // native Purge Unused is almost certainly an "Import in
             // Families" case -- CAD content embedded inside a loaded
@@ -1247,6 +1269,48 @@ namespace METools
             p.Children.Add(btnForceRescan);
 
             return p;
+        }
+
+        // Queues Revit's own native Purge Unused command -- confirmed via
+        // Autodesk's own API docs and forum examples this is an instance
+        // method (UIApplication.PostCommand), not static, and that it only
+        // QUEUES the command to run once this method returns control to
+        // Revit -- it does not run inline, and does not need (or want) to
+        // run inside this app's own ExternalEvent, since it isn't a
+        // document modification itself, just a request for Revit's own
+        // native dialog to open. Revit allows only one posted command at a
+        // time and throws if another is already queued, hence the guard.
+        private void OnTryPurgeUnusedClicked()
+        {
+            var uiapp = SettingsCommand.CurrentApp;
+            if (uiapp == null)
+            {
+                MessageBox.Show(S._("settings.imports.no_document"), S._("settings.imports.title"),
+                    MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+            try
+            {
+                var id = Autodesk.Revit.UI.RevitCommandId.LookupPostableCommandId(Autodesk.Revit.UI.PostableCommand.PurgeUnused);
+                if (id == null)
+                {
+                    MessageBox.Show(S._("settings.imports.purge_unavailable"), S._("settings.imports.title"),
+                        MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
+                }
+                StatusLeft.Text = S._("settings.imports.purge_queued");
+                uiapp.PostCommand(id);
+            }
+            catch (Exception ex)
+            {
+                // Most likely cause per Autodesk's own docs: another
+                // command was already posted (only one at a time is
+                // allowed) -- worth saying plainly rather than a raw
+                // exception message that wouldn't mean anything to
+                // someone who didn't post that other command themselves.
+                MessageBox.Show(string.Format(S._("settings.imports.purge_post_failed"), ex.Message),
+                    S._("settings.imports.title"), MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
         }
 
         private void LoadImportedCategories()
@@ -1560,7 +1624,12 @@ namespace METools
                 foreach (var n in stillPresentNames.Distinct().Take(10))
                     sb.AppendLine("   • " + n);
             }
-            MessageBox.Show(sb.ToString(), S._("settings.imports.done_title"), MessageBoxButton.OK, MessageBoxImage.None);
+            // Warning (not None/Information) whenever anything survived --
+            // this exact "it said it worked but they're still there"
+            // misread is what prompted this whole fix; a neutral icon on a
+            // partially-failed outcome was too easy to skim past.
+            MessageBox.Show(sb.ToString(), S._("settings.imports.done_title"), MessageBoxButton.OK,
+                stillPresent > 0 ? MessageBoxImage.Warning : MessageBoxImage.Information);
 
             LoadImportedCategories();
         }
