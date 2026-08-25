@@ -662,10 +662,10 @@ namespace METools
                             <RepeatButton Command=""ScrollBar.PageDownCommand"" Opacity=""0"" Focusable=""False""/>
                         </Track.IncreaseRepeatButton>
                         <Track.Thumb>
-                            <Thumb MinHeight=""24"" MinWidth=""24"">
+                            <Thumb MinHeight=""30"" MinWidth=""30"">
                                 <Thumb.Template>
                                     <ControlTemplate TargetType=""Thumb"">
-                                        <Border x:Name=""ThumbBorder"" Background=""{thumb}"" CornerRadius=""4"" Margin=""4,2,2,2""/>
+                                        <Border x:Name=""ThumbBorder"" Background=""{thumb}"" CornerRadius=""4"" Margin=""4,2,2,2"" MinHeight=""24""/>
                                         <ControlTemplate.Triggers>
                                             <Trigger Property=""IsMouseOver"" Value=""True"">
                                                 <Setter TargetName=""ThumbBorder"" Property=""Background"" Value=""{thumbHover}""/>

@@ -446,7 +446,7 @@ namespace METools
             var handler = new ProjectHealthCheckHandler();
             var evt     = ExternalEvent.Create(handler);
 
-            _window = new ProjectHealthCheckWindow(result, evt, handler);
+            _window = new ProjectHealthCheckWindow(result, evt, handler, uiApp);
             _window.Closed += (s, e) => _window = null;
             _window.Show();
         }

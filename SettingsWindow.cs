@@ -243,10 +243,37 @@ namespace METools
                 Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location) ?? "",
                 "config", "standard_worksets.json");
 
+        // Index of "Imported Objects" within _homeTiles below -- exposed so
+        // an external caller (the Diagnostics hub) can jump straight to
+        // this panel without needing to know _homeTiles' internal layout,
+        // and without touching anything about how Settings' own home
+        // screen behaves when opened normally.
+        public static readonly int ImportsTabIndex = 5;
+
         public SettingsWindow()
         {
             S.SetLanguage(SettingsStore.Language ?? "en");
             InitWindow(S._("settings.title"), width: 500, isDialog: false);
+            BuildStatusBar(LicenseManager.StatusText, AppVersion);
+            BuildContent();
+        }
+
+        // Opens straight to a specific panel (e.g. ImportsTabIndex),
+        // bypassing the home grid entirely -- the existing parameterless
+        // constructor above is completely unchanged, so nothing about
+        // Settings' normal ribbon-button behavior is affected by this.
+        public SettingsWindow(int openToTab)
+        {
+            S.SetLanguage(SettingsStore.Language ?? "en");
+            _activeTab = openToTab;
+            // BUG FIXED HERE: the title bar always said "Settings" even
+            // when opened straight to Imported Objects, with the actual
+            // panel name only showing lower down in the back bar --
+            // confirmed as genuinely confusing from a live screenshot.
+            // _activeTab has to be set (above) before InitWindow runs, not
+            // after, since the title is fixed at construction time.
+            string title = openToTab == ImportsTabIndex ? S._("settings.tab.imports") : S._("settings.title");
+            InitWindow(title, width: 500, isDialog: false);
             BuildStatusBar(LicenseManager.StatusText, AppVersion);
             BuildContent();
         }
@@ -317,12 +344,27 @@ namespace METools
             for (int r = 0; r < 2; r++)
                 grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
+            // Imported Objects no longer shows here -- it lives exclusively
+            // under the Diagnostics ribbon button now (see DiagnosticsWindow
+            // and SettingsWindow.ImportsTabIndex/the openToTab constructor
+            // below). _homeTiles itself is deliberately left with all 6
+            // entries rather than having this one removed from the array --
+            // ShowPanel and TabTitle both key off these positions by a
+            // fixed index (idx == 5 for Imports specifically), and removing
+            // the entry would shift every tile after it into a different
+            // index than what ShowPanel/TabTitle still expect. Skipping it
+            // here, while keeping a separate counter for the tiles that DO
+            // render, gets the same visible result without touching that
+            // indexing at all.
+            int shown = 0;
             for (int i = 0; i < _homeTiles.Length; i++)
             {
+                if (i == ImportsTabIndex) continue;
                 var tile = BuildHomeTile(S._(_homeTiles[i].Key), _homeTiles[i].Glyph, i);
-                Grid.SetRow(tile, i / 3);
-                Grid.SetColumn(tile, i % 3);
+                Grid.SetRow(tile, shown / 3);
+                Grid.SetColumn(tile, shown % 3);
                 grid.Children.Add(tile);
+                shown++;
             }
             return grid;
         }
@@ -378,7 +420,24 @@ namespace METools
                 BorderBrush = MeToolsTheme.BrBtnBorder, BorderThickness = new Thickness(1),
             };
             backBtn.Template = RoundedBtnTemplate();
-            backBtn.Click += (s, e) => ShowHome();
+            // Imported Objects can now only ever be reached via the
+            // Diagnostics hub (its tile in this window's own home grid was
+            // just removed), so Back from that specific panel goes there
+            // instead of Settings' own home -- every other panel's Back
+            // behavior (ShowHome) is completely unchanged.
+            backBtn.Click += (s, e) =>
+            {
+                if (_activeTab == ImportsTabIndex)
+                {
+                    var uiapp = SettingsCommand.CurrentApp;
+                    Close();
+                    if (uiapp != null) DiagnosticsCommand.Open(uiapp);
+                }
+                else
+                {
+                    ShowHome();
+                }
+            };
             Grid.SetColumn(backBtn, 0);
 
             _backBarTitle = new TextBlock
@@ -428,7 +487,12 @@ namespace METools
             _activeTab = idx;
             _homeGrid.Visibility = Visibility.Collapsed;
             _backBar.Visibility  = Visibility.Visible;
-            _backBarTitle.Text   = TabTitle(idx);
+            // Imports is the one panel whose own top title bar already
+            // names it directly (see the openToTab constructor) -- showing
+            // the same name again here would just be redundant. Every
+            // other panel still needs this, since their top title bar
+            // stays generically "Settings".
+            _backBarTitle.Text = idx == ImportsTabIndex ? "" : TabTitle(idx);
 
             _panAppearance.Visibility = idx == 0 ? Visibility.Visible : Visibility.Collapsed;
             _panLanguage.Visibility   = idx == 1 ? Visibility.Visible : Visibility.Collapsed;
@@ -1160,6 +1224,22 @@ namespace METools
             public string   Name;
             public int      SubCategoryCount;
             public int      LiveInstanceCount;
+            public List<Autodesk.Revit.DB.ElementId> LiveInstanceIds = new List<Autodesk.Revit.DB.ElementId>();
+            // Confirmed live: a category can show zero direct ImportInstance
+            // elements (genuinely true) yet still be permanently undeletable,
+            // because Revit auto-names Text Note types after the source file
+            // during import ("{filename}-{font}-{n}"), and those types --
+            // structurally unrelated TextNoteType objects, not ImportInstance
+            // elements -- can go on to see real, widespread use as ordinary
+            // project text styles, entirely independent of the original CAD
+            // content. The category-level scan below has no way to see this
+            // on its own; it's tracked here separately from LiveInstanceCount
+            // because it's a fundamentally different kind of dependency
+            // (a still-active text formatting choice, not leftover import
+            // geometry) and deserves to be reported as such, not folded into
+            // "should be removable."
+            public int      DerivedTextUsageCount;
+            public List<string> DerivedTextTypeNames = new List<string>();
             public CheckBox Checkbox;
         }
 
@@ -1331,6 +1411,7 @@ namespace METools
 
             List<Autodesk.Revit.DB.Category> topLevel;
             var liveInstanceCounts = new Dictionary<long, int>();
+            var liveInstanceIds = new Dictionary<long, List<Autodesk.Revit.DB.ElementId>>();
             try
             {
                 topLevel = doc.Settings.Categories.Cast<Autodesk.Revit.DB.Category>()
@@ -1345,6 +1426,9 @@ namespace METools
                     var cid = ii.Category?.Id;
                     if (cid == null) continue;
                     liveInstanceCounts[cid.Value] = liveInstanceCounts.TryGetValue(cid.Value, out var n) ? n + 1 : 1;
+                    if (!liveInstanceIds.TryGetValue(cid.Value, out var idList))
+                        liveInstanceIds[cid.Value] = idList = new List<Autodesk.Revit.DB.ElementId>();
+                    idList.Add(ii.Id);
                 }
             }
             catch (Exception ex)
@@ -1354,6 +1438,33 @@ namespace METools
                 DeferredResize();
                 return;
             }
+
+            // Confirmed live: Revit auto-names Text Note types after the
+            // source file during CAD import ("{filename}-{font}-{n}"), and
+            // those types can go on to see real, independent use as
+            // ordinary project text styles -- a completely different
+            // object (TextNoteType, category Text Notes) from the import
+            // category itself, related only by a name that happens to
+            // start with the import's own name. Collected once here
+            // (all Text Note types, and instance counts per type) rather
+            // than re-querying per row below.
+            var textTypeNamesById = new Dictionary<long, string>();
+            var textInstanceCountByTypeId = new Dictionary<long, int>();
+            try
+            {
+                foreach (Autodesk.Revit.DB.TextNoteType tnt in new Autodesk.Revit.DB.FilteredElementCollector(doc)
+                    .OfClass(typeof(Autodesk.Revit.DB.TextNoteType)))
+                {
+                    textTypeNamesById[tnt.Id.Value] = tnt.Name;
+                }
+                foreach (Autodesk.Revit.DB.TextNote tn in new Autodesk.Revit.DB.FilteredElementCollector(doc)
+                    .OfClass(typeof(Autodesk.Revit.DB.TextNote)))
+                {
+                    var tid = tn.GetTypeId().Value;
+                    textInstanceCountByTypeId[tid] = textInstanceCountByTypeId.TryGetValue(tid, out var n) ? n + 1 : 1;
+                }
+            }
+            catch { } // best-effort -- absence of this info just means rows fall back to the plain orphaned/stubborn text
 
             if (topLevel.Count == 0)
             {
@@ -1372,6 +1483,25 @@ namespace METools
                 int subCount = 0;
                 try { subCount = cat.SubCategories?.Size ?? 0; } catch { }
                 liveInstanceCounts.TryGetValue(cat.Id.Value, out var liveCount);
+                liveInstanceIds.TryGetValue(cat.Id.Value, out var idsForCat);
+
+                // "{catName}-{font}-{n}" is the confirmed real naming
+                // pattern -- StartsWith (not exact match, not Contains)
+                // deliberately: exact match would miss every one of them
+                // (they all have a font/number suffix), while Contains
+                // could false-positive on an unrelated type that merely
+                // mentions this category's name somewhere in a longer
+                // string of its own.
+                int derivedUsage = 0;
+                var derivedNames = new List<string>();
+                foreach (var kv in textTypeNamesById)
+                {
+                    if (!kv.Value.StartsWith(cat.Name, StringComparison.OrdinalIgnoreCase)) continue;
+                    textInstanceCountByTypeId.TryGetValue(kv.Key, out var cnt);
+                    if (cnt <= 0) continue;
+                    derivedUsage += cnt;
+                    derivedNames.Add(kv.Value);
+                }
 
                 var row = new ImportedCategoryRow
                 {
@@ -1379,6 +1509,9 @@ namespace METools
                     Name             = cat.Name,
                     SubCategoryCount = subCount,
                     LiveInstanceCount = liveCount,
+                    LiveInstanceIds   = idsForCat ?? new List<Autodesk.Revit.DB.ElementId>(),
+                    DerivedTextUsageCount = derivedUsage,
+                    DerivedTextTypeNames  = derivedNames,
                 };
                 _importRows.Add(row);
                 _importsList.Children.Add(BuildImportRow(row));
@@ -1398,6 +1531,7 @@ namespace METools
             var grid = new Grid { Margin = new Thickness(2, 4, 2, 4) };
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
             var cb = new CheckBox { VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 3, 8, 0) };
             cb.Checked   += (s, e) => UpdateImportsStatus();
@@ -1413,18 +1547,22 @@ namespace METools
 
             bool hasNote = _stubbornCategoryNotes.TryGetValue(row.CategoryId.Value, out var stubbornNote)
                            && !string.IsNullOrWhiteSpace(stubbornNote);
+            bool hasDerivedUsage = row.DerivedTextUsageCount > 0;
             string statusText = row.LiveInstanceCount > 0
                 ? string.Format(S._("settings.imports.row_in_use"), row.SubCategoryCount, row.LiveInstanceCount)
-                : hasNote
-                    ? string.Format(S._("settings.imports.row_stubborn_note"), row.SubCategoryCount, stubbornNote)
-                    : _stubbornCategoryNotes.ContainsKey(row.CategoryId.Value)
-                        ? string.Format(S._("settings.imports.row_stubborn"), row.SubCategoryCount)
-                        : string.Format(S._("settings.imports.row_orphaned"), row.SubCategoryCount);
+                : hasDerivedUsage
+                    ? string.Format(S._("settings.imports.row_derived_text_usage"), row.SubCategoryCount, row.DerivedTextUsageCount,
+                        string.Join(", ", row.DerivedTextTypeNames.Take(3)) + (row.DerivedTextTypeNames.Count > 3 ? string.Format(S._("settings.imports.subcategory_more_suffix"), row.DerivedTextTypeNames.Count - 3) : ""))
+                    : hasNote
+                        ? string.Format(S._("settings.imports.row_stubborn_note"), row.SubCategoryCount, stubbornNote)
+                        : _stubbornCategoryNotes.ContainsKey(row.CategoryId.Value)
+                            ? string.Format(S._("settings.imports.row_stubborn"), row.SubCategoryCount)
+                            : string.Format(S._("settings.imports.row_orphaned"), row.SubCategoryCount);
             bool isStubborn = _stubbornCategoryNotes.ContainsKey(row.CategoryId.Value);
             textStack.Children.Add(new TextBlock
             {
                 Text = statusText, FontSize = 10.5, TextWrapping = TextWrapping.Wrap,
-                Foreground = row.LiveInstanceCount > 0 ? MeToolsTheme.BrOrange
+                Foreground = (row.LiveInstanceCount > 0 || hasDerivedUsage) ? MeToolsTheme.BrOrange
                            : isStubborn                ? MeToolsTheme.Br(MeToolsTheme.CRed)
                                                          : MeToolsTheme.BrMuted,
             });
@@ -1433,11 +1571,227 @@ namespace METools
             grid.Children.Add(cb);
             grid.Children.Add(textStack);
 
+            // Only shown when something is actually still using this
+            // category -- resolves each instance's owning view (most CAD
+            // imports are view-specific, tied to one Drafting View/Legend/
+            // etc. rather than living in 3D model space) so the person can
+            // jump straight there and decide for themselves whether to
+            // keep or remove that specific usage, instead of guessing from
+            // a bare instance count.
+            if (row.LiveInstanceCount > 0 && row.LiveInstanceIds.Count > 0)
+            {
+                var btnGoTo = new Button
+                {
+                    Content = S._("settings.imports.go_to_usage"), FontSize = 10.5,
+                    Padding = new Thickness(8, 3, 8, 3), Cursor = Cursors.Hand,
+                    Background = MeToolsTheme.BrActiveBg, BorderThickness = new Thickness(1),
+                    BorderBrush = MeToolsTheme.Br(MeToolsTheme.CAccent), Foreground = MeToolsTheme.Br(MeToolsTheme.CAccent),
+                    VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(8, 0, 0, 0),
+                };
+                btnGoTo.Click += (s, e) => OnGoToImportUsageClicked(row);
+                Grid.SetColumn(btnGoTo, 2);
+                grid.Children.Add(btnGoTo);
+            }
+
             return new Border
             {
                 BorderBrush = MeToolsTheme.BrBorder, BorderThickness = new Thickness(0, 0, 0, 1),
                 Padding = new Thickness(0, 4, 0, 4), Child = grid,
             };
+        }
+
+        // Resolves where a category's live instances actually are (grouped
+        // by owning view, since view-specific CAD imports are the common
+        // case -- see BuildImportRow), reports the breakdown in the status
+        // bar, and jumps to the first view found with those specific
+        // instances selected. Mirrors CollisionCheckerWindow.OnGoToClicked's
+        // pattern (ActiveView assignment + Selection.SetElementIds, called
+        // directly rather than through the ExternalEvent -- neither is a
+        // document modification).
+        private void OnGoToImportUsageClicked(ImportedCategoryRow row)
+        {
+            var doc = SettingsCommand.CurrentDocument;
+            var uiDoc = SettingsCommand.CurrentApp?.ActiveUIDocument;
+            if (doc == null || uiDoc == null) return;
+
+            // Grouped by owning view -- InvalidElementId means "not tied to
+            // any one view" (a model-space/3D import), grouped together
+            // under a blank key rather than dropped.
+            var byView = new Dictionary<long, (string Name, List<Autodesk.Revit.DB.ElementId> Ids)>();
+            foreach (var id in row.LiveInstanceIds)
+            {
+                Autodesk.Revit.DB.ElementId ownerViewId;
+                try { ownerViewId = (doc.GetElement(id) as Autodesk.Revit.DB.ImportInstance)?.OwnerViewId ?? Autodesk.Revit.DB.ElementId.InvalidElementId; }
+                catch { ownerViewId = Autodesk.Revit.DB.ElementId.InvalidElementId; }
+
+                string viewName;
+                if (ownerViewId == Autodesk.Revit.DB.ElementId.InvalidElementId)
+                {
+                    viewName = S._("settings.imports.usage_model_space");
+                }
+                else
+                {
+                    var v = doc.GetElement(ownerViewId) as Autodesk.Revit.DB.View;
+                    viewName = v?.Name ?? S._("settings.imports.usage_unknown_view");
+                }
+
+                if (!byView.TryGetValue(ownerViewId.Value, out var entry))
+                    byView[ownerViewId.Value] = entry = (viewName, new List<Autodesk.Revit.DB.ElementId>());
+                entry.Ids.Add(id);
+                byView[ownerViewId.Value] = entry;
+            }
+
+            // Reported regardless of how many distinct views there turn out
+            // to be -- if there's more than one, the direct jump below can
+            // only ever go to one of them, so this is the only way the
+            // person finds out about the others at all.
+            var summary = string.Join(", ", byView.Values.Select(v => string.Format(S._("settings.imports.usage_view_count"), v.Ids.Count, v.Name)));
+            if (StatusLeft != null) StatusLeft.Text = string.Format(S._("settings.imports.usage_summary"), summary);
+
+            // Jumps to the first VIEW-SPECIFIC group found (a real,
+            // activatable view). If everything is model-space only (no
+            // view-specific group at all), falls through to the 3D-view
+            // branch below instead of doing nothing -- confirmed as a
+            // real gap: the status line said "the 3D model (not tied to
+            // one view)" but nothing actually took the person there.
+            var firstViewable = byView.FirstOrDefault(kv => kv.Key != Autodesk.Revit.DB.ElementId.InvalidElementId.Value);
+            if (firstViewable.Value.Ids != null)
+            {
+                Autodesk.Revit.DB.View targetView = null;
+                try
+                {
+                    targetView = doc.GetElement(new Autodesk.Revit.DB.ElementId(firstViewable.Key)) as Autodesk.Revit.DB.View;
+                    if (targetView != null && targetView.Id != uiDoc.ActiveView?.Id)
+                        uiDoc.ActiveView = targetView;
+                    uiDoc.Selection.SetElementIds(firstViewable.Value.Ids);
+                    // BUG FIXED HERE: ShowElements (zoom-to-fit) used to be
+                    // called here too, but it can fail with Revit's own
+                    // native "No good view could be found" dialog for
+                    // certain view types -- confirmed as a real, documented
+                    // ShowElements quirk (reported for Legend views by
+                    // other developers; Drafting Views can hit it too).
+                    // Critically, that dialog is Revit's own UI popping up
+                    // directly, not a .NET exception -- the try/catch here
+                    // never had any way to prevent it.
+                    try { uiDoc.RefreshActiveView(); } catch { }
+                }
+                catch { }
+
+                // BUG FIXED HERE (again): plain selection with no zoom at
+                // all turned out to be just as unusable in practice --
+                // confirmed live that 6 selected elements are invisible
+                // among a couple hundred others in the same view with
+                // nothing to draw the eye there. ZoomAndCenterRectangle is
+                // a direct, mechanical "point this view's camera at this
+                // box" call -- it does NOT perform the "search every view
+                // for one that shows this element" logic ShowElements does
+                // internally, so it can't trigger the same failure mode.
+                // Kept in its own try/catch, separate from the block
+                // above, so a zoom failure (e.g. a genuinely zero-size or
+                // unreadable bounding box) can never take the selection
+                // itself down with it.
+                try
+                {
+                    var effectiveView = targetView ?? uiDoc.ActiveView;
+                    Autodesk.Revit.DB.XYZ min = null, max = null;
+                    foreach (var id in firstViewable.Value.Ids)
+                    {
+                        Autodesk.Revit.DB.BoundingBoxXYZ bbox;
+                        try { bbox = doc.GetElement(id)?.get_BoundingBox(effectiveView); }
+                        catch { bbox = null; }
+                        if (bbox == null) continue;
+                        min = min == null ? bbox.Min : new Autodesk.Revit.DB.XYZ(Math.Min(min.X, bbox.Min.X), Math.Min(min.Y, bbox.Min.Y), Math.Min(min.Z, bbox.Min.Z));
+                        max = max == null ? bbox.Max : new Autodesk.Revit.DB.XYZ(Math.Max(max.X, bbox.Max.X), Math.Max(max.Y, bbox.Max.Y), Math.Max(max.Z, bbox.Max.Z));
+                    }
+                    if (min != null && max != null)
+                    {
+                        // Confirmed live this needed to be tighter: 30%
+                        // padding compounds badly when the element itself
+                        // is already large (a whole architectural CAD
+                        // reference can genuinely span most of a building's
+                        // footprint) -- the padding was making an already-
+                        // huge box even bigger instead of helping find
+                        // anything. 10%, with a smaller fixed floor, gets
+                        // as close as possible to the element's own real
+                        // extent without literally touching its edges.
+                        double padX = Math.Max((max.X - min.X) * 0.1, 2.0 / 304.8);
+                        double padY = Math.Max((max.Y - min.Y) * 0.1, 2.0 / 304.8);
+                        min = new Autodesk.Revit.DB.XYZ(min.X - padX, min.Y - padY, min.Z);
+                        max = new Autodesk.Revit.DB.XYZ(max.X + padX, max.Y + padY, max.Z);
+
+                        var openUiView = uiDoc.GetOpenUIViews()
+                            .FirstOrDefault(uv => uv.ViewId == uiDoc.ActiveView?.Id);
+                        openUiView?.ZoomAndCenterRectangle(min, max);
+                    }
+                }
+                catch { }
+            }
+            else if (byView.TryGetValue(Autodesk.Revit.DB.ElementId.InvalidElementId.Value, out var modelSpaceEntry))
+            {
+                // Model-space instances have no owning view to switch to,
+                // but they DO have real 3D geometry -- any ordinary 3D view
+                // can show them. Picks the first available one rather than
+                // requiring a specific name; if none exists at all (rare,
+                // but possible on a project with only plan/drafting views),
+                // says so plainly instead of silently doing nothing.
+                Autodesk.Revit.DB.View3D view3D = null;
+                try
+                {
+                    view3D = new Autodesk.Revit.DB.FilteredElementCollector(doc)
+                        .OfClass(typeof(Autodesk.Revit.DB.View3D))
+                        .Cast<Autodesk.Revit.DB.View3D>()
+                        .FirstOrDefault(v => !v.IsTemplate);
+                }
+                catch { }
+
+                if (view3D == null)
+                {
+                    if (StatusLeft != null) StatusLeft.Text = S._("settings.imports.no_3d_view");
+                    return;
+                }
+
+                try
+                {
+                    if (view3D.Id != uiDoc.ActiveView?.Id)
+                        uiDoc.ActiveView = view3D;
+                    uiDoc.Selection.SetElementIds(modelSpaceEntry.Ids);
+                    try { uiDoc.RefreshActiveView(); } catch { }
+                }
+                catch { }
+
+                try
+                {
+                    // get_BoundingBox(null) rather than a specific view --
+                    // correct for a non-view-specific element, which has
+                    // one real bounding box in model space rather than a
+                    // per-view one the way view-specific elements do.
+                    Autodesk.Revit.DB.XYZ min = null, max = null;
+                    foreach (var id in modelSpaceEntry.Ids)
+                    {
+                        Autodesk.Revit.DB.BoundingBoxXYZ bbox;
+                        try { bbox = doc.GetElement(id)?.get_BoundingBox(null); }
+                        catch { bbox = null; }
+                        if (bbox == null) continue;
+                        min = min == null ? bbox.Min : new Autodesk.Revit.DB.XYZ(Math.Min(min.X, bbox.Min.X), Math.Min(min.Y, bbox.Min.Y), Math.Min(min.Z, bbox.Min.Z));
+                        max = max == null ? bbox.Max : new Autodesk.Revit.DB.XYZ(Math.Max(max.X, bbox.Max.X), Math.Max(max.Y, bbox.Max.Y), Math.Max(max.Z, bbox.Max.Z));
+                    }
+                    if (min != null && max != null)
+                    {
+                        // Same tightening as the view-specific branch above
+                        // -- see its remarks.
+                        double padX = Math.Max((max.X - min.X) * 0.1, 2.0 / 304.8);
+                        double padY = Math.Max((max.Y - min.Y) * 0.1, 2.0 / 304.8);
+                        double padZ = Math.Max((max.Z - min.Z) * 0.1, 2.0 / 304.8);
+                        min = new Autodesk.Revit.DB.XYZ(min.X - padX, min.Y - padY, min.Z - padZ);
+                        max = new Autodesk.Revit.DB.XYZ(max.X + padX, max.Y + padY, max.Z + padZ);
+
+                        var openUiView = uiDoc.GetOpenUIViews()
+                            .FirstOrDefault(uv => uv.ViewId == uiDoc.ActiveView?.Id);
+                        openUiView?.ZoomAndCenterRectangle(min, max);
+                    }
+                }
+                catch { }
+            }
         }
 
         private void UpdateImportsStatus()
@@ -1495,6 +1849,11 @@ namespace METools
             if (result != MessageBoxResult.Yes) return;
 
             StatusLeft.Text = S._("settings.imports.deleting");
+            // Captured per category during the delete attempt below so the
+            // verification step further down can report exactly which
+            // subcategories survived by name, instead of just a count that
+            // doesn't say anything concrete when it doesn't move.
+            var subsBeforeByRow = new Dictionary<long, List<(long Id, string Name)>>();
             try
             {
                 using (var tx = new Autodesk.Revit.DB.Transaction(doc, "ME-Tools: Remove Imported Categories"))
@@ -1553,7 +1912,27 @@ namespace METools
 
                             try
                             {
-                                foreach (Autodesk.Revit.DB.Category sub in cat.SubCategories)
+                                // BUG FIXED HERE: this used to foreach
+                                // directly over cat.SubCategories while
+                                // calling doc.Delete() on each member --
+                                // deleting a subcategory mutates that same
+                                // live collection in real time, which
+                                // invalidates the enumerator after the
+                                // first successful delete. The resulting
+                                // exception was silently swallowed by the
+                                // catch below, so only ever the FIRST
+                                // subcategory in the whole set actually got
+                                // deleted per attempt, no matter how many
+                                // times "Delete Selected" was run -- exactly
+                                // matching a real, reported symptom
+                                // (subcategory counts like 94 or 124 never
+                                // budging across repeated attempts).
+                                // Materializing into a plain List first
+                                // decouples the loop from the collection
+                                // being mutated underneath it.
+                                var subs = cat.SubCategories.Cast<Autodesk.Revit.DB.Category>().ToList();
+                                subsBeforeByRow[row.CategoryId.Value] = subs.Select(s => (s.Id.Value, s.Name)).ToList();
+                                foreach (var sub in subs)
                                     try { doc.Delete(sub.Id); } catch { }
                             }
                             catch { }
@@ -1589,6 +1968,7 @@ namespace METools
 
             int removed = 0, stillPresent = 0;
             var stillPresentNames = new List<string>();
+            var subcategoryReport = new List<string>();
             foreach (var row in selected)
             {
                 if (stillExisting.Contains(row.CategoryId.Value))
@@ -1602,6 +1982,35 @@ namespace METools
                     // useful note with a blank one.
                     if (!_stubbornCategoryNotes.ContainsKey(row.CategoryId.Value))
                         _stubbornCategoryNotes[row.CategoryId.Value] = "";
+
+                    // Subcategory-level detail: compares what existed right
+                    // before this attempt against what's still there right
+                    // now, by id -- confirmed a real, reported gap that the
+                    // old count-only reporting couldn't answer ("even the
+                    // subcategories aren't being deleted for some of
+                    // these"). Reports exactly which ones by name so
+                    // there's something concrete to go check (e.g. a Line
+                    // Style still assigned to a Detail Line somewhere),
+                    // rather than a number that just doesn't move.
+                    if (subsBeforeByRow.TryGetValue(row.CategoryId.Value, out var before) && before.Count > 0)
+                    {
+                        try
+                        {
+                            var catNow = doc.Settings.Categories.Cast<Autodesk.Revit.DB.Category>()
+                                .FirstOrDefault(c => c.Id.Value == row.CategoryId.Value);
+                            var stillThereIds = catNow?.SubCategories.Cast<Autodesk.Revit.DB.Category>()
+                                .Select(s => s.Id.Value).ToHashSet() ?? new HashSet<long>();
+                            var survivedNames = before.Where(b => stillThereIds.Contains(b.Id)).Select(b => b.Name).ToList();
+                            if (survivedNames.Count > 0)
+                            {
+                                string namesPart = string.Join(", ", survivedNames.Take(5));
+                                if (survivedNames.Count > 5) namesPart += string.Format(S._("settings.imports.subcategory_more_suffix"), survivedNames.Count - 5);
+                                subcategoryReport.Add(string.Format(S._("settings.imports.subcategory_survived_line"),
+                                    row.Name, survivedNames.Count, before.Count, namesPart));
+                            }
+                        }
+                        catch { }
+                    }
                 }
                 else
                 {
@@ -1624,6 +2033,13 @@ namespace METools
                 foreach (var n in stillPresentNames.Distinct().Take(10))
                     sb.AppendLine("   • " + n);
             }
+            if (subcategoryReport.Count > 0)
+            {
+                sb.AppendLine();
+                sb.AppendLine(S._("settings.imports.subcategory_survived_header"));
+                foreach (var line in subcategoryReport)
+                    sb.AppendLine("   • " + line);
+            }
             // Warning (not None/Information) whenever anything survived --
             // this exact "it said it worked but they're still there"
             // misread is what prompted this whole fix; a neutral icon on a
@@ -1632,6 +2048,15 @@ namespace METools
                 stillPresent > 0 ? MessageBoxImage.Warning : MessageBoxImage.Information);
 
             LoadImportedCategories();
+            // BUG FIXED HERE: StatusLeft was set to "Deleting..." at the
+            // very start of this method and then never touched again --
+            // LoadImportedCategories() (called just above, and by Rescan
+            // too) doesn't update it itself; Rescan's own button handler
+            // sets it explicitly right after calling it, but this method
+            // never did the same. Confirmed as a real, reported symptom:
+            // the status bar stayed on "Deleting..." indefinitely no
+            // matter how long ago the operation actually finished.
+            StatusLeft.Text = string.Format(S._("settings.imports.rescan_done"), _importRows.Count);
         }
 
         // ── "Find & Remove from Families" ────────────────────────────────
@@ -1945,7 +2370,13 @@ namespace METools
                             {
                                 try
                                 {
-                                    foreach (Autodesk.Revit.DB.Category sub in cat.SubCategories)
+                                    // Same fix as the main Delete Selected
+                                    // path -- see its remarks. Materialize
+                                    // before deleting so the enumerator
+                                    // isn't invalidated by the deletion
+                                    // itself after the first subcategory.
+                                    var subs = cat.SubCategories.Cast<Autodesk.Revit.DB.Category>().ToList();
+                                    foreach (var sub in subs)
                                         try { famDoc.Delete(sub.Id); } catch { }
                                 }
                                 catch { }

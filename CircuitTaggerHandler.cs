@@ -502,6 +502,18 @@ namespace METools.FamilyPlacer
                     tx.Commit();
             }
 
+            // BUG FIXED HERE: the magenta "pending" highlight applied while
+            // picking (see SetPendingMark above) was never cleared after a
+            // successful Apply -- confirmed as a real, reported symptom:
+            // elements stayed stuck in that color permanently, even after
+            // being deselected, because nothing here ever called
+            // SetPendingMark(..., on: false) to reset them. Has to happen
+            // in its own call, after the transaction above has fully
+            // closed -- SetPendingMark opens its own Transaction
+            // internally, and Revit doesn't support nesting one inside
+            // another on the same document.
+            try { SetPendingMark(doc, view, req.ElementIds, false); } catch { }
+
             var summary = $"Done. {written} elements updated";
             if (tagged > 0) summary += $", {tagged} tags placed";
             if (!canTag)    summary += $" -- tag family '{attemptedTagLabel}' not loaded, no tags placed. Run Project Health Check to fix this.";

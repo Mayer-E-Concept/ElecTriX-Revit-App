@@ -54,11 +54,12 @@ namespace METools
 
             try { app.CreateRibbonTab(TAB); } catch { }
 
-            var panelSetup     = app.CreateRibbonPanel(TAB, "Setup");
-            var panelPlacement = app.CreateRibbonPanel(TAB, "Placement");
-            var panelLevels    = app.CreateRibbonPanel(TAB, "Levels & Structure");
-            var panelCircuits  = app.CreateRibbonPanel(TAB, "Circuits & Reporting");
-            var panelTeam      = app.CreateRibbonPanel(TAB, "Team");
+            var panelSetup       = app.CreateRibbonPanel(TAB, "Setup");
+            var panelDiagnostics = app.CreateRibbonPanel(TAB, "Diagnostics");
+            var panelPlacement   = app.CreateRibbonPanel(TAB, "Placement");
+            var panelLevels      = app.CreateRibbonPanel(TAB, "Levels & Structure");
+            var panelCircuits    = app.CreateRibbonPanel(TAB, "Circuits & Reporting");
+            var panelTeam        = app.CreateRibbonPanel(TAB, "Team");
             string dll = Assembly.GetExecutingAssembly().Location;
 
             // -- Settings (Appearance ? Language ? License ? Worksets) -------
@@ -79,22 +80,29 @@ namespace METools
             RibbonThemeWatcher.Register(settingsButton, "icon_settings");
             RibbonLanguageWatcher.Register(settingsButton, "ribbon.settings");
 
-            // -- Project Health Check -----------------------------------------
-            var hcBtn = new PushButtonData(
-                "ProjectHealthCheck", S._("ribbon.project_health_check"), dll,
-                "METools.ProjectHealthCheckCommand")
+            // -- Diagnostics (Find Stray Elements ? Project Health Check ? Imported Objects) --
+            // Moved here from three separate places: Project Health Check
+            // used to have its own standalone button right here in Setup;
+            // Imported Objects used to be reachable only as one of six
+            // tiles buried inside Settings' own home screen; Find Stray
+            // Elements is brand new. All three are "is something wrong
+            // with this project, and can I fix it" tools, distinct from
+            // Settings (the app's OWN configuration) and from the
+            // day-to-day design tools elsewhere on this ribbon, so they
+            // get a home of their own instead of being scattered.
+            var diagBtn = new PushButtonData(
+                "Diagnostics", S._("ribbon.diagnostics"), dll,
+                "METools.DiagnosticsCommand")
             {
-                ToolTip         = "Checks the ME-Tools_CircuitTag family and Circuit Tagger's shared-parameter bindings in this project.",
-                LongDescription = $"Project Health Check -- {VENDOR}\n\nOn a new or detached project that didn't inherit the full company template, Circuit Tagger can silently degrade -- writing parameters but placing no tags, or writing nothing at all -- because either:\n\n" +
-                                  "* The 'ME-Tools_CircuitTag' Multi-Category Tag family isn't loaded\n" +
-                                  "* One or more of the 6 shared parameters (Vorsicherung, FI-Kreis, Stromkreis Tag, Schaltkreis, CAx_Apartment, CAx_Building) aren't bound to all 8 electrical categories\n\n" +
-                                  "This checks both, in a few seconds, instead of debugging it by hand.",
+                ToolTip         = "Find Stray Elements, Project Health Check, and Imported Objects -- model-health and cleanup tools.",
+                LongDescription = $"Diagnostics -- {VENDOR}\n\nFind Stray Elements · Project Health Check · Imported Objects\n\n" +
+                                  "Tools for finding and fixing things that are wrong with a project, rather than day-to-day design work.",
                 Image           = LoadIcon("icon_healthcheck_light_16.png") ?? LoadIcon("icon_settings_light_16.png"),
                 LargeImage      = LoadIcon("icon_healthcheck_light_32.png") ?? LoadIcon("icon_settings_light_32.png"),
             };
-            var hcButton = panelSetup.AddItem(hcBtn) as PushButton;
-            RibbonThemeWatcher.Register(hcButton, "icon_healthcheck");
-            RibbonLanguageWatcher.Register(hcButton, "ribbon.project_health_check");
+            var diagButton = panelDiagnostics.AddItem(diagBtn) as PushButton;
+            RibbonThemeWatcher.Register(diagButton, "icon_healthcheck");
+            RibbonLanguageWatcher.Register(diagButton, "ribbon.diagnostics");
 
             // -- Family Placer -----------------------------------------------
             var fpBtn = new PushButtonData(
@@ -320,11 +328,12 @@ namespace METools
             // do anything; check %APPDATA%\METools\ribbon-color-debug.log
             // either way. Safe to delete this block + RibbonPanelColorizer.cs
             // entirely if it doesn't pan out -- nothing else depends on it.
-            RibbonPanelColorizer.TryColor(panelSetup,     System.Windows.Media.Color.FromRgb(0x0F, 0x37, 0x37));
-            RibbonPanelColorizer.TryColor(panelPlacement, System.Windows.Media.Color.FromRgb(0x18, 0x5F, 0x5F));
-            RibbonPanelColorizer.TryColor(panelLevels,    System.Windows.Media.Color.FromRgb(0x23, 0x7D, 0x7D));
-            RibbonPanelColorizer.TryColor(panelCircuits,  System.Windows.Media.Color.FromRgb(0x32, 0x9B, 0x9B));
-            RibbonPanelColorizer.TryColor(panelTeam,      System.Windows.Media.Color.FromRgb(0x46, 0xB9, 0xB9));
+            RibbonPanelColorizer.TryColor(panelSetup,       System.Windows.Media.Color.FromRgb(0x0F, 0x37, 0x37));
+            RibbonPanelColorizer.TryColor(panelDiagnostics, System.Windows.Media.Color.FromRgb(0x13, 0x4B, 0x4B));
+            RibbonPanelColorizer.TryColor(panelPlacement,   System.Windows.Media.Color.FromRgb(0x18, 0x5F, 0x5F));
+            RibbonPanelColorizer.TryColor(panelLevels,      System.Windows.Media.Color.FromRgb(0x23, 0x7D, 0x7D));
+            RibbonPanelColorizer.TryColor(panelCircuits,    System.Windows.Media.Color.FromRgb(0x32, 0x9B, 0x9B));
+            RibbonPanelColorizer.TryColor(panelTeam,        System.Windows.Media.Color.FromRgb(0x46, 0xB9, 0xB9));
             RibbonPanelColorizer.Init(app);
 
             return Result.Succeeded;

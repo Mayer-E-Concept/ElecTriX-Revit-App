@@ -66,6 +66,12 @@ namespace METools.CollisionChecker
         // needs the full, unfiltered list).
         private enum ResultStatusFilter { All, Placed, NotPlaced }
         private ResultStatusFilter _statusFilter = ResultStatusFilter.All;
+        // -1 = haven't navigated yet this session/scan. Reset whenever the
+        // underlying list changes shape (rescan, filter change) so it
+        // never points at a position that no longer means the same thing.
+        private int _navIndex = -1;
+        private Button _btnNavPrev, _btnNavNext;
+        private TextBlock _lblNavPosition;
         private readonly HashSet<string> _checkedRowIds = new HashSet<string>();
         private readonly Dictionary<string, CheckBox>  _rowChecks = new Dictionary<string, CheckBox>();
         private readonly Dictionary<string, TextBlock> _rowStatus = new Dictionary<string, TextBlock>();
@@ -201,6 +207,7 @@ namespace METools.CollisionChecker
             if (cached == null) return;
 
             _collisions = cached.Value.Collisions;
+            _navIndex = -1; // fresh data -- old position no longer means the same thing
 
             // The actual fix for markers stacking up across a window
             // close/reopen: _markerIds/_markersByCollisionId used to be
@@ -781,12 +788,33 @@ namespace METools.CollisionChecker
                 if (filterCombo.SelectedItem is ComboBoxItem item && item.Tag is ResultStatusFilter f)
                 {
                     _statusFilter = f;
+                    _navIndex = -1; // the visible list just changed shape -- old position no longer means the same thing
                     RenderResultList();
                 }
             };
             selRow.Children.Add(filterCombo);
 
+            // Next/Previous -- steps through whatever's currently visible
+            // (respecting the filter above) in the exact same order it's
+            // displayed, jumping straight to each one in Revit the same
+            // way the per-row "Go To" button does, so reviewing a long
+            // list doesn't mean scrolling back up here and clicking Go To
+            // separately for every single row.
+            var navRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 6) };
+            _btnNavPrev = ActionBtn("\u25C0 " + S._("collisioncheck.nav_previous"), true, () => NavigateRow(-1));
+            _btnNavNext = ActionBtn(S._("collisioncheck.nav_next") + " \u25B6", true, () => NavigateRow(1));
+            _btnNavPrev.Margin = new Thickness(0, 0, 6, 0);
+            navRow.Children.Add(_btnNavPrev);
+            navRow.Children.Add(_btnNavNext);
+            _lblNavPosition = new TextBlock
+            {
+                FontSize = 11, Foreground = MeToolsTheme.BrMuted, VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(10, 0, 0, 0),
+            };
+            navRow.Children.Add(_lblNavPosition);
+
             header.Children.Add(selRow);
+            header.Children.Add(navRow);
             DockPanel.SetDock(header, Dock.Top);
             dock2.Children.Add(header);
 
@@ -864,6 +892,7 @@ namespace METools.CollisionChecker
                     structuralLinkId = chosenStructural.InstanceId;
             }
             _collisions = CollisionCheckerHandler.ScanForCollisions(doc, uiDoc, _scope, architectureSourceId, architectureSourceIsLink, (_cbHoleSymbol?.SelectedItem as HoleSymbolOption)?.SymbolId, plumbingLinkId, structuralLinkId);
+            _navIndex = -1; // fresh data -- old position no longer means the same thing
             _lblSummary.Text = _collisions.Count == 0
                 ? S._("collisioncheck.none_found")
                 : string.Format(S._("collisioncheck.n_found"), _collisions.Count);
@@ -913,6 +942,63 @@ namespace METools.CollisionChecker
                 }
                 catch { c.HoleInstanceId = Autodesk.Revit.DB.ElementId.InvalidElementId; }
             }
+        }
+
+        // Shared by RenderResultList (for grouping/display) and the
+        // Next/Previous navigation buttons below -- both need the exact
+        // same order, or navigating "next" could jump somewhere that
+        // doesn't match what's visually above/below the current row.
+        private List<CollisionInfo> GetOrderedVisibleRows()
+        {
+            var visible = _statusFilter == ResultStatusFilter.Placed ? _collisions.Where(c => c.IsResolved).ToList()
+                        : _statusFilter == ResultStatusFilter.NotPlaced ? _collisions.Where(c => !c.IsResolved).ToList()
+                        : _collisions;
+            return visible
+                .GroupBy(c => string.IsNullOrEmpty(c.LevelName) ? S._("collisioncheck.no_level") : c.LevelName)
+                .OrderBy(g => g.Key, StringComparer.OrdinalIgnoreCase)
+                .SelectMany(levelGroup => levelGroup
+                    .GroupBy(c => c.ElementCategory)
+                    .OrderBy(g => g.Key, StringComparer.OrdinalIgnoreCase)
+                    .SelectMany(catGroup => catGroup))
+                .ToList();
+        }
+
+        // Initializes toward the natural end for whichever direction is
+        // pressed first (Next from nowhere -> first row; Previous from
+        // nowhere -> last row), then wraps continuously in both directions
+        // after that -- clicking Next past the last row goes back to the
+        // first, matching a "just keep going" review workflow rather than
+        // stopping dead at the ends.
+        private void NavigateRow(int delta)
+        {
+            var rows = GetOrderedVisibleRows();
+            if (rows.Count == 0)
+            {
+                if (_lblNavPosition != null) _lblNavPosition.Text = S._("collisioncheck.nav_none");
+                return;
+            }
+
+            _navIndex = _navIndex < 0
+                ? (delta > 0 ? 0 : rows.Count - 1)
+                : ((_navIndex + delta) % rows.Count + rows.Count) % rows.Count;
+
+            var target = rows[_navIndex];
+
+            // Auto-expand this row's level/category groups if they're
+            // currently collapsed -- otherwise Next/Previous could jump
+            // Revit to a row that's invisible in the panel itself, which
+            // would be confusing (was it even the right one?).
+            string levelKey = "L:" + (string.IsNullOrEmpty(target.LevelName) ? S._("collisioncheck.no_level") : target.LevelName);
+            string catKey = levelKey + "|C:" + target.ElementCategory;
+            bool expandedSomething = false;
+            if (_expandedGroups.Add(levelKey)) expandedSomething = true;
+            if (_expandedGroups.Add(catKey)) expandedSomething = true;
+            if (expandedSomething) RenderResultList();
+
+            if (_lblNavPosition != null)
+                _lblNavPosition.Text = string.Format(S._("collisioncheck.nav_position_fmt"), _navIndex + 1, rows.Count);
+
+            OnGoToClicked(target);
         }
 
         private void RenderResultList()

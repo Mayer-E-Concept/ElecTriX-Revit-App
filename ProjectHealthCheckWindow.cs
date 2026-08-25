@@ -14,16 +14,18 @@ namespace METools
     {
         private readonly ExternalEvent                _evt;
         private readonly ProjectHealthCheckHandler     _handler;
+        private readonly UIApplication                 _uiApp;
         private StackPanel _body;
         private ScrollViewer _scroll;
 
         protected override string AppKey => "ProjectHealthCheck";
 
-        public ProjectHealthCheckWindow(HealthCheckResult result, ExternalEvent evt, ProjectHealthCheckHandler handler)
+        public ProjectHealthCheckWindow(HealthCheckResult result, ExternalEvent evt, ProjectHealthCheckHandler handler, UIApplication uiApp)
         {
             S.SetLanguage(SettingsStore.Language ?? "en");
             _evt     = evt;
             _handler = handler;
+            _uiApp   = uiApp;
             _handler.OnResult = r => Dispatcher.Invoke(() => Render(r));
             _handler.OnFixMessages = msgs => Dispatcher.Invoke(() =>
             {
@@ -34,6 +36,12 @@ namespace METools
             InitWindow(S._("healthcheck.title"), 520);
             Build();
             Render(result);
+        }
+
+        private void OnBackClicked()
+        {
+            Close();
+            DiagnosticsCommand.Open(_uiApp);
         }
 
         private void Build()
@@ -73,8 +81,18 @@ namespace METools
                 MaxHeight  = 620,
                 Background = MeToolsTheme.BrBg,
             };
+            // Wrapper so the Back button stays put across re-renders --
+            // Render() below clears _body.Children on every Refresh/Fix
+            // All, which would silently remove anything added directly
+            // inside _body itself.
+            var wrapper = new StackPanel();
+            var backBtn = ActionBtn("\u2190  " + S._("diagnostics.back"), true, OnBackClicked);
+            backBtn.HorizontalAlignment = HorizontalAlignment.Left;
+            backBtn.Margin = new Thickness(14, 12, 14, 0);
+            wrapper.Children.Add(backBtn);
             _body = new StackPanel { Margin = new Thickness(14, 12, 14, 12) };
-            _scroll.Content = _body;
+            wrapper.Children.Add(_body);
+            _scroll.Content = wrapper;
             RootDock.Children.Add(_scroll);
         }
 
