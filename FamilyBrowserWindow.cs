@@ -784,24 +784,37 @@ namespace METools
         private void ExecuteLoadFromDisk(Document doc)
         {
             int loaded = 0, skipped = 0, failed = 0;
+
+            // PERFORMANCE FIXED HERE: this used to re-query every Family
+            // in the document, for every single file being loaded --
+            // O(files x existing families) on a project that could
+            // already have hundreds of families, for someone batch-
+            // loading dozens of files at once. Collecting existing names
+            // into one HashSet up front makes each file's check O(1)
+            // instead. Names get added to the same set as they're loaded,
+            // so a later duplicate within this same batch is still
+            // correctly skipped, matching the original behavior exactly.
+            var existingNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            try
+            {
+                foreach (var f in new FilteredElementCollector(doc).OfClass(typeof(Family)).Cast<Family>())
+                    if (f.Name != null) existingNames.Add(f.Name);
+            }
+            catch { }
+
             foreach (var path in FilePathsToLoad)
             {
                 try
                 {
                     string famName = Path.GetFileNameWithoutExtension(path);
-                    bool exists = new FilteredElementCollector(doc)
-                        .OfClass(typeof(Family))
-                        .Cast<Family>()
-                        .Any(f => string.Equals(f.Name, famName, StringComparison.OrdinalIgnoreCase));
-
-                    if (exists) { skipped++; continue; }
+                    if (existingNames.Contains(famName)) { skipped++; continue; }
 
                     using (var tx = new Transaction(doc, $"ME-Tools: Load family {famName}"))
                     {
                         tx.Start();
                         Family fam;
                         bool ok = doc.LoadFamily(path, out fam);
-                        if (ok) { tx.Commit(); loaded++; }
+                        if (ok) { tx.Commit(); loaded++; existingNames.Add(famName); }
                         else    { tx.RollBack(); failed++; }
                     }
                 }

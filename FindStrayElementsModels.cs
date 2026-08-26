@@ -4,7 +4,7 @@ using Autodesk.Revit.DB;
 
 namespace METools
 {
-    public enum FindStrayAction { None, Scan, GoTo, Prune }
+    public enum FindStrayAction { None, Scan, GoTo, Prune, BackToDiagnostics }
 
     public class StrayElementInfo
     {

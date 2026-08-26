@@ -131,7 +131,8 @@ namespace METools
         private void OnBackClicked()
         {
             Close();
-            DiagnosticsCommand.Open(_uiApp);
+            _handler.Request = new FindStrayElementsRequest { Action = FindStrayAction.BackToDiagnostics };
+            _evt.Raise();
         }
 
         // ── Scan ──────────────────────────────────────────────────────────

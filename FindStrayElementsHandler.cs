@@ -60,6 +60,16 @@ namespace METools
             if (req.Action == FindStrayAction.Scan) ExecuteScan(doc, uiDoc, req);
             else if (req.Action == FindStrayAction.GoTo) ExecuteGoTo(doc, uiDoc, req);
             else if (req.Action == FindStrayAction.Prune) ExecutePrune(doc, req);
+            // BUG FIXED HERE: "Back" used to call DiagnosticsCommand.Open()
+            // directly from this window's own (modeless) click handler,
+            // which creates a brand-new ExternalEvent of its own right
+            // there -- confirmed live this silently failed ("nothing
+            // appears, not minimized, just gone"). Routing it through this
+            // method instead means DiagnosticsCommand.Open() -- and the
+            // ExternalEvent.Create() call inside it -- runs from within
+            // Execute(), which Revit guarantees is always valid context,
+            // the same guarantee Scan/GoTo/Prune above already rely on.
+            else if (req.Action == FindStrayAction.BackToDiagnostics) DiagnosticsCommand.Open(app);
         }
 
         // ── Scan ──────────────────────────────────────────────────────────

@@ -97,19 +97,20 @@ namespace METools.ActivityLog
             if (string.IsNullOrWhiteSpace(folder)) return;
 
             var map = new Dictionary<long, ElementSnapshot>();
-            foreach (var cat in TrackedCategories)
+            // PERFORMANCE FIXED HERE: same ElementMulticategoryFilter fix
+            // as Circuit Tagger/Lamp Placer -- 13 separate document walks
+            // reduced to 1, run every time a document opens.
+            try
             {
-                try
+                var catFilter = new ElementMulticategoryFilter(TrackedCategories);
+                foreach (var el in new FilteredElementCollector(doc)
+                    .WherePasses(catFilter).WhereElementIsNotElementType())
                 {
-                    foreach (var el in new FilteredElementCollector(doc)
-                        .OfCategory(cat).WhereElementIsNotElementType())
-                    {
-                        var snap = Snapshot(doc, el);
-                        if (snap != null) map[el.Id.Value] = snap;
-                    }
+                    var snap = Snapshot(doc, el);
+                    if (snap != null) map[el.Id.Value] = snap;
                 }
-                catch { }
             }
+            catch { }
             _cache[doc] = map;
         }
 

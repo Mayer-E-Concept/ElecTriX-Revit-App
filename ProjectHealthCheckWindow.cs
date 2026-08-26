@@ -41,7 +41,8 @@ namespace METools
         private void OnBackClicked()
         {
             Close();
-            DiagnosticsCommand.Open(_uiApp);
+            _handler.GoBackToDiagnostics = true;
+            _evt.Raise();
         }
 
         private void Build()

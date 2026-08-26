@@ -176,22 +176,24 @@ namespace METools.FamilyPlacer
         {
             var apts   = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var builds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var cat in GetElectricalCategories())
+            // PERFORMANCE FIXED HERE: same fix as ReadAllTaggedElements /
+            // FindUntagged -- one combined ElementMulticategoryFilter query
+            // instead of 8 separate per-category document walks, run every
+            // time this window opens.
+            try
             {
-                try
+                var catFilter = new ElementMulticategoryFilter(GetElectricalCategories().ToList());
+                foreach (var fi in new FilteredElementCollector(doc)
+                    .WherePasses(catFilter).WhereElementIsNotElementType()
+                    .OfClass(typeof(FamilyInstance)).Cast<FamilyInstance>())
                 {
-                    foreach (var fi in new FilteredElementCollector(doc)
-                        .OfCategory(cat).WhereElementIsNotElementType()
-                        .OfClass(typeof(FamilyInstance)).Cast<FamilyInstance>())
-                    {
-                        var a = fi.LookupParameter(PARAM_APARTMENT)?.AsString()?.Trim();
-                        var b = fi.LookupParameter(PARAM_BUILDING)?.AsString()?.Trim();
-                        if (!string.IsNullOrEmpty(a)) apts.Add(a);
-                        if (!string.IsNullOrEmpty(b)) builds.Add(b);
-                    }
+                    var a = fi.LookupParameter(PARAM_APARTMENT)?.AsString()?.Trim();
+                    var b = fi.LookupParameter(PARAM_BUILDING)?.AsString()?.Trim();
+                    if (!string.IsNullOrEmpty(a)) apts.Add(a);
+                    if (!string.IsNullOrEmpty(b)) builds.Add(b);
                 }
-                catch { }
             }
+            catch { }
             OnApartmentValues?.Invoke(apts.OrderBy(v => v).ToList());
             OnBuildingValues?.Invoke(builds.OrderBy(v => v).ToList());
         }
@@ -751,52 +753,71 @@ namespace METools.FamilyPlacer
         internal static IEnumerable<BuiltInCategory> GetElectricalCategories()
             => METools.ProjectHealthCheckCollector.RequiredCategories.Select(rc => rc.Cat);
 
-        public static List<ExportRow> ReadAllTaggedElements(Document doc)
+        // PERFORMANCE FIXED HERE: Room requires GetRoomName's expensive
+        // GetRoomAtPoint fallback whenever an element isn't already
+        // room/space-hosted (fi.Room/fi.Space null) -- a real, reported
+        // ~10 second load on a large project's worth of tagged elements.
+        // Circuit Stats and Clear Selected never actually read .Room at
+        // all (confirmed by checking every consumer of these rows) --
+        // only the CSV export does, since Room is literally one of its
+        // columns. includeRoom lets each caller opt out of work it was
+        // never going to use.
+        public static List<ExportRow> ReadAllTaggedElements(Document doc, bool includeRoom = true)
         {
             var rows = new List<ExportRow>();
             Phase phase = null;
-            try { phase = new FilteredElementCollector(doc).OfClass(typeof(Phase)).Cast<Phase>().LastOrDefault(); } catch { }
-
-            foreach (var cat in GetElectricalCategories())
+            if (includeRoom)
             {
-                try
-                {
-                    foreach (var fi in new FilteredElementCollector(doc)
-                        .OfCategory(cat).WhereElementIsNotElementType()
-                        .OfClass(typeof(FamilyInstance)).Cast<FamilyInstance>())
-                    {
-                        var apt  = fi.LookupParameter(PARAM_APARTMENT)?.AsString()         ?? "";
-                        var bld  = fi.LookupParameter(PARAM_BUILDING)?.AsString()          ?? "";
-                        var vs   = fi.LookupParameter(PARAM_VORSICHERUNG)?.AsString()      ?? "";
-                        var fiP  = fi.LookupParameter(PARAM_FI)?.AsString()                ?? "";
-                        var sk   = fi.LookupParameter(PARAM_STROMKREIS)?.AsString()        ?? "";
-                        var bk   = fi.LookupParameter(PARAM_BELEUCHTUNGSKREIS)?.AsString() ?? "";
-
-                        if (string.IsNullOrEmpty(apt) && string.IsNullOrEmpty(bld) &&
-                            string.IsNullOrEmpty(vs)  && string.IsNullOrEmpty(sk)  &&
-                            string.IsNullOrEmpty(fiP) && string.IsNullOrEmpty(bk))
-                            continue;
-
-                        rows.Add(new ExportRow
-                        {
-                            Building          = bld,
-                            Apartment         = apt,
-                            CircuitLabel      = sk,
-                            Vorsicherung      = vs,
-                            FI                = fiP,
-                            Stromkreis        = sk,
-                            Beleuchtungskreis = bk,
-                            Category          = fi.Category?.Name ?? "",
-                            CategoryId        = (int)(fi.Category?.Id?.Value ?? 0),
-                            FamilyName        = fi.Symbol?.Family?.Name ?? fi.Name ?? "",
-                            Room              = GetRoomName(doc, fi, phase),
-                            LevelName         = GetLevelName(doc, fi),
-                            ElementId         = fi.Id.Value.ToString(),
-                        });
-                    }
-                }
-                catch { }
+                try { phase = new FilteredElementCollector(doc).OfClass(typeof(Phase)).Cast<Phase>().LastOrDefault(); } catch { }
             }
+
+            // PERFORMANCE FIXED HERE: this used to run one
+            // FilteredElementCollector PER electrical category (8 separate
+            // full-document walks) instead of one combined query.
+            // ElementMulticategoryFilter does the identical job of "match
+            // any of these categories" in a single pass -- category
+            // membership doesn't have per-category failure modes the way
+            // some other filter types might, so there's no meaningful
+            // robustness lost by combining them, only 7 fewer redundant
+            // walks of the whole document every time this runs.
+            try
+            {
+                var catFilter = new ElementMulticategoryFilter(GetElectricalCategories().ToList());
+                foreach (var fi in new FilteredElementCollector(doc)
+                    .WherePasses(catFilter).WhereElementIsNotElementType()
+                    .OfClass(typeof(FamilyInstance)).Cast<FamilyInstance>())
+                {
+                    var apt  = fi.LookupParameter(PARAM_APARTMENT)?.AsString()         ?? "";
+                    var bld  = fi.LookupParameter(PARAM_BUILDING)?.AsString()          ?? "";
+                    var vs   = fi.LookupParameter(PARAM_VORSICHERUNG)?.AsString()      ?? "";
+                    var fiP  = fi.LookupParameter(PARAM_FI)?.AsString()                ?? "";
+                    var sk   = fi.LookupParameter(PARAM_STROMKREIS)?.AsString()        ?? "";
+                    var bk   = fi.LookupParameter(PARAM_BELEUCHTUNGSKREIS)?.AsString() ?? "";
+
+                    if (string.IsNullOrEmpty(apt) && string.IsNullOrEmpty(bld) &&
+                        string.IsNullOrEmpty(vs)  && string.IsNullOrEmpty(sk)  &&
+                        string.IsNullOrEmpty(fiP) && string.IsNullOrEmpty(bk))
+                        continue;
+
+                    rows.Add(new ExportRow
+                    {
+                        Building          = bld,
+                        Apartment         = apt,
+                        CircuitLabel      = sk,
+                        Vorsicherung      = vs,
+                        FI                = fiP,
+                        Stromkreis        = sk,
+                        Beleuchtungskreis = bk,
+                        Category          = fi.Category?.Name ?? "",
+                        CategoryId        = (int)(fi.Category?.Id?.Value ?? 0),
+                        FamilyName        = fi.Symbol?.Family?.Name ?? fi.Name ?? "",
+                        Room              = includeRoom ? GetRoomName(doc, fi, phase) : "",
+                        LevelName         = GetLevelName(doc, fi),
+                        ElementId         = fi.Id.Value.ToString(),
+                    });
+                }
+            }
+            catch { }
             return rows;
         }
 
@@ -814,29 +835,30 @@ namespace METools.FamilyPlacer
             Phase phase = null;
             try { phase = new FilteredElementCollector(doc).OfClass(typeof(Phase)).Cast<Phase>().LastOrDefault(); } catch { }
 
-            foreach (var cat in GetElectricalCategories())
+            // PERFORMANCE FIXED HERE: same fix as ReadAllTaggedElements
+            // above -- one combined ElementMulticategoryFilter query
+            // instead of 8 separate per-category document walks.
+            try
             {
-                try
+                var catFilter = new ElementMulticategoryFilter(GetElectricalCategories().ToList());
+                foreach (var fi in new FilteredElementCollector(doc)
+                    .WherePasses(catFilter).WhereElementIsNotElementType()
+                    .OfClass(typeof(FamilyInstance)).Cast<FamilyInstance>())
                 {
-                    foreach (var fi in new FilteredElementCollector(doc)
-                        .OfCategory(cat).WhereElementIsNotElementType()
-                        .OfClass(typeof(FamilyInstance)).Cast<FamilyInstance>())
-                    {
-                        var sk = fi.LookupParameter(PARAM_STROMKREIS)?.AsString() ?? "";
-                        if (!string.IsNullOrWhiteSpace(sk)) continue; // already tagged -- not what this is looking for
+                    var sk = fi.LookupParameter(PARAM_STROMKREIS)?.AsString() ?? "";
+                    if (!string.IsNullOrWhiteSpace(sk)) continue; // already tagged -- not what this is looking for
 
-                        result.Add(new UntaggedElementInfo
-                        {
-                            ElementId    = fi.Id,
-                            CategoryName = fi.Category?.Name ?? "",
-                            FamilyName   = fi.Symbol?.Family?.Name ?? fi.Name ?? "",
-                            LevelName    = GetLevelName(doc, fi),
-                            RoomName     = GetRoomName(doc, fi, phase),
-                        });
-                    }
+                    result.Add(new UntaggedElementInfo
+                    {
+                        ElementId    = fi.Id,
+                        CategoryName = fi.Category?.Name ?? "",
+                        FamilyName   = fi.Symbol?.Family?.Name ?? fi.Name ?? "",
+                        LevelName    = GetLevelName(doc, fi),
+                        RoomName     = GetRoomName(doc, fi, phase),
+                    });
                 }
-                catch { }
             }
+            catch { }
             return result;
         }
 
@@ -904,7 +926,7 @@ namespace METools.FamilyPlacer
             var foundLabels = new HashSet<string>();
             try
             {
-                var rows = ReadAllTaggedElements(doc); // one scan for the whole batch, not one per label
+                var rows = ReadAllTaggedElements(doc, includeRoom: false); // one scan for the whole batch, not one per label
                 var toClear = rows
                     .Where(r => labelSet.Contains(r.CircuitLabel) || labelSet.Contains(r.Stromkreis))
                     .ToList();

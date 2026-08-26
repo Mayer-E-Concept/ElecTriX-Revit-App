@@ -373,16 +373,22 @@ namespace METools.LampPlacer
             double floorZ = room.Level?.Elevation ?? 0;
 
             // Find existing fixtures inside the room (lighting + fire alarm) to clear out.
-            var cats = new[] {
+            // PERFORMANCE FIXED HERE: combined into one
+            // ElementMulticategoryFilter query instead of one
+            // FilteredElementCollector per category -- same fix applied
+            // to Circuit Tagger's category loops, same reasoning: no
+            // per-category failure mode is being given up, just redundant
+            // document walks that scale with fixture count on a large
+            // project.
+            var catFilter = new ElementMulticategoryFilter(new[] {
                 BuiltInCategory.OST_LightingFixtures,
                 BuiltInCategory.OST_LightingDevices,
                 BuiltInCategory.OST_FireAlarmDevices
-            };
+            });
             var toDelete = new List<ElementId>();
-            foreach (var cat in cats)
             {
                 var instances = new FilteredElementCollector(doc)
-                    .OfClass(typeof(FamilyInstance)).OfCategory(cat).Cast<FamilyInstance>();
+                    .OfClass(typeof(FamilyInstance)).WherePasses(catFilter).Cast<FamilyInstance>();
                 foreach (var fi in instances)
                 {
                     XYZ testPt = null;
@@ -443,16 +449,17 @@ namespace METools.LampPlacer
             Level fallbackLvl = ResolveFallbackLevel(doc, cfg);
 
             // 2. ALLE Leuchten im Raum finden (unabhängig von Familie)
-            var cats = new[] {
+            // PERFORMANCE FIXED HERE: same fix as UpdateRoom above --
+            // combined into one ElementMulticategoryFilter query.
+            var catFilter = new ElementMulticategoryFilter(new[] {
                 BuiltInCategory.OST_LightingFixtures,
                 BuiltInCategory.OST_LightingDevices
-            };
+            });
             var toDelete = new List<ElementId>();
-            foreach (var cat in cats)
             {
                 var instances = new FilteredElementCollector(doc)
                     .OfClass(typeof(FamilyInstance))
-                    .OfCategory(cat)
+                    .WherePasses(catFilter)
                     .Cast<FamilyInstance>();
 
                 foreach (var fi in instances)

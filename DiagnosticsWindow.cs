@@ -18,6 +18,14 @@
 // input until the modal one closes anyway. Closing first keeps the
 // handoff simple and identical for all three tiles, rather than one
 // special case per tool.
+//
+// BUG FIXED HERE: each tile used to call its target tool's Open() method
+// (or ShowDialog() for Imported Objects) directly from its own click
+// handler. See DiagnosticsHandler for the full explanation -- in short,
+// this window is modeless now and its click handlers have no valid Revit
+// API context on their own, so all three tiles route through this
+// window's own ExternalEvent instead, guaranteeing they run with the
+// same valid context an IExternalCommand's Execute() would provide.
 using System;
 using System.Windows;
 using System.Windows.Controls;
@@ -30,38 +38,32 @@ namespace METools
     public class DiagnosticsWindow : MeToolsWindowBase
     {
         private readonly UIApplication _uiApp;
+        private readonly ExternalEvent _evt;
+        private readonly DiagnosticsHandler _handler;
 
-        private static readonly (string Key, string Glyph, Action<DiagnosticsWindow> Open)[] _tiles =
+        private static readonly (string Key, string Glyph, DiagnosticsTileAction Action)[] _tiles =
         {
-            ("diagnostics.tile.stray",   "\uE71C", w => { w.Close(); FindStrayElementsCommand.Open(w._uiApp); }), // Filter/funnel-ish
-            ("diagnostics.tile.health",  "\uE9D9", w => { w.Close(); ProjectHealthCheckCommand.Open(w._uiApp); }), // Heart/pulse-ish
-            ("diagnostics.tile.imports", "\uE8B5", w =>
-            {
-                // BUG FIXED HERE: SettingsWindow relies internally on the
-                // static SettingsCommand.CurrentApp property (e.g. Try
-                // Purge Unused reads it directly) rather than taking a
-                // UIApplication as a constructor parameter the way the
-                // other two tiles' Open() methods do -- this was never
-                // being set on this specific path, since Imported Objects
-                // is reached through SettingsWindow's own constructor, not
-                // through SettingsCommand.Execute() (the only other place
-                // that was setting it). Left null, anything inside
-                // Imported Objects that reads CurrentApp would have
-                // silently done nothing.
-                SettingsCommand.SetCurrentAppForDirectLaunch(w._uiApp);
-                w.Close();
-                new SettingsWindow(SettingsWindow.ImportsTabIndex).ShowDialog();
-                SettingsCommand.SetCurrentAppForDirectLaunch(null);
-            }),
+            ("diagnostics.tile.stray",   "\uE71C", DiagnosticsTileAction.OpenStray),   // Filter/funnel-ish
+            ("diagnostics.tile.health",  "\uE9D9", DiagnosticsTileAction.OpenHealth),  // Heart/pulse-ish
+            ("diagnostics.tile.imports", "\uE8B5", DiagnosticsTileAction.OpenImports), // Import
         };
 
-        public DiagnosticsWindow(UIApplication uiApp)
+        public DiagnosticsWindow(UIApplication uiApp, ExternalEvent evt, DiagnosticsHandler handler)
         {
-            _uiApp = uiApp;
+            _uiApp   = uiApp;
+            _evt     = evt;
+            _handler = handler;
             S.SetLanguage(SettingsStore.Language ?? "en");
             InitWindow(S._("diagnostics.title"), width: 460, isDialog: false);
             BuildStatusBar("", $"v{SplashGate.GetVersion()}");
             BuildContent();
+        }
+
+        private void OnTileClicked(DiagnosticsTileAction action)
+        {
+            Close();
+            _handler.Action = action;
+            _evt.Raise();
         }
 
         private void BuildContent()
@@ -76,7 +78,8 @@ namespace METools
 
             for (int i = 0; i < _tiles.Length; i++)
             {
-                var tile = BuildHomeTile(S._(_tiles[i].Key), _tiles[i].Glyph, _tiles[i].Open);
+                var action = _tiles[i].Action;
+                var tile = BuildHomeTile(S._(_tiles[i].Key), _tiles[i].Glyph, () => OnTileClicked(action));
                 Grid.SetRow(tile, 0);
                 Grid.SetColumn(tile, i);
                 grid.Children.Add(tile);
@@ -89,7 +92,7 @@ namespace METools
         // Same visual language as SettingsWindow.BuildHomeTile, deliberately
         // -- this hub and Settings should read as the same family of
         // window even though they're separate classes.
-        private Border BuildHomeTile(string label, string glyph, Action<DiagnosticsWindow> onClick)
+        private Border BuildHomeTile(string label, string glyph, Action onClick)
         {
             var iconTb = new TextBlock
             {
@@ -121,7 +124,7 @@ namespace METools
             };
             tile.MouseEnter += (s, e) => tile.Background = MeToolsTheme.BrActiveBg;
             tile.MouseLeave += (s, e) => tile.Background = MeToolsTheme.BrSurface;
-            tile.MouseLeftButtonDown += (s, e) => onClick(this);
+            tile.MouseLeftButtonDown += (s, e) => onClick();
             return tile;
         }
     }

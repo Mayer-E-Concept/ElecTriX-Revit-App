@@ -173,22 +173,23 @@ namespace METools.FamilyPlacer
         // ─── Sondersteckdosen ─────────────────────────────────────────
         public static HashSet<string> LeseSonderkuerzel(Document doc)
         {
-            var kat = new[] { BuiltInCategory.OST_ElectricalFixtures, BuiltInCategory.OST_ElectricalEquipment };
+            // PERFORMANCE FIXED HERE: same ElementMulticategoryFilter fix
+            // as Circuit Tagger/Lamp Placer's category loops.
+            var catFilter = new ElementMulticategoryFilter(new[] {
+                BuiltInCategory.OST_ElectricalFixtures, BuiltInCategory.OST_ElectricalEquipment
+            });
             var k = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var c in kat)
+            try
             {
-                try
+                foreach (var el in new FilteredElementCollector(doc).WherePasses(catFilter)
+                    .WhereElementIsNotElementType().ToElements())
                 {
-                    foreach (var el in new FilteredElementCollector(doc).OfCategory(c)
-                        .WhereElementIsNotElementType().ToElements())
-                    {
-                        var p = el.LookupParameter(PARAM_SONDERSTECKDOSE);
-                        var w = p?.AsString()?.Trim().ToUpperInvariant();
-                        if (!string.IsNullOrWhiteSpace(w)) k.Add(w);
-                    }
+                    var p = el.LookupParameter(PARAM_SONDERSTECKDOSE);
+                    var w = p?.AsString()?.Trim().ToUpperInvariant();
+                    if (!string.IsNullOrWhiteSpace(w)) k.Add(w);
                 }
-                catch { }
             }
+            catch { }
             foreach (var s in RaumHelper.StandardKuerzel) k.Add(s);
             return k;
         }

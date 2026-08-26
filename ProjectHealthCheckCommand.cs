@@ -383,11 +383,28 @@ namespace METools
     public class ProjectHealthCheckHandler : IExternalEventHandler
     {
         public bool DoFix; // set true before Raise() to run the auto-fix first
+        // BUG FIXED HERE: "Back" used to call DiagnosticsCommand.Open()
+        // directly from ProjectHealthCheckWindow's own (modeless) click
+        // handler, which creates a brand-new ExternalEvent of its own
+        // right there -- confirmed live this silently failed ("nothing
+        // appears, not minimized, just gone"). Set true before Raise() to
+        // just reopen Diagnostics instead of doing the normal
+        // refresh/fix flow -- DiagnosticsCommand.Open()'s own
+        // ExternalEvent.Create() call then runs from within Execute(),
+        // which Revit guarantees is always valid context.
+        public bool GoBackToDiagnostics;
         public Action<HealthCheckResult> OnResult;
         public Action<List<string>> OnFixMessages;
 
         public void Execute(UIApplication app)
         {
+            if (GoBackToDiagnostics)
+            {
+                GoBackToDiagnostics = false;
+                DiagnosticsCommand.Open(app);
+                return;
+            }
+
             try
             {
                 var doc = app.ActiveUIDocument?.Document;

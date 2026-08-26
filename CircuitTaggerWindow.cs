@@ -516,7 +516,7 @@ namespace METools.FamilyPlacer
             var doc = _uiApp.ActiveUIDocument?.Document;
             if (doc == null) { UpdateStatusBar(S._("circuittagger.no_tagged_found")); return; }
 
-            var rows = CircuitTaggerHandler.ReadAllTaggedElements(doc);
+            var rows = CircuitTaggerHandler.ReadAllTaggedElements(doc, includeRoom: false);
             if (rows.Count == 0) { _statsList.Children.Add(EmptyRow(S._("circuittagger.no_tagged_found"))); UpdateStatusBar(S._("circuittagger.no_tagged_found")); return; }
 
             // Group: building -> apartment -> circuit base -> sub-circuits
