@@ -129,6 +129,46 @@ namespace METools.ProjectTransfer
             }
             catch { }
 
+            // Only SHARED project parameters are offered here -- confirmed
+            // via research this session that Revit's public API has no way
+            // to create a brand-new, purely-internal (non-shared) project
+            // parameter definition in a different document at all,
+            // regardless of technique. Starting from the real
+            // SharedParameterElements already in this document (each has
+            // a stable, real ElementId, unlike a bare ParameterBindings
+            // iterator entry) and cross-referencing by name against the
+            // actual project-level binding -- a shared parameter can be
+            // loaded into a document without being bound to any category
+            // at all (e.g. if it's only used inside a family), and those
+            // aren't project parameters in the sense this feature means.
+            try
+            {
+                foreach (SharedParameterElement spe in new FilteredElementCollector(doc).OfClass(typeof(SharedParameterElement)))
+                {
+                    string name = spe.Name;
+                    if (string.IsNullOrEmpty(name)) continue;
+
+                    ElementBinding binding = null;
+                    var it = doc.ParameterBindings.ForwardIterator();
+                    it.Reset();
+                    while (it.MoveNext())
+                    {
+                        if (string.Equals(it.Key?.Name, name, StringComparison.Ordinal))
+                        { binding = it.Current as ElementBinding; break; }
+                    }
+                    if (binding == null) continue; // loaded into the doc but not bound as a project parameter
+
+                    int catCount = binding.Categories?.Size ?? 0;
+                    string bindKind = binding is InstanceBinding ? "Instance" : "Type";
+                    items.Add(new TransferItem
+                    {
+                        Id = spe.Id, Name = name, Category = TransferCategory.ProjectParameters,
+                        SubInfo = $"{Plural(catCount, "category", "categories")}, {bindKind}",
+                    });
+                }
+            }
+            catch { }
+
             AssignSubGroups(items);
             OnSourceLoaded?.Invoke(items);
         }
@@ -291,11 +331,12 @@ namespace METools.ProjectTransfer
             // rest down with it — each gets its own SubTransaction.
             var buckets = new (string Label, List<ElementId> Ids)[]
             {
-                ("Filters",        new List<ElementId>()),
-                ("Views",          new List<ElementId>()),
-                ("View Templates", new List<ElementId>()),
-                ("Sheets",         new List<ElementId>()),
-                ("Schedules",      new List<ElementId>()),
+                ("Filters",           new List<ElementId>()),
+                ("Views",             new List<ElementId>()),
+                ("View Templates",    new List<ElementId>()),
+                ("Sheets",            new List<ElementId>()),
+                ("Schedules",         new List<ElementId>()),
+                ("Project Parameters", new List<ElementId>()),
             };
             foreach (var id in ids)
             {
@@ -305,6 +346,7 @@ namespace METools.ProjectTransfer
                 else if (el is ViewSchedule)                    buckets[4].Ids.Add(id);
                 else if (el is View v && v.IsTemplate)          buckets[2].Ids.Add(id); // check before the generic View bucket below
                 else if (el is View)                            buckets[1].Ids.Add(id);
+                else if (el is SharedParameterElement)          buckets[5].Ids.Add(id);
             }
 
             // Name-collision check, BEFORE copying anything: Revit's
@@ -378,12 +420,19 @@ namespace METools.ProjectTransfer
                         sub.Start();
                         try
                         {
-                            var opts = new CopyPasteOptions();
-                            opts.SetDuplicateTypeNamesHandler(new KeepDestinationTypesHandler());
-                            ElementTransformUtils.CopyElements(sourceDoc, bucketIds, targetDoc, Transform.Identity, opts);
+                            if (label == "Project Parameters")
+                            {
+                                CopyProjectParameters(app, sourceDoc, targetDoc, bucketIds, result);
+                            }
+                            else
+                            {
+                                var opts = new CopyPasteOptions();
+                                opts.SetDuplicateTypeNamesHandler(new KeepDestinationTypesHandler());
+                                ElementTransformUtils.CopyElements(sourceDoc, bucketIds, targetDoc, Transform.Identity, opts);
+                                result.Copied += bucketIds.Count;
+                                result.Lines.Add($"{label}: {Plural(bucketIds.Count, "item", "items")} copied");
+                            }
                             sub.Commit();
-                            result.Copied += bucketIds.Count;
-                            result.Lines.Add($"{label}: {Plural(bucketIds.Count, "item", "items")} copied");
                         }
                         catch (Exception ex)
                         {
@@ -396,6 +445,107 @@ namespace METools.ProjectTransfer
             }
 
             OnCopyDone?.Invoke(result);
+        }
+
+        // Project parameter transfer is genuinely different from every
+        // other category here -- there's no ElementId-addressable "thing"
+        // that ElementTransformUtils.CopyElements can just duplicate.
+        // Confirmed via research this session: once a shared parameter is
+        // bound in a project, its Definition (from doc.ParameterBindings)
+        // is an InternalDefinition, NOT the ExternalDefinition Insert/
+        // ReInsert actually require -- that type only exists when reading
+        // straight from the shared parameter file itself. So this reads
+        // the source's binding (categories, instance/type, group) from
+        // the document, but has to re-find the actual ExternalDefinition
+        // it needs from whatever shared parameter file is currently
+        // attached to this Revit session.
+        private static void CopyProjectParameters(UIApplication app, Document sourceDoc, Document targetDoc, List<ElementId> ids, TransferResult result)
+        {
+            DefinitionFile defFile = null;
+            try { defFile = app.Application.OpenSharedParameterFile(); } catch { }
+            if (defFile == null)
+            {
+                result.Lines.Add("Project Parameters: skipped -- no shared parameter file is currently set in this Revit session (Manage tab \u2192 Shared Parameters).");
+                return;
+            }
+
+            int copied = 0;
+            var skippedNames = new List<string>();
+
+            foreach (var id in ids)
+            {
+                var spe = sourceDoc.GetElement(id) as SharedParameterElement;
+                if (spe == null) continue;
+                string name = spe.Name;
+                if (string.IsNullOrEmpty(name)) continue;
+
+                Definition sourceDef = null;
+                ElementBinding sourceBinding = null;
+                var it = sourceDoc.ParameterBindings.ForwardIterator();
+                it.Reset();
+                while (it.MoveNext())
+                {
+                    if (string.Equals(it.Key?.Name, name, StringComparison.Ordinal))
+                    { sourceDef = it.Key; sourceBinding = it.Current as ElementBinding; break; }
+                }
+                if (sourceDef == null || sourceBinding == null) { skippedNames.Add(name); continue; }
+
+                ExternalDefinition extDef = null;
+                foreach (DefinitionGroup grp in defFile.Groups)
+                {
+                    extDef = grp.Definitions.FirstOrDefault(d => string.Equals(d.Name, name, StringComparison.Ordinal)) as ExternalDefinition;
+                    if (extDef != null) break;
+                }
+                if (extDef == null) { skippedNames.Add($"{name} (not in the current shared parameter file)"); continue; }
+
+                // Map each bound category to its counterpart in the target by
+                // BuiltInCategory -- only standard categories can be matched
+                // this way. Anything that can't be matched is dropped from
+                // the set rather than failing the whole parameter; a
+                // category-less binding below is what actually fails it.
+                var catSet = app.Application.Create.NewCategorySet();
+                foreach (Category cat in sourceBinding.Categories)
+                {
+                    try
+                    {
+                        var bic = (BuiltInCategory)cat.Id.Value;
+                        var targetCat = Category.GetCategory(targetDoc, bic);
+                        if (targetCat != null) catSet.Insert(targetCat);
+                    }
+                    catch { }
+                }
+                if (catSet.Size == 0) { skippedNames.Add($"{name} (none of its categories exist in the target)"); continue; }
+
+                ElementBinding newBinding = sourceBinding is InstanceBinding
+                    ? (ElementBinding)new InstanceBinding(catSet)
+                    : (ElementBinding)new TypeBinding(catSet);
+                var groupId = sourceDef.GetGroupTypeId();
+
+                try
+                {
+                    bool alreadyBound = false;
+                    var targetIt = targetDoc.ParameterBindings.ForwardIterator();
+                    targetIt.Reset();
+                    while (targetIt.MoveNext())
+                        if (string.Equals(targetIt.Key?.Name, name, StringComparison.Ordinal)) { alreadyBound = true; break; }
+
+                    bool ok = alreadyBound
+                        ? targetDoc.ParameterBindings.ReInsert(extDef, newBinding, groupId)
+                        : targetDoc.ParameterBindings.Insert(extDef, newBinding, groupId);
+                    if (ok) copied++;
+                    else skippedNames.Add(name);
+                }
+                catch (Exception ex) { skippedNames.Add($"{name} ({ex.Message})"); }
+            }
+
+            result.Copied += copied;
+            if (copied > 0) result.Lines.Add($"Project Parameters: {Plural(copied, "item", "items")} copied");
+            if (skippedNames.Count > 0)
+            {
+                string shown = string.Join(", ", skippedNames.Take(5));
+                string more = skippedNames.Count > 5 ? $" (+{skippedNames.Count - 5} more)" : "";
+                result.Lines.Add($"Project Parameters: {Plural(skippedNames.Count, "item", "items")} skipped -- {shown}{more}");
+            }
         }
 
         public string GetName() => "ME-Tools Project Transfer";

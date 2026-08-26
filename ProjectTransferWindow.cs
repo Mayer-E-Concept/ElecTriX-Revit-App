@@ -258,6 +258,7 @@ namespace METools.ProjectTransfer
                 (TransferCategory.ViewTemplates, S._("transfer.cat_view_templates")),
                 (TransferCategory.Sheets,        S._("transfer.cat_sheets")),
                 (TransferCategory.Schedules,     S._("transfer.cat_schedules")),
+                (TransferCategory.ProjectParameters, S._("transfer.cat_project_parameters")),
             };
             foreach (var (cat, label) in defs)
             {

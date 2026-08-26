@@ -448,7 +448,7 @@ namespace METools
 
         public static void Open(UIApplication uiApp)
         {
-            if (!METools.LicenseManager.CheckAccessOrExplain()) return;
+            if (!METools.LicenseManager.CheckFullAccessOrExplain()) return;
 
             var doc = uiApp.ActiveUIDocument?.Document;
             if (doc == null) return;

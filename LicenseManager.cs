@@ -100,6 +100,39 @@ namespace METools
             return false;
         }
 
+        /// <summary>
+        /// Stricter gate for tools that require an ACTUAL license, regardless
+        /// of trial status -- Family Placer, Family Browser, Lamp Placer,
+        /// Statistics, Activity &amp; Time, and Fix Level are free to use for as
+        /// long as someone likes (no gate at all, not even this one);
+        /// everything else calls this instead of CheckAccessOrExplain, since
+        /// being within the 14-day trial window is no longer sufficient on
+        /// its own for those. Ribbon buttons for these tools are also
+        /// visually greyed out via RibbonLicenseWatcher when unlicensed, so
+        /// this dialog is mostly a backstop for someone clicking anyway --
+        /// the button stays clickable on purpose so this message is
+        /// reachable rather than the click just silently doing nothing.
+        /// </summary>
+        public static bool CheckFullAccessOrExplain()
+        {
+            if (IsLicensed()) return true;
+            try
+            {
+                var td = new TaskDialog("ME-Tools — License Required")
+                {
+                    MainInstruction = "This tool requires a license",
+                    MainContent     = "This is one of ME-Tools' full-license tools, not part of the free tier " +
+                                      "(Family Placer, Family Browser, Lamp Placer, Statistics, Activity & Time, Fix Level).\n\n" +
+                                      "Open ME-Tools \u2192 Settings \u2192 License to activate a key.\n\n" +
+                                      "Need a license? Contact office@mayer-econcept.ro (include your Machine ID, shown in Settings).",
+                    CommonButtons   = TaskDialogCommonButtons.Ok,
+                };
+                td.Show();
+            }
+            catch { }
+            return false;
+        }
+
         // ── Public API ────────────────────────────────────────────────────
 
         /// <summary>

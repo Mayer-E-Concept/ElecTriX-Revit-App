@@ -20,7 +20,7 @@ namespace METools
 
         public static void Open(UIApplication uiApp)
         {
-            if (!METools.LicenseManager.CheckAccessOrExplain()) return;
+            // No license gate here on purpose -- Free tier: always usable, licensed or not.
 
             if (_window != null && _window.IsVisible)
             {

@@ -27,7 +27,7 @@ namespace METools
 
         public static void Open(UIApplication uiApp)
         {
-            if (!LicenseManager.CheckAccessOrExplain()) return;
+            if (!LicenseManager.CheckFullAccessOrExplain()) return;
             MeToolsWindowBase.RevitHandle = uiApp.MainWindowHandle;
 
             if (_window != null && _window.IsVisible)

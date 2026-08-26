@@ -37,7 +37,7 @@ namespace METools
 
         public static void Open(UIApplication uiApp)
         {
-            if (!LicenseManager.CheckAccessOrExplain()) return;
+            if (!LicenseManager.CheckFullAccessOrExplain()) return;
 
             if (_window != null && _window.IsVisible)
             { _window.Activate(); _window.Focus(); return; }

@@ -102,6 +102,7 @@ namespace METools
             };
             var diagButton = panelDiagnostics.AddItem(diagBtn) as PushButton;
             RibbonThemeWatcher.Register(diagButton, "icon_healthcheck");
+            RibbonLicenseWatcher.Register(diagButton);
             RibbonLanguageWatcher.Register(diagButton, "ribbon.diagnostics");
 
             // -- Family Placer -----------------------------------------------
@@ -179,6 +180,7 @@ namespace METools
             };
             var lmButton = panelLevels.AddItem(lmBtn) as PushButton;
             RibbonThemeWatcher.Register(lmButton, "icon_lm");
+            RibbonLicenseWatcher.Register(lmButton);
             RibbonLanguageWatcher.Register(lmButton, "ribbon.level_manager");
 
             // -- Project Transfer ---------------------------------------------
@@ -193,6 +195,7 @@ namespace METools
             };
             var ptButton = panelLevels.AddItem(ptBtn) as PushButton;
             RibbonThemeWatcher.Register(ptButton, "icon_pt");
+            RibbonLicenseWatcher.Register(ptButton);
             RibbonLanguageWatcher.Register(ptButton, "ribbon.project_transfer");
 
             // -- Circuit Tagger ---------------------------------------------
@@ -212,6 +215,7 @@ namespace METools
             };
             var ctButton = panelCircuits.AddItem(ctBtn) as PushButton;
             RibbonThemeWatcher.Register(ctButton, "icon_ct");
+            RibbonLicenseWatcher.Register(ctButton);
             RibbonLanguageWatcher.Register(ctButton, "ribbon.circuit_tagger");
 
             // -- Statistics ------------------------------------------------
@@ -249,6 +253,7 @@ namespace METools
             };
             var bpButton = panelCircuits.AddItem(bpBtn) as PushButton;
             RibbonThemeWatcher.Register(bpButton, "icon_bp");
+            RibbonLicenseWatcher.Register(bpButton);
             RibbonLanguageWatcher.Register(bpButton, "ribbon.batch_params");
 
             // -- Collision Checker (conduits/cable trays vs walls) -----------
@@ -273,6 +278,7 @@ namespace METools
             };
             var ccButton = panelCircuits.AddItem(ccBtn) as PushButton;
             RibbonThemeWatcher.Register(ccButton, "icon_cc");
+            RibbonLicenseWatcher.Register(ccButton);
             RibbonLanguageWatcher.Register(ccButton, "ribbon.collision_checker");
 
             // -- Comments ----------------------------------------------------
@@ -292,6 +298,7 @@ namespace METools
             };
             var cmtButton = panelTeam.AddItem(cmtBtn) as PushButton;
             RibbonThemeWatcher.Register(cmtButton, "icon_comments");
+            RibbonLicenseWatcher.Register(cmtButton);
             RibbonLanguageWatcher.Register(cmtButton, "ribbon.comments");
 
             // -- Activity Log & Time Tracker ------------------------------------
@@ -321,6 +328,12 @@ namespace METools
             // current theme, and subscribe so it stays in sync if the user
             // switches Revit's theme later without restarting.
             RibbonThemeWatcher.Init();
+
+            // Greys out the full-license tools' ribbon buttons right now if
+            // running unlicensed. Also re-run from Settings whenever the
+            // license is activated/deactivated, since that's the only other
+            // moment license state can actually change mid-session.
+            RibbonLicenseWatcher.RefreshAll();
 
             // EXPERIMENTAL: attempt to color each panel using undocumented
             // internal Revit UI classes -- see RibbonPanelColorizer.cs for the

@@ -5,7 +5,7 @@ using Autodesk.Revit.DB;
 
 namespace METools.ProjectTransfer
 {
-    public enum TransferCategory { Filters, Views, ViewTemplates, Sheets, Schedules }
+    public enum TransferCategory { Filters, Views, ViewTemplates, Sheets, Schedules, ProjectParameters }
 
     // One item the user can pick to copy: a filter, a drafting view/legend,
     // a sheet, or a schedule from the SOURCE (active) document.

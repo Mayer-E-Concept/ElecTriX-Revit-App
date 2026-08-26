@@ -722,14 +722,14 @@ namespace METools
             string key = _tbKey?.Text?.Trim().ToUpperInvariant() ?? "";
             if (string.IsNullOrEmpty(key)) return;
             bool ok = LicenseManager.TryActivate(key);
-            if (ok) { MessageBox.Show(S._("settings.license.act_ok_msg"), S._("settings.license.act_ok_title"), MessageBoxButton.OK, MessageBoxImage.None); RefreshStatusLabel(); if (_btnDeactivate != null) _btnDeactivate.Visibility = Visibility.Visible; UpdateActivateButton(); }
+            if (ok) { MessageBox.Show(S._("settings.license.act_ok_msg"), S._("settings.license.act_ok_title"), MessageBoxButton.OK, MessageBoxImage.None); RefreshStatusLabel(); if (_btnDeactivate != null) _btnDeactivate.Visibility = Visibility.Visible; UpdateActivateButton(); RibbonLicenseWatcher.RefreshAll(); }
             else    { MessageBox.Show(S._("settings.license.act_fail_msg"), S._("settings.license.act_fail_title"), MessageBoxButton.OK, MessageBoxImage.Warning); }
         }
 
         private void OnDeactivate()
         {
             if (MessageBox.Show(S._("settings.license.remove_confirm"), S._("settings.license.remove_title"), MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes)
-            { LicenseManager.Deactivate(); if (_tbKey != null) _tbKey.Text = ""; if (_btnDeactivate != null) _btnDeactivate.Visibility = Visibility.Collapsed; RefreshStatusLabel(); UpdateActivateButton(); }
+            { LicenseManager.Deactivate(); if (_tbKey != null) _tbKey.Text = ""; if (_btnDeactivate != null) _btnDeactivate.Visibility = Visibility.Collapsed; RefreshStatusLabel(); UpdateActivateButton(); RibbonLicenseWatcher.RefreshAll(); }
         }
 
         // ── TAB 3: Worksets ───────────────────────────────────────────────
