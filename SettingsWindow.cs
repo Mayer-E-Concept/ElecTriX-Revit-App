@@ -1393,6 +1393,42 @@ namespace METools
             }
         }
 
+        // Lightweight, UI-free count for DiagnosticsHandler's "Run All
+        // Checks" orchestrator. Deliberately kept completely separate from
+        // LoadImportedCategories below -- that method is tightly coupled to
+        // building this window's own UI (rows, checkboxes, subcategory
+        // tracking, derived-text-usage detection) and has been the subject
+        // of many careful bug fixes this session; duplicating just the
+        // "orphaned" definition here, rather than touching that method,
+        // keeps this addition zero-risk to everything already working.
+        // Doesn't detect derived-text-usage (confirmed elsewhere this
+        // session as a real, separate reason a category can be stuck) --
+        // this is specifically "how many top-level import categories have
+        // zero direct elements," a narrower, well-defined count.
+        public static int CountOrphanedImportCategories(Autodesk.Revit.DB.Document doc)
+        {
+            int count = 0;
+            try
+            {
+                var liveIds = new HashSet<long>();
+                foreach (var ii in new Autodesk.Revit.DB.FilteredElementCollector(doc)
+                    .OfClass(typeof(Autodesk.Revit.DB.ImportInstance))
+                    .Cast<Autodesk.Revit.DB.ImportInstance>())
+                {
+                    var cid = ii.Category?.Id;
+                    if (cid != null) liveIds.Add(cid.Value);
+                }
+
+                foreach (var cat in doc.Settings.Categories.Cast<Autodesk.Revit.DB.Category>()
+                    .Where(c => c != null && c.Parent == null && c.Id != null && c.Id.Value > 0))
+                {
+                    if (!liveIds.Contains(cat.Id.Value)) count++;
+                }
+            }
+            catch { }
+            return count;
+        }
+
         private void LoadImportedCategories()
         {
             if (_importsList == null) return;
@@ -1517,6 +1553,17 @@ namespace METools
                 _importsList.Children.Add(BuildImportRow(row));
             }
             UpdateImportsStatus();
+
+            // Genuinely orphaned = zero direct instances AND zero derived-
+            // text-usage, matching this app's own "should be removable"
+            // status text elsewhere on this same panel -- a category with
+            // LiveInstanceCount == 0 but real derived-text-usage is still
+            // blocked, not actually removable.
+            int orphanedCount = _importRows.Count(r => r.LiveInstanceCount == 0 && r.DerivedTextUsageCount == 0);
+            SettingsStore.SaveScanHistory("imports", orphanedCount == 0
+                ? S._("diagnostics.hub_history_clean")
+                : string.Format(S._("settings.imports.hub_history_found_fmt"), orphanedCount));
+
             // Deferred for the same reason as ShowHome/ShowPanel -- this
             // runs synchronously right after ShowPanel just changed several
             // panels' Visibility, before WPF's next real layout pass has
@@ -2689,22 +2736,80 @@ namespace METools
     internal static class SettingsStore
     {
         private static readonly string File = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "METools", "settings.ini");
-        private static string _language;
+        private static Dictionary<string, string> _cache;
+
+        // BUG FIXED HERE: this used to be a single dedicated Language
+        // property that read/wrote the ENTIRE file as just one
+        // "language=..." line -- correct as long as there was only ever
+        // one key, but it meant adding any second setting (LastTrialNudgeDate
+        // below) the same naive way would have silently wiped out whatever
+        // the other one had just saved. Rewritten as a proper multi-key
+        // store; Language's own get/set behavior is unchanged.
+        private static Dictionary<string, string> ReadAll()
+        {
+            if (_cache != null) return _cache;
+            _cache = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            try
+            {
+                if (System.IO.File.Exists(File))
+                    foreach (var line in System.IO.File.ReadAllLines(File))
+                    {
+                        int idx = line.IndexOf('=');
+                        if (idx <= 0) continue;
+                        _cache[line.Substring(0, idx).Trim()] = line.Substring(idx + 1).Trim();
+                    }
+            }
+            catch { }
+            return _cache;
+        }
+
+        private static void WriteKey(string key, string value)
+        {
+            var all = ReadAll();
+            all[key] = value ?? "";
+            try
+            {
+                var dir = Path.GetDirectoryName(File);
+                Directory.CreateDirectory(dir);
+                System.IO.File.WriteAllLines(File, all.Select(kv => $"{kv.Key}={kv.Value}"));
+            }
+            catch { }
+        }
+
         public static string Language
         {
-            get
-            {
-                if (_language != null) return _language;
-                try { if (System.IO.File.Exists(File)) foreach (var line in System.IO.File.ReadAllLines(File)) if (line.StartsWith("language=")) return _language = line.Substring(9).Trim(); }
-                catch { }
-                return _language = "en";
-            }
-            set
-            {
-                _language = value;
-                try { var dir = Path.GetDirectoryName(File); Directory.CreateDirectory(dir); System.IO.File.WriteAllText(File, $"language={value}\n"); }
-                catch { }
-            }
+            get => ReadAll().TryGetValue("language", out var v) && !string.IsNullOrEmpty(v) ? v : "en";
+            set => WriteKey("language", value);
+        }
+
+        // Last calendar date (yyyy-MM-dd, invariant) the trial-ending nudge
+        // was shown -- so it's a once-per-day reminder during the final
+        // stretch, not a once-per-Revit-restart annoyance.
+        public static string LastTrialNudgeDate
+        {
+            get => ReadAll().TryGetValue("last_trial_nudge_date", out var v) ? v : "";
+            set => WriteKey("last_trial_nudge_date", value);
+        }
+
+        // Generic last-scan history for the Diagnostics hub tiles -- one
+        // summary string and one timestamp per tool, keyed by a short tool
+        // id (e.g. "stray", "health", "imports", "dupfam") rather than a
+        // separate near-duplicate property per tool.
+        public static void SaveScanHistory(string toolKey, string summary)
+        {
+            WriteKey($"scan_{toolKey}_summary", summary ?? "");
+            WriteKey($"scan_{toolKey}_when", DateTime.Now.ToString("o", System.Globalization.CultureInfo.InvariantCulture));
+        }
+
+        public static (string Summary, DateTime? When) GetScanHistory(string toolKey)
+        {
+            var all = ReadAll();
+            string summary = all.TryGetValue($"scan_{toolKey}_summary", out var s) ? s : "";
+            DateTime? when = null;
+            if (all.TryGetValue($"scan_{toolKey}_when", out var w) &&
+                DateTime.TryParse(w, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.RoundtripKind, out var dt))
+                when = dt;
+            return (summary, when);
         }
     }
 }

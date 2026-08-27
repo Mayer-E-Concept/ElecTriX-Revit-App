@@ -107,6 +107,10 @@ namespace METools
                 return;
             }
 
+            SettingsStore.SaveScanHistory("health", result.AllHealthy
+                ? S._("diagnostics.hub_history_clean")
+                : S._("healthcheck.hub_history_issues"));
+
             _body.Children.Add(new TextBlock
             {
                 Text = string.IsNullOrEmpty(result.ProjectTitle) ? "" : result.ProjectTitle,

@@ -349,6 +349,14 @@ namespace METools
             RibbonPanelColorizer.TryColor(panelTeam,        System.Windows.Media.Color.FromRgb(0x46, 0xB9, 0xB9));
             RibbonPanelColorizer.Init(app);
 
+            // Trial-ending reminder -- deliberately NOT called directly here.
+            // OnStartup runs while Revit itself is still starting up; a
+            // modal TaskDialog at this exact moment risks interfering with
+            // that. ApplicationInitialized is the standard, documented way
+            // to defer something like this until Revit has actually
+            // finished starting.
+            app.ControlledApplication.ApplicationInitialized += (s, e) => LicenseManager.ShowTrialNudgeIfDue();
+
             return Result.Succeeded;
         }
 

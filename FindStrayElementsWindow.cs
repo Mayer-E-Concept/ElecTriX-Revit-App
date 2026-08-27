@@ -153,6 +153,9 @@ namespace METools
             StatusLeft.Text = _results.Count == 0
                 ? string.Format(S._("straytool.scan_done_clean"), viewsScanned)
                 : string.Format(S._("straytool.scan_done_found"), _results.Count, viewsScanned);
+            SettingsStore.SaveScanHistory("stray", _results.Count == 0
+                ? S._("diagnostics.hub_history_clean")
+                : string.Format(S._("straytool.hub_history_found_fmt"), _results.Count));
             RenderResults();
         }
 

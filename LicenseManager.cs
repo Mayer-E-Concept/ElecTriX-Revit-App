@@ -204,6 +204,45 @@ namespace METools
         }
 
         /// <summary>
+        /// Shows a one-time-per-calendar-day reminder once the trial is down
+        /// to its final 5 days (matching GetStatus()'s own "expiring soon"
+        /// threshold) and not yet expired -- once it's actually expired,
+        /// CheckAccessOrExplain/CheckFullAccessOrExplain already surface that
+        /// every time a gated tool is opened, so a separate nudge stops being
+        /// useful at that point. Call once from App.OnStartup, after the
+        /// ribbon itself is built so the reminder doesn't block Revit from
+        /// finishing its own startup.
+        /// </summary>
+        public static void ShowTrialNudgeIfDue()
+        {
+            if (IsLicensed()) return;
+            int d = DaysRemaining;
+            if (d <= 0 || d > 5) return;
+
+            string today = DateTime.Today.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+            if (SettingsStore.LastTrialNudgeDate == today) return;
+
+            try
+            {
+                var td = new TaskDialog("ME-Tools — Trial Ending Soon")
+                {
+                    MainInstruction = $"Your ME-Tools trial ends in {d} day{(d == 1 ? "" : "s")}",
+                    MainContent     = "After that, the full-license tools (Circuit Tagger, Collision Checker, Batch Params, " +
+                                      "Diagnostics, Level & IFC Manager, Project Transfer, Comments, and others) will be locked " +
+                                      "until you activate a key. The free tier -- Family Placer, Family Browser, Lamp Placer, " +
+                                      "Statistics, Activity & Time, Fix Level -- keeps working either way.\n\n" +
+                                      "Open ME-Tools \u2192 Settings \u2192 License to activate a key.\n\n" +
+                                      "Need a license? Contact office@mayer-econcept.ro (include your Machine ID, shown in Settings).",
+                    CommonButtons   = TaskDialogCommonButtons.Ok,
+                };
+                td.Show();
+            }
+            catch { }
+
+            SettingsStore.LastTrialNudgeDate = today;
+        }
+
+        /// <summary>
         /// Short machine identifier for activation-code binding. Based on the
         /// registry's MachineGuid (HKLM\SOFTWARE\Microsoft\Cryptography), which
         /// only changes on an OS reinstall -- unlike the previous basis

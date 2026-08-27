@@ -75,11 +75,23 @@ namespace METools
         // ── Scan ──────────────────────────────────────────────────────────
         private void ExecuteScan(Document doc, UIDocument uiDoc, FindStrayElementsRequest req)
         {
+            var results = ScanForStrayElements(doc, uiDoc, req.WholeModel, out int viewsAttempted, out int viewsScanned);
+            if (viewsAttempted == 0) { OnScanDone?.Invoke(results, 0, "no_views"); return; }
+            OnScanDone?.Invoke(results, viewsScanned, null);
+        }
+
+        // Extracted so DiagnosticsHandler's "Run All Checks" orchestrator
+        // can reuse the exact same scan this tool's own "Scan" button runs
+        // -- one real implementation, not a second copy that could drift
+        // out of sync with this one over time.
+        public static List<StrayElementInfo> ScanForStrayElements(Document doc, UIDocument uiDoc, bool wholeModel, out int viewsAttempted, out int viewsScanned)
+        {
+            viewsScanned = 0;
             var results = new List<StrayElementInfo>();
             List<View> viewsToScan;
             try
             {
-                if (req.WholeModel)
+                if (wholeModel)
                 {
                     viewsToScan = new FilteredElementCollector(doc)
                         .OfClass(typeof(View))
@@ -91,22 +103,19 @@ namespace METools
                 }
                 else
                 {
-                    var av = uiDoc.ActiveView;
+                    var av = uiDoc?.ActiveView;
                     viewsToScan = av != null ? new List<View> { av } : new List<View>();
                 }
             }
-            catch (Exception ex) { OnStatus?.Invoke("Scan failed: " + ex.Message); return; }
+            catch { viewsAttempted = 0; return results; }
 
-            if (viewsToScan.Count == 0) { OnScanDone?.Invoke(results, 0, "no_views"); return; }
-
-            int viewsScanned = 0;
+            viewsAttempted = viewsToScan.Count;
             foreach (var view in viewsToScan)
             {
                 try { ScanOneView(doc, view, results); viewsScanned++; }
                 catch { } // one bad view (e.g. a view type that doesn't support the collector used) shouldn't stop the rest
             }
-
-            OnScanDone?.Invoke(results, viewsScanned, null);
+            return results;
         }
 
         // Analyzes exactly one view's own content in isolation -- a
@@ -115,7 +124,7 @@ namespace METools
         // global analysis would either miss real outliers in the detail
         // view or false-flag ordinary content in the site view. Every view
         // is judged only against itself.
-        private void ScanOneView(Document doc, View view, List<StrayElementInfo> results)
+        private static void ScanOneView(Document doc, View view, List<StrayElementInfo> results)
         {
             var excludedIds = new HashSet<long>();
             foreach (var bic in ExcludedCategories)
