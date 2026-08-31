@@ -4,7 +4,7 @@ using Autodesk.Revit.DB;
 
 namespace METools
 {
-    public enum FindStrayAction { None, Scan, GoTo, Prune, BackToDiagnostics }
+    public enum FindStrayAction { None, Scan, GoTo, Prune, BackToDiagnostics, Delete }
 
     public class StrayElementInfo
     {
@@ -34,5 +34,9 @@ namespace METools
         // (most commonly: deleted) silently drops off the list rather than
         // sitting there stale.
         public System.Collections.Generic.List<StrayElementInfo> ToPrune;
+
+        // -- Delete only -- one or many at once (per-row Delete button, or
+        // Delete Selected from checkboxes).
+        public System.Collections.Generic.List<ElementId> ToDelete;
     }
 }

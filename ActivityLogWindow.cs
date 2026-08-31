@@ -102,7 +102,7 @@ namespace METools.ActivityLog
             });
 
             S.SetLanguage(SettingsStore.Language ?? "en");
-            InitWindow(S._("activitylog.title"), 620);
+            InitWindow(S._("activitylog.title"), 760);
             Build();
 
             _all   = entries   ?? new List<ActivityLogEntry>();
@@ -524,6 +524,21 @@ namespace METools.ActivityLog
                 return;
             }
 
+            // Per-user Added/Modified/Deleted counts from the Activity Log
+            // (a separate data source from the Time Tracker sessions this
+            // tab was originally built around) -- same user-name
+            // normalization as the grouping below, so "" and a real name
+            // collapse into the same bucket consistently in both places.
+            var editCounts = _all
+                .GroupBy(x => string.IsNullOrWhiteSpace(x.User) ? S._("timetracker.unknown_user") : x.User,
+                          StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(
+                    g => g.Key,
+                    g => (Added: g.Count(x => x.Action == ActivityAction.Added),
+                          Modified: g.Count(x => x.Action == ActivityAction.Modified),
+                          Deleted: g.Count(x => x.Action == ActivityAction.Deleted)),
+                    StringComparer.OrdinalIgnoreCase);
+
             var totals = _ttAll
                 .GroupBy(x => string.IsNullOrWhiteSpace(x.User) ? S._("timetracker.unknown_user") : x.User,
                           StringComparer.OrdinalIgnoreCase)
@@ -541,7 +556,9 @@ namespace METools.ActivityLog
             foreach (var row in totals)
             {
                 bool isMe = string.Equals(row.User, _currentUser, StringComparison.OrdinalIgnoreCase);
-                _panTeam.Children.Add(TeamRow(row.User, row.TotalSeconds, row.SessionCount, row.LastActiveUtc.ToLocalTime(), isMe));
+                editCounts.TryGetValue(row.User, out var counts); // defaults to (0, 0, 0) if this user never edited a tracked category
+                _panTeam.Children.Add(TeamRow(row.User, row.TotalSeconds, row.SessionCount, row.LastActiveUtc.ToLocalTime(),
+                    counts.Added, counts.Modified, counts.Deleted, isMe));
             }
         }
 
@@ -552,6 +569,9 @@ namespace METools.ActivityLog
             g.Children.Add(HeaderCell(S._("timetracker.col_total"), 1));
             g.Children.Add(HeaderCell(S._("timetracker.col_sessions"), 2));
             g.Children.Add(HeaderCell(S._("timetracker.col_last_active"), 3));
+            g.Children.Add(HeaderCell(S._("timetracker.col_added"), 4));
+            g.Children.Add(HeaderCell(S._("timetracker.col_modified"), 5));
+            g.Children.Add(HeaderCell(S._("timetracker.col_deleted"), 6));
             return new Border
             {
                 BorderBrush = MeToolsTheme.BrBorder, BorderThickness = new Thickness(0, 0, 0, 1),
@@ -578,10 +598,14 @@ namespace METools.ActivityLog
             g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(90) });
             g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(70) });
             g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(120) });
+            g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(55) });
+            g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(65) });
+            g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(55) });
             return g;
         }
 
-        private Border TeamRow(string user, double totalSeconds, int sessionCount, DateTime lastActiveLocal, bool isMe)
+        private Border TeamRow(string user, double totalSeconds, int sessionCount, DateTime lastActiveLocal,
+            int addedCount, int modifiedCount, int deletedCount, bool isMe)
         {
             var g = TeamRowGrid();
             g.Margin = new Thickness(0, 6, 0, 6);
@@ -616,7 +640,33 @@ namespace METools.ActivityLog
             };
             Grid.SetColumn(lastText, 3);
 
+            // Added/Modified/Deleted come from the Activity Log, a separate
+            // data source from everything else in this row -- 0 here just
+            // means this user hasn't touched a tracked category, not that
+            // something failed to load.
+            var addedText = new TextBlock
+            {
+                Text = addedCount.ToString(), FontSize = 12, Foreground = MeToolsTheme.BrAccent,
+                VerticalAlignment = VerticalAlignment.Center,
+            };
+            Grid.SetColumn(addedText, 4);
+
+            var modifiedText = new TextBlock
+            {
+                Text = modifiedCount.ToString(), FontSize = 12, Foreground = MeToolsTheme.BrMuted,
+                VerticalAlignment = VerticalAlignment.Center,
+            };
+            Grid.SetColumn(modifiedText, 5);
+
+            var deletedText = new TextBlock
+            {
+                Text = deletedCount.ToString(), FontSize = 12, Foreground = MeToolsTheme.BrOrange,
+                VerticalAlignment = VerticalAlignment.Center,
+            };
+            Grid.SetColumn(deletedText, 6);
+
             g.Children.Add(userText); g.Children.Add(totalText); g.Children.Add(countText); g.Children.Add(lastText);
+            g.Children.Add(addedText); g.Children.Add(modifiedText); g.Children.Add(deletedText);
 
             return new Border
             {

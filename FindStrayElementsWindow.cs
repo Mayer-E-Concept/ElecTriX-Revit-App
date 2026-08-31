@@ -38,6 +38,12 @@ namespace METools
         private Button _btnScopeActive, _btnScopeModel;
         private List<StrayElementInfo> _results = new List<StrayElementInfo>();
 
+        // Rebuilt every RenderResults() call -- keyed by ElementId.Value
+        // rather than the StrayElementInfo object itself, so a Prune-driven
+        // rebuild (which produces new StrayElementInfo instances for
+        // survivors) doesn't lose track of which rows were checked.
+        private readonly Dictionary<long, CheckBox> _rowChecks = new Dictionary<long, CheckBox>();
+
         public FindStrayElementsWindow(UIApplication uiApp, ExternalEvent evt, FindStrayElementsHandler handler)
         {
             _uiApp   = uiApp;
@@ -45,10 +51,11 @@ namespace METools
             _handler = handler;
             _handler.OnScanDone = (results, viewsScanned, errorKey) => Dispatcher.Invoke(() => HandleScanDone(results, viewsScanned, errorKey));
             _handler.OnPruneDone = survivors => Dispatcher.Invoke(() => HandlePruneDone(survivors));
+            _handler.OnDeleteDone = deleted => Dispatcher.Invoke(() => HandleDeleteDone(deleted));
             _handler.OnStatus = msg => Dispatcher.Invoke(() => { if (StatusLeft != null) StatusLeft.Text = msg; });
 
             S.SetLanguage(SettingsStore.Language ?? "en");
-            InitWindow(S._("straytool.title"), width: 540, isDialog: false);
+            InitWindow(S._("straytool.title"), width: 560, isDialog: false);
             BuildStatusBar("", $"v{SplashGate.GetVersion()}");
             BuildContent();
 
@@ -104,6 +111,17 @@ namespace METools
 
             var resSec = new StackPanel { Margin = new Thickness(0, 16, 0, 0) };
             resSec.Children.Add(Sec(S._("straytool.results")));
+
+            var selRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 4, 0, 6) };
+            selRow.Children.Add(ActionBtn(S._("straytool.select_all"), true, OnSelectAllClicked));
+            var btnNone = ActionBtn(S._("straytool.select_none"), true, OnSelectNoneClicked);
+            btnNone.Margin = new Thickness(6, 0, 0, 0);
+            selRow.Children.Add(btnNone);
+            var btnDeleteSel = ActionBtn(S._("straytool.delete_selected"), true, OnDeleteSelectedClicked);
+            btnDeleteSel.Margin = new Thickness(6, 0, 0, 0);
+            selRow.Children.Add(btnDeleteSel);
+            resSec.Children.Add(selRow);
+
             var box = new Border
             {
                 BorderBrush = MeToolsTheme.BrBorder, BorderThickness = new Thickness(1),
@@ -169,10 +187,68 @@ namespace METools
             RenderResults();
         }
 
+        // ── Delete ───────────────────────────────────────────────────────
+        private void OnGoToClicked(StrayElementInfo r)
+        {
+            _handler.Request = new FindStrayElementsRequest
+            {
+                Action = FindStrayAction.GoTo, TargetViewId = r.ViewId, TargetElementId = r.Id,
+            };
+            _evt.Raise();
+        }
+
+        private void OnDeleteClicked(StrayElementInfo r)
+        {
+            string label = string.IsNullOrEmpty(r.TypeName) ? r.Category : $"{r.Category} - {r.TypeName}";
+            if (MessageBox.Show(string.Format(S._("straytool.delete_confirm_one_fmt"), label), S._("straytool.delete_confirm_title"),
+                MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
+
+            _handler.Request = new FindStrayElementsRequest { Action = FindStrayAction.Delete, ToDelete = new List<ElementId> { r.Id } };
+            _evt.Raise();
+        }
+
+        private void OnSelectAllClicked()
+        {
+            foreach (var cb in _rowChecks.Values) cb.IsChecked = true;
+        }
+
+        private void OnSelectNoneClicked()
+        {
+            foreach (var cb in _rowChecks.Values) cb.IsChecked = false;
+        }
+
+        private void OnDeleteSelectedClicked()
+        {
+            var ids = _rowChecks.Where(kv => kv.Value.IsChecked == true).Select(kv => new ElementId(kv.Key)).ToList();
+            if (ids.Count == 0) { StatusLeft.Text = S._("straytool.nothing_selected"); return; }
+
+            if (MessageBox.Show(string.Format(S._("straytool.delete_confirm_many_fmt"), ids.Count), S._("straytool.delete_confirm_title"),
+                MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
+
+            _handler.Request = new FindStrayElementsRequest { Action = FindStrayAction.Delete, ToDelete = ids };
+            _evt.Raise();
+        }
+
+        private void HandleDeleteDone(List<ElementId> deleted)
+        {
+            var deletedSet = new HashSet<long>((deleted ?? new List<ElementId>()).Select(id => id.Value));
+            _results.RemoveAll(r => deletedSet.Contains(r.Id.Value));
+            FindStrayElementsCommand.CachedResults = _results;
+
+            StatusLeft.Text = deletedSet.Count == 0
+                ? S._("straytool.delete_failed")
+                : string.Format(S._("straytool.deleted_fmt"), deletedSet.Count);
+            SettingsStore.SaveScanHistory("stray", _results.Count == 0
+                ? S._("diagnostics.hub_history_clean")
+                : string.Format(S._("straytool.hub_history_found_fmt"), _results.Count));
+            RenderResults();
+        }
+
         // ── Results list ──────────────────────────────────────────────────
         private void RenderResults()
         {
             _resultList.Children.Clear();
+            _rowChecks.Clear();
             if (_results.Count == 0)
             {
                 _resultList.Children.Add(new TextBlock
@@ -200,8 +276,13 @@ namespace METools
         private Border BuildStrayRow(StrayElementInfo r)
         {
             var grid = new Grid { Margin = new Thickness(2, 3, 2, 3) };
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var cb = new CheckBox { VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 4, 8, 0) };
+            _rowChecks[r.Id.Value] = cb;
+            Grid.SetColumn(cb, 0);
 
             double distM = r.DistanceFt * 0.3048;
             string distText = distM >= 1000
@@ -220,30 +301,26 @@ namespace METools
                 Text = string.Format(S._("straytool.distance_line_fmt"), distText),
                 FontSize = 10.5, Foreground = MeToolsTheme.BrOrange, TextWrapping = TextWrapping.Wrap,
             });
-            Grid.SetColumn(textStack, 0);
+            Grid.SetColumn(textStack, 1);
 
+            var btnStack = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Top };
             var btnGoTo = ActionBtn(S._("straytool.go_to"), true, () => OnGoToClicked(r));
-            btnGoTo.VerticalAlignment = VerticalAlignment.Top;
             btnGoTo.Margin = new Thickness(8, 0, 0, 0);
-            Grid.SetColumn(btnGoTo, 1);
+            var btnDelete = ActionBtn(S._("straytool.delete"), true, () => OnDeleteClicked(r));
+            btnDelete.Margin = new Thickness(6, 0, 0, 0);
+            btnStack.Children.Add(btnGoTo);
+            btnStack.Children.Add(btnDelete);
+            Grid.SetColumn(btnStack, 2);
 
+            grid.Children.Add(cb);
             grid.Children.Add(textStack);
-            grid.Children.Add(btnGoTo);
+            grid.Children.Add(btnStack);
 
             return new Border
             {
                 BorderBrush = MeToolsTheme.BrBorder, BorderThickness = new Thickness(0, 0, 0, 1),
                 Padding = new Thickness(0, 4, 0, 4), Child = grid,
             };
-        }
-
-        private void OnGoToClicked(StrayElementInfo r)
-        {
-            _handler.Request = new FindStrayElementsRequest
-            {
-                Action = FindStrayAction.GoTo, TargetViewId = r.ViewId, TargetElementId = r.Id,
-            };
-            _evt.Raise();
         }
     }
 }

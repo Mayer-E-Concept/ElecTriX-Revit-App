@@ -23,6 +23,7 @@ namespace METools
         public FindStrayElementsRequest Request { get; set; } = new FindStrayElementsRequest();
         public Action<List<StrayElementInfo>, int, string> OnScanDone { get; set; } // results, viewsScanned, statusMessage
         public Action<List<StrayElementInfo>> OnPruneDone { get; set; }
+        public Action<List<ElementId>> OnDeleteDone { get; set; } // the ids that were actually confirmed gone
         public Action<string> OnStatus { get; set; }
 
         // Same reasoning as originally written: these legitimately span
@@ -70,6 +71,7 @@ namespace METools
             // Execute(), which Revit guarantees is always valid context,
             // the same guarantee Scan/GoTo/Prune above already rely on.
             else if (req.Action == FindStrayAction.BackToDiagnostics) DiagnosticsCommand.Open(app);
+            else if (req.Action == FindStrayAction.Delete) ExecuteDelete(doc, req);
         }
 
         // ── Scan ──────────────────────────────────────────────────────────
@@ -243,6 +245,41 @@ namespace METools
                 }
             }
             OnPruneDone?.Invoke(survivors);
+        }
+
+        // ── Delete -- one (per-row button) or many at once (Delete
+        // Selected). Each id gets its own try/catch so one bad element
+        // (already gone, some other reason it refuses to delete) doesn't
+        // abort the rest of the batch. Confirmed via GetElement afterward
+        // rather than trusting Delete's own return value -- Delete can
+        // cascade (deleting a hosted element along with its host, say),
+        // so its return collection doesn't map cleanly back to "did this
+        // specific requested id survive."
+        private void ExecuteDelete(Document doc, FindStrayElementsRequest req)
+        {
+            var confirmed = new List<ElementId>();
+            if (req.ToDelete != null && req.ToDelete.Count > 0)
+            {
+                try
+                {
+                    using (var tx = new Transaction(doc, "ME-Tools: Delete Stray Elements"))
+                    {
+                        tx.Start();
+                        foreach (var id in req.ToDelete)
+                        {
+                            try { doc.Delete(id); } catch { }
+                        }
+                        tx.Commit();
+                    }
+                }
+                catch { }
+
+                foreach (var id in req.ToDelete)
+                {
+                    try { if (doc.GetElement(id) == null) confirmed.Add(id); } catch { confirmed.Add(id); }
+                }
+            }
+            OnDeleteDone?.Invoke(confirmed);
         }
 
         // ── Go To -- same pattern already proven in Collision Checker and

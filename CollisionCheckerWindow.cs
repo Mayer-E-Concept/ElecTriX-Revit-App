@@ -440,7 +440,7 @@ namespace METools.CollisionChecker
         // would. Still worth attempting: matches this project's own naming
         // convention, and a wrong guess costs nothing since it's never
         // presented as more than a starting point to check.
-        private static readonly string[] ArchitectureLinkNameHints = { "arch", "architektur", "gebaeude", "gebäude", "hochbau" };
+        private static readonly string[] ArchitectureLinkNameHints = { "arch", "architektur", "gebaeude", "gebäude", "hochbau", "arc_" };
 
         private void RefreshImportChoices()
         {
