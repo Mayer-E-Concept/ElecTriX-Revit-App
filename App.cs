@@ -301,6 +301,27 @@ namespace METools
             RibbonLicenseWatcher.Register(cmtButton);
             RibbonLanguageWatcher.Register(cmtButton, "ribbon.comments");
 
+            // -- Tasks ---------------------------------------------------------
+            // Customer emails processed by the standalone METools.MailBridge
+            // service become tasks here -- translated/summarized, filed per
+            // project, self-assignable. Same shared folder as Comments.
+            var taskBtn = new PushButtonData(
+                "Tasks", S._("ribbon.tasks"), dll,
+                "METools.Tasks.TasksCommand")
+            {
+                ToolTip = "Customer emails filed as per-project tasks -- translated, summarized, self-assignable.",
+                LongDescription = $"Tasks -- {VENDOR}\n\nIncoming customer emails are translated, summarized, and filed here as tasks for the matching project.\n\n" +
+                    "* Requires the same shared network folder as Comments (configured there)\n" +
+                    "* Assign to yourself, mark done, or jump to a pinned element\n" +
+                    "* Auto-refreshes while the window is open",
+                Image = LoadIcon("icon_tasks_light_16.png") ?? LoadIcon("icon_comments_light_16.png"),
+                LargeImage = LoadIcon("icon_tasks_light_32.png") ?? LoadIcon("icon_comments_light_32.png"),
+            };
+            var taskButton = panelTeam.AddItem(taskBtn) as PushButton;
+            RibbonThemeWatcher.Register(taskButton, "icon_tasks");
+            RibbonLicenseWatcher.Register(taskButton);
+            RibbonLanguageWatcher.Register(taskButton, "ribbon.tasks");
+
             // -- Activity Log & Time Tracker ------------------------------------
             // Time Tracker used to be its own button here; merged into this one
             // as two extra tabs ("Team Totals" / "My Sessions") since it's the
