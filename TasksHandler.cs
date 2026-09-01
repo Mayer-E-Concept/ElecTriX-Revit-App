@@ -1,12 +1,16 @@
 // TasksHandler.cs -- ME-Tools | Tasks ExternalEvent handler
 // Mayer E-Concept SRL
 //
-// Every action from the modeless TasksWindow -- even Claim and MarkDone,
-// which are pure file I/O with no Revit API involved -- is queued through
-// here rather than running inline from a WPF click handler. That mirrors
-// CommentsHandler's CommentsAction/CommentsRequest pattern exactly: one
-// path for every action, so nobody has to remember which ones are
-// "special" and safe to call directly.
+// Every action from the modeless TasksWindow -- even Claim, Release and
+// MarkDone, which are pure file I/O with no Revit API involved -- is
+// queued through here rather than running inline from a WPF click
+// handler, mirroring CommentsHandler's request/action pattern exactly.
+//
+// Since the window now shows tasks from every project at once (not just
+// whichever one it was opened from), a mutation has to be told which
+// project's file to touch per request -- see TasksRequest.TaskProjectId --
+// rather than this handler holding one fixed ProjectId for its whole
+// lifetime the way the original single-project version did.
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -18,11 +22,11 @@ namespace METools.Tasks
     public class TasksHandler : IExternalEventHandler
     {
         public TasksRequest Request { get; set; }
-        public string ProjectId { get; set; }
 
-        // Fired once Execute finishes, with the reloaded task list and an
-        // optional message to surface (an error, or a storage warning).
-        public Action<List<ProjectTask>, string> OnComplete { get; set; }
+        // Fired once Execute finishes, with the reloaded cross-project
+        // task list, freshly computed stats, and an optional message to
+        // surface (an error, or a storage warning).
+        public Action<List<ProjectTask>, TaskStats, string> OnComplete { get; set; }
 
         public void Execute(UIApplication app)
         {
@@ -35,7 +39,7 @@ namespace METools.Tasks
             {
                 case TasksAction.Claim:
                     {
-                        var result = TasksStorage.TryClaim(ProjectId, request.TaskId, request.CurrentUser, out var claimedBy, out error);
+                        var result = TasksStorage.TryClaim(request.TaskProjectId, request.TaskId, request.CurrentUser, out var claimedBy, out error);
                         if (result == ClaimResult.AlreadyClaimed)
                             error = $"Someone beat you to it -- already claimed by {claimedBy}.";
                         else if (result == ClaimResult.NotFound)
@@ -43,8 +47,18 @@ namespace METools.Tasks
                         break;
                     }
 
+                case TasksAction.Release:
+                    {
+                        var result = TasksStorage.Release(request.TaskProjectId, request.TaskId, request.CurrentUser, out error);
+                        if (result == ClaimResult.NotYours)
+                            error = "That task isn't assigned to you, so it can't be released from here.";
+                        else if (result == ClaimResult.NotFound)
+                            error = "That task is no longer on the list.";
+                        break;
+                    }
+
                 case TasksAction.MarkDone:
-                    TasksStorage.MarkDone(ProjectId, request.TaskId, out error);
+                    TasksStorage.MarkDone(request.TaskProjectId, request.TaskId, out error);
                     break;
 
                 case TasksAction.GoToElement:
@@ -55,14 +69,35 @@ namespace METools.Tasks
                     AttachElement(app, request);
                     break;
 
+                case TasksAction.RegisterCurrentProject:
+                    error = RegisterCurrentProject(app);
+                    break;
+
+                case TasksAction.MoveToProject:
+                    TasksStorage.MoveTaskToProject(request.TaskProjectId, request.TargetProjectId, request.TaskId, out error);
+                    break;
+
+                case TasksAction.Delete:
+                    TasksStorage.DeleteTask(request.TaskProjectId, request.TaskId, out error);
+                    break;
+
                 case TasksAction.Refresh:
                     // Pure reload -- nothing to do against the document.
                     break;
             }
 
-            var list = TasksStorage.LoadAll(ProjectId, out var warning);
-            OnComplete?.Invoke(list, error ?? warning);
+            var list = TasksStorage.LoadAllAcrossProjects(out var warning);
+            var stats = ComputeStats(list);
+            OnComplete?.Invoke(list, stats, error ?? warning);
         }
+
+        private static TaskStats ComputeStats(List<ProjectTask> list) => new TaskStats
+        {
+            Total = list.Count,
+            Unassigned = list.Count(t => string.IsNullOrWhiteSpace(t.AssignedTo)),
+            InProgress = list.Count(t => !string.IsNullOrWhiteSpace(t.AssignedTo) && t.Status != "done"),
+            Done = list.Count(t => t.Status == "done"),
+        };
 
         private void GoToElement(UIApplication app, string elementUniqueId)
         {
@@ -73,7 +108,7 @@ namespace METools.Tasks
             try { element = uidoc.Document.GetElement(elementUniqueId); }
             catch { element = null; }
 
-            if (element == null) return; // stale reference -- the reloaded list is still shown either way
+            if (element == null) return; // stale reference, or the element belongs to a different project than what's open -- the reloaded list is still shown either way
 
             uidoc.Selection.SetElementIds(new List<ElementId> { element.Id });
             uidoc.ShowElements(element);
@@ -94,7 +129,7 @@ namespace METools.Tasks
             var element = doc.GetElement(selectedIds.First());
             if (element == null) return;
 
-            TasksStorage.Mutate(ProjectId, list =>
+            TasksStorage.Mutate(request.TaskProjectId, list =>
             {
                 var task = list.Find(t => t.Id == request.TaskId);
                 if (task == null) return;
@@ -104,5 +139,49 @@ namespace METools.Tasks
         }
 
         public string GetName() => "METools Tasks Handler";
+
+        // Pulls Project Name/Number/Address/Client Name straight out of
+        // Revit's own Project Information -- and the document's file
+        // title, which is always present even when those fields are left
+        // blank (common in practice) -- rather than asking for any of it
+        // to be typed by hand. Real project metadata is both less effort
+        // and less error-prone than remembering to type "Hamburg_V2"
+        // correctly into a JSON file.
+        private string RegisterCurrentProject(UIApplication app)
+        {
+            var uidoc = app.ActiveUIDocument;
+            if (uidoc == null)
+                return "Open a project in Revit first, then try registering it.";
+
+            var doc = uidoc.Document;
+            var projectId = METools.Comments.CommentsStorage.GetOrCreateProjectId(doc);
+            if (string.IsNullOrEmpty(projectId))
+                return "Could not identify this project.";
+
+            string ProjectField(string paramName)
+            {
+                try { return doc.ProjectInformation?.LookupParameter(paramName)?.AsString(); }
+                catch { return null; }
+            }
+
+            var projectName = ProjectField("Project Name");
+            var projectNumber = ProjectField("Project Number");
+            var projectAddress = ProjectField("Project Address");
+            var clientName = ProjectField("Client Name");
+            var fileTitle = doc.Title;
+
+            var displayName = !string.IsNullOrWhiteSpace(projectName) ? projectName : fileTitle;
+
+            var keywords = new List<string> { fileTitle, projectName, projectNumber, projectAddress, clientName }
+                .Where(k => !string.IsNullOrWhiteSpace(k) && k.Trim().Length >= 3)
+                .Select(k => k.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            var ok = TasksStorage.RegisterProject(projectId, displayName, keywords, null, out var storageError);
+            return ok
+                ? $"Registered '{displayName}' for Tasks -- matches on: {string.Join(", ", keywords)}."
+                : $"Could not register this project: {storageError}";
+        }
     }
 }

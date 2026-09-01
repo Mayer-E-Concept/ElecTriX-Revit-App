@@ -1,9 +1,12 @@
 // TasksCommand.cs -- ME-Tools | Tasks ribbon command
 // Mayer E-Concept SRL
+//
+// No longer requires an open document -- the window is a cross-project
+// dashboard now, and the shared folder path it reads from comes from
+// Comments' own machine-level setting, not from anything in a Document.
 using Autodesk.Revit.Attributes;
 using Autodesk.Revit.DB;
 using Autodesk.Revit.UI;
-using METools.Comments;
 
 namespace METools.Tasks
 {
@@ -13,25 +16,7 @@ namespace METools.Tasks
     {
         public Result Execute(ExternalCommandData commandData, ref string message, ElementSet elements)
         {
-            var uiApp = commandData.Application;
-            var doc = uiApp.ActiveUIDocument?.Document;
-            if (doc == null)
-            {
-                message = "Open a project before using Tasks.";
-                return Result.Failed;
-            }
-
-            // Same GUID CommentsStorage already stamps into this project --
-            // a task file for this project lives right next to its
-            // comments file, keyed by the same id.
-            var projectId = CommentsStorage.GetOrCreateProjectId(doc);
-            if (string.IsNullOrEmpty(projectId))
-            {
-                message = "Could not identify this project.";
-                return Result.Failed;
-            }
-
-            TasksWindow.ShowOrActivate(uiApp, projectId);
+            TasksWindow.ShowOrActivate(commandData.Application);
             return Result.Succeeded;
         }
     }
