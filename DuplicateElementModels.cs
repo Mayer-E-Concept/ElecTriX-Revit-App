@@ -26,7 +26,7 @@ namespace METools.CollisionChecker
         public List<DuplicateElementInfo> DuplicateInstances { get; set; } = new List<DuplicateElementInfo>();
     }
 
-    public enum DuplicateCheckAction { Scan, DeleteDuplicates }
+    public enum DuplicateCheckAction { Scan, DeleteDuplicates, GoToGroup }
 
     public class DuplicateCheckRequest
     {
@@ -37,6 +37,12 @@ namespace METools.CollisionChecker
         // what gets deleted is guaranteed to be exactly what was shown and
         // confirmed on screen, not whatever a second scan happens to find.
         public List<DuplicateGroup> GroupsToDelete { get; set; } = new List<DuplicateGroup>();
+
+        // For GoToGroup: the one group to select and zoom to -- every
+        // element in it (the kept copy and all the extras), since they're
+        // all sitting at the same point by definition. Seeing the whole
+        // stack highlighted is the point, not just one of them.
+        public DuplicateGroup TargetGroup { get; set; }
     }
 
     public class DuplicateScanResult

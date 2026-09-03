@@ -228,6 +228,10 @@ namespace METools.CollisionChecker
                     FontSize = 10.5, Foreground = MeToolsTheme.BrMuted, Margin = new Thickness(0, 2, 0, 0),
                 });
 
+                var goToRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 6, 0, 0) };
+                goToRow.Children.Add(ActionBtn("Go to", true, () => SendGoToGroup(group)));
+                sp.Children.Add(goToRow);
+
                 _dupResultsPanel.Children.Add(new Border
                 {
                     Background = MeToolsTheme.BrSurface, BorderBrush = MeToolsTheme.BrBorder,
@@ -236,6 +240,12 @@ namespace METools.CollisionChecker
                     Child = sp,
                 });
             }
+        }
+
+        private void SendGoToGroup(DuplicateGroup group)
+        {
+            _dupHandler.Request = new DuplicateCheckRequest { Action = DuplicateCheckAction.GoToGroup, TargetGroup = group };
+            _dupEvent.Raise();
         }
 
         private void ConfirmAndDeleteDuplicates()
