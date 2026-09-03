@@ -17,7 +17,7 @@ using Visibility = System.Windows.Visibility;
 
 namespace METools.CollisionChecker
 {
-    public class CollisionCheckerWindow : METools.MeToolsWindowBase
+    public partial class CollisionCheckerWindow : METools.MeToolsWindowBase
     {
         protected override string AppKey => "CollisionChecker";
 
@@ -189,7 +189,12 @@ namespace METools.CollisionChecker
             rootGrid.Children.Add(resultsDock);
 
             contentGrid.Children.Add(rootGrid);
-            RootDock.Children.Add(contentGrid);
+
+            // Duplicate Devices tab is built and wired in
+            // CollisionCheckerWindow.Duplicates.cs (a separate partial-class
+            // file) -- kept as a one-line hook here rather than growing
+            // this already-large file further.
+            RootDock.Children.Add(BuildTabbedRoot(contentGrid));
 
             TryRestoreCachedScan();
         }
