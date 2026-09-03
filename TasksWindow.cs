@@ -221,29 +221,30 @@ namespace METools.Tasks
             return result;
         }
 
-        // Same normalization scheme as MailBridge's ProjectRegistry.Resolve
-        // -- case, underscores, hyphens, and extra spaces all collapsed to
-        // single spaces -- kept in sync by hand across the two separate
-        // .NET projects, same as the model shapes themselves.
-        private static string Normalize(string s) =>
-            System.Text.RegularExpressions.Regex.Replace((s ?? "").ToLowerInvariant(), @"[_\-\s]+", " ").Trim();
-
         // Only offered for tasks that landed in "unassigned" -- an
         // already-routed task never gets a suggestion, since it already
         // has a real answer. Matches the AI's ProjectGuessRaw against
         // every registered project's DisplayName and Keywords; either
         // containing the other counts as a match, with a minimum length
-        // so short strings like "V2" alone can't match everything. This
-        // is still just a suggestion a person clicks to confirm -- never
-        // auto-applied -- so a slightly loose match here is fine; it
-        // costs one extra glance, not a silent misfile.
-        private ProjectRegistryEntry FindSuggestedProject(ProjectTask task)
+        // so short strings like "V2" alone can't match everything.
+        //
+        // Returns every match, not just one -- two projects sharing a
+        // code (e.g. "P238 Schwanstrasse" and "P238 BOS Haus 2" both
+        // registered under "P238") is a completely normal way project
+        // numbering works, not a rare edge case. Silently picking
+        // whichever one happened to be registered first would be exactly
+        // the kind of wrong-project misfile this whole feature exists to
+        // avoid -- so when there's more than one candidate, the window
+        // shows all of them and a person picks, rather than guessing on
+        // their behalf.
+        private List<ProjectRegistryEntry> FindSuggestedProjects(ProjectTask task)
         {
-            if (task.RoutingMethod != "unassigned" || string.IsNullOrWhiteSpace(task.ProjectGuessRaw))
-                return null;
+            var result = new List<ProjectRegistryEntry>();
+            if (task.ProjectId != "unassigned" || string.IsNullOrWhiteSpace(task.ProjectGuessRaw))
+                return result;
 
-            var guess = Normalize(task.ProjectGuessRaw);
-            if (guess.Length < 3) return null;
+            var guess = TasksStorage.Normalize(task.ProjectGuessRaw);
+            if (guess.Length < 3) return result;
 
             foreach (var entry in _registryEntries)
             {
@@ -253,14 +254,17 @@ namespace METools.Tasks
                 foreach (var candidate in candidates)
                 {
                     if (string.IsNullOrWhiteSpace(candidate)) continue;
-                    var normCandidate = Normalize(candidate);
+                    var normCandidate = TasksStorage.Normalize(candidate);
                     if (normCandidate.Length < 3) continue;
                     if (guess.Contains(normCandidate) || normCandidate.Contains(guess))
-                        return entry;
+                    {
+                        result.Add(entry);
+                        break; // one matching keyword is enough to include this project once
+                    }
                 }
             }
 
-            return null;
+            return result;
         }
 
         private void SendMoveRequest(ProjectTask task, ProjectRegistryEntry target)
@@ -288,6 +292,25 @@ namespace METools.Tasks
 
             if (result == MessageBoxResult.Yes)
                 SendRequest(TasksAction.Delete, task);
+        }
+
+        // A plain hex value defined here rather than relying on
+        // MeToolsTheme.CRed -- that member's exact type (Color vs Brush)
+        // isn't something this file can verify without compiling, and a
+        // wrong guess there is a build break. This is a standalone,
+        // reasonably universal warning red.
+        private static readonly System.Windows.Media.Brush StaleWarningBrush =
+            new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0xE5, 0x48, 0x4D));
+
+        private const double StaleUnassignedHours = 48;
+
+        private static string FormatAge(DateTime receivedUtc)
+        {
+            var span = DateTime.UtcNow - receivedUtc;
+            if (span.TotalMinutes < 1) return "just now";
+            if (span.TotalMinutes < 60) return $"{(int)span.TotalMinutes}m ago";
+            if (span.TotalHours < 24) return $"{(int)span.TotalHours}h ago";
+            return $"{(int)span.TotalDays}d ago";
         }
 
         private string DisplayProjectName(string projectId)
@@ -369,14 +392,31 @@ namespace METools.Tasks
             });
 
             var received = task.ReceivedAtUtc.ToLocalTime().ToString("g");
+            var age = FormatAge(task.ReceivedAtUtc);
             sp.Children.Add(new TextBlock
             {
-                Text = $"{task.SenderName} <{task.SenderEmail}> \u00b7 {received} \u00b7 {task.Category} \u00b7 {task.Urgency} urgency",
+                Text = $"{task.SenderName} <{task.SenderEmail}> \u00b7 {received} ({age}) \u00b7 {task.Category} \u00b7 {task.Urgency} urgency",
                 FontSize = 10.5,
                 Foreground = MeToolsTheme.BrMuted,
                 TextWrapping = TextWrapping.Wrap,
                 Margin = new Thickness(0, 0, 0, 6),
             });
+
+            // A quiet nudge, not a loud alarm: only for tasks nobody has
+            // claimed yet, past a threshold long enough that it's genuinely
+            // been sitting rather than just "arrived this morning."
+            if (string.IsNullOrWhiteSpace(task.AssignedTo) && task.Status != "done" &&
+                (DateTime.UtcNow - task.ReceivedAtUtc).TotalHours >= StaleUnassignedHours)
+            {
+                sp.Children.Add(new TextBlock
+                {
+                    Text = $"Waiting {age} with nobody assigned",
+                    FontSize = 10.5,
+                    FontWeight = FontWeights.Medium,
+                    Foreground = StaleWarningBrush,
+                    Margin = new Thickness(0, 0, 0, 6),
+                });
+            }
 
             if (!string.IsNullOrWhiteSpace(task.Summary))
             {
@@ -390,14 +430,35 @@ namespace METools.Tasks
                 });
             }
 
-            if (task.RoutingMethod == "unassigned")
+            if (task.ProjectId == "unassigned")
             {
-                var suggestion = FindSuggestedProject(task);
-                if (suggestion != null)
+                if (task.RoutingMethod == "ambiguous-domain" || task.RoutingMethod == "ambiguous-keyword")
                 {
-                    sp.Children.Add(InfoBox($"Possible match: \"{task.ProjectGuessRaw}\" \u2192 {suggestion.DisplayName}"));
+                    sp.Children.Add(InfoBox(
+                        "The sender's domain or a registered keyword matches more than one project -- " +
+                        "routing was skipped rather than guess which one. Fix the overlap in the project registry, or pick one below if it's already narrowed down."));
+                }
+
+                var suggestions = FindSuggestedProjects(task);
+                if (suggestions.Count == 1)
+                {
+                    sp.Children.Add(InfoBox($"Possible match: \"{task.ProjectGuessRaw}\" \u2192 {suggestions[0].DisplayName}"));
                     var moveRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 6) };
-                    moveRow.Children.Add(ActionBtn($"Move to {suggestion.DisplayName}", false, () => SendMoveRequest(task, suggestion)));
+                    moveRow.Children.Add(ActionBtn($"Move to {suggestions[0].DisplayName}", false, () => SendMoveRequest(task, suggestions[0])));
+                    sp.Children.Add(moveRow);
+                }
+                else if (suggestions.Count > 1)
+                {
+                    var names = string.Join(", ", suggestions.Select(s => s.DisplayName));
+                    sp.Children.Add(InfoBox(
+                        $"\"{task.ProjectGuessRaw}\" matches more than one registered project ({names}) -- " +
+                        "pick the right one rather than risk the wrong one:"));
+                    var moveRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 6) };
+                    foreach (var candidate in suggestions)
+                    {
+                        if (moveRow.Children.Count > 0) moveRow.Children.Add(new Border { Width = 6 });
+                        moveRow.Children.Add(ActionBtn(candidate.DisplayName, true, () => SendMoveRequest(task, candidate)));
+                    }
                     sp.Children.Add(moveRow);
                 }
                 else

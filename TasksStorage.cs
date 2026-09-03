@@ -19,6 +19,15 @@ namespace METools.Tasks
 
     public static class TasksStorage
     {
+        // Same normalization scheme as MailBridge's ProjectRegistry.Resolve
+        // -- case, underscores, hyphens, and extra spaces all collapsed to
+        // single spaces -- kept in sync by hand across the two separate
+        // .NET projects, same as the model shapes themselves. Public and
+        // shared here so TasksWindow and TasksHandler use the exact same
+        // logic rather than each keeping their own copy.
+        public static string Normalize(string s) =>
+            System.Text.RegularExpressions.Regex.Replace((s ?? "").ToLowerInvariant(), @"[_\-\s]+", " ").Trim();
+
         private const string TasksFilePrefix = "METools_Tasks_";
         private const string TasksFileSuffix = ".json";
         private const string RegistryFileName = "METools_ProjectRegistry.json";

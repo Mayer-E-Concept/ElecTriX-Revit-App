@@ -178,10 +178,45 @@ namespace METools.Tasks
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
 
+            // Check for overlap with already-registered projects BEFORE
+            // writing anything -- same normalize-and-either-contains logic
+            // real routing uses, so this warning is an accurate preview of
+            // what would actually collide, not a guess at one. This is the
+            // cheapest point to catch it: at registration time, instead of
+            // only discovering the conflict later when a real email lands
+            // in "unassigned" because two projects both matched.
+            var existingRegistry = TasksStorage.LoadProjectRegistry();
+            var overlaps = new List<string>();
+            foreach (var keyword in keywords)
+            {
+                var normKeyword = TasksStorage.Normalize(keyword);
+                foreach (var other in existingRegistry)
+                {
+                    if (other.ProjectId == projectId) continue; // don't compare a project against its own existing entry when re-registering
+
+                    var otherCandidates = new List<string> { other.DisplayName };
+                    if (other.Keywords != null) otherCandidates.AddRange(other.Keywords);
+
+                    foreach (var oc in otherCandidates)
+                    {
+                        if (string.IsNullOrWhiteSpace(oc)) continue;
+                        var normOc = TasksStorage.Normalize(oc);
+                        if (normOc.Length < 3) continue;
+                        if (normKeyword.Contains(normOc) || normOc.Contains(normKeyword))
+                            overlaps.Add($"'{keyword}' overlaps with '{other.DisplayName}'");
+                    }
+                }
+            }
+
             var ok = TasksStorage.RegisterProject(projectId, displayName, keywords, null, out var storageError);
-            return ok
-                ? $"Registered '{displayName}' for Tasks -- matches on: {string.Join(", ", keywords)}."
-                : $"Could not register this project: {storageError}";
+            if (!ok)
+                return $"Could not register this project: {storageError}";
+
+            var message = $"Registered '{displayName}' for Tasks -- matches on: {string.Join(", ", keywords)}.";
+            if (overlaps.Count > 0)
+                message += " Heads up -- " + string.Join("; ", overlaps.Distinct()) +
+                    ". Emails matching only the shared term will route to Unassigned instead of guessing which project -- narrow one of the keywords if you want it to auto-route.";
+            return message;
         }
     }
 }
