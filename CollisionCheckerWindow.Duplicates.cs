@@ -75,7 +75,37 @@ namespace METools.CollisionChecker
 
             ShowDupTab(_dupTabCollisions, _dupCollisionsContent);
 
+            // Mirrors CircuitTaggerCommand's own DocumentChanged pattern
+            // (confirmed by reading that file): subscribe once, using
+            // the window's own already-stored _uiApp field rather than
+            // needing any change to CollisionCheckerCommand.cs, and
+            // unsubscribe on Closed so this doesn't leak a handler onto
+            // the Application object after the window is gone.
+            _uiApp.Application.DocumentChanged += OnDupDocumentChanged;
+            Closed += (s, e) => { try { _uiApp.Application.DocumentChanged -= OnDupDocumentChanged; } catch { } };
+
             return container;
+        }
+
+        // Only rescans while the Duplicates tab is actually the visible
+        // one -- same reasoning as Circuit Tagger's stats tab: without
+        // this check, every transaction anyone commits anywhere in the
+        // model would trigger a full device scan, most of the time for
+        // a tab nobody's even looking at.
+        private void OnDupDocumentChanged(object sender, Autodesk.Revit.DB.Events.DocumentChangedEventArgs e)
+        {
+            if (_dupPanelDuplicates == null || _dupPanelDuplicates.Visibility != Visibility.Visible) return;
+
+            try
+            {
+                Dispatcher.BeginInvoke(
+                    System.Windows.Threading.DispatcherPriority.Background,
+                    new Action(() =>
+                    {
+                        try { RunDuplicateScan(); } catch { }
+                    }));
+            }
+            catch { }
         }
 
         private void EnsureDupHandler()

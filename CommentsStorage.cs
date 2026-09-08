@@ -16,6 +16,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Text.Json;
 using System.Threading;
+using METools;
 using Autodesk.Revit.DB;
 using Autodesk.Revit.DB.ExtensibleStorage;
 
@@ -202,44 +203,6 @@ namespace METools.Comments
             return Path.Combine(folder, $"METools_Comments_{projectId}.json");
         }
 
-        // Reads and parses the shared file, distinguishing two very different
-        // situations that the old code treated identically:
-        //   - genuinely nothing there yet (missing file, empty file) -- safe,
-        //     expected, an empty list is the correct answer
-        //   - the file exists, has content, but doesn't parse (e.g. a network
-        //     interruption left a partial write behind) -- NOT safe to treat
-        //     as empty, since the only caller of this that writes (Mutate)
-        //     would otherwise overwrite whatever's actually still in that
-        //     file with just the one new/changed comment, discarding
-        //     everyone else's data permanently.
-        // Returns false only for that second case; parseError explains why.
-        private static bool TryReadRaw(string path, out List<ProjectComment> list, out string parseError)
-        {
-            list = new List<ProjectComment>();
-            parseError = null;
-            if (path == null || !File.Exists(path)) return true;
-
-            for (int attempt = 0; attempt < 3; attempt++)
-            {
-                try
-                {
-                    var json = File.ReadAllText(path);
-                    if (string.IsNullOrWhiteSpace(json)) return true;
-                    var file = JsonSerializer.Deserialize<CommentsFile>(json);
-                    list = file?.Comments ?? new List<ProjectComment>();
-                    return true;
-                }
-                catch (IOException) { Thread.Sleep(150); } // likely someone else writing right now
-                catch (Exception ex)
-                {
-                    parseError = ex.Message;
-                    return false;
-                }
-            }
-            parseError = "File was locked/busy after several attempts.";
-            return false;
-        }
-
         public static List<ProjectComment> LoadAll(string projectId) => LoadAll(projectId, out _);
 
         // The out-warning overload: for a display-only refresh, degrading to
@@ -251,64 +214,32 @@ namespace METools.Comments
         {
             warning = null;
             var path = GetFilePath(projectId);
-            if (!TryReadRaw(path, out var list, out string parseError))
+            if (!SharedJsonStorage.TryReadRaw<CommentsFile>(path, out var wrapper, out string parseError))
                 warning = $"Comments file could not be read ({parseError}). Showing none for now -- " +
                           "existing data on the shared drive has not been touched.";
-            return list;
+            return wrapper?.Comments ?? new List<ProjectComment>();
         }
 
-        // Read-modify-write with retry: reloads the file fresh immediately before
-        // writing (so a near-simultaneous save from someone else isn't clobbered),
-        // and retries briefly if the file is momentarily locked by that other save.
-        // Refuses to write at all if the existing file can't be read cleanly --
-        // see TryReadRaw's comment for why overwriting in that state would be
-        // actively destructive rather than just inconvenient.
+        // Read-modify-write with retry -- delegated to SharedJsonStorage,
+        // the same helper Tasks' own storage uses (see that file for the
+        // actual mechanics). This just supplies the comments-specific
+        // wrapper type and file path; the JSON shape on disk (a
+        // CommentsFile with a "Comments" property) is completely
+        // unchanged, so every existing file still reads exactly as before.
         public static bool Mutate(string projectId, Action<List<ProjectComment>> mutation, out string error)
         {
-            error = "";
-            var folder = GetSharedFolder();
-            if (string.IsNullOrWhiteSpace(folder))
-            {
-                error = "No shared comments folder configured yet.";
-                return false;
-            }
             if (string.IsNullOrWhiteSpace(projectId))
             {
                 error = "Could not identify this project.";
                 return false;
             }
-            try { Directory.CreateDirectory(folder); }
-            catch (Exception ex) { error = "Shared folder not reachable: " + ex.Message; return false; }
 
-            var path = GetFilePath(projectId);
-            for (int attempt = 0; attempt < 5; attempt++)
-            {
-                try
-                {
-                    if (!TryReadRaw(path, out var list, out string parseError))
-                    {
-                        error = $"Shared comments file appears corrupted ({parseError}). Nothing was changed -- " +
-                                "check the file on the shared drive directly before trying again.";
-                        return false;
-                    }
-                    mutation(list);
-                    var json = JsonSerializer.Serialize(new CommentsFile { Comments = list },
-                        new JsonSerializerOptions { WriteIndented = true });
-                    File.WriteAllText(path, json);
-                    return true;
-                }
-                catch (IOException)
-                {
-                    Thread.Sleep(200);
-                }
-                catch (Exception ex)
-                {
-                    error = ex.Message;
-                    return false;
-                }
-            }
-            error = "Shared comments file was busy after several attempts -- try again.";
-            return false;
+            return SharedJsonStorage.Mutate<CommentsFile>(
+                GetSharedFolder(),
+                GetFilePath(projectId),
+                wrapper => mutation(wrapper.Comments),
+                "No shared comments folder configured yet.",
+                out error);
         }
     }
 }

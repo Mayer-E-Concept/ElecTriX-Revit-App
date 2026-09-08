@@ -14,6 +14,7 @@
 // Graph message id.
 using System;
 using System.Collections.Generic;
+using METools.Comments;
 
 namespace METools.Tasks
 {
@@ -83,7 +84,16 @@ namespace METools.Tasks
     // never touch the Revit document, like Claim or MarkDone -- goes
     // through this single enum/request pair and TasksHandler's
     // ExternalEvent, mirroring CommentsAction/CommentsRequest exactly.
-    public enum TasksAction { Refresh, Claim, Release, MarkDone, GoToElement, AttachElement, RegisterCurrentProject, MoveToProject, Delete }
+    public enum TasksAction { Refresh, Claim, Release, MarkDone, GoToElement, AttachElement, RegisterCurrentProject, MoveToProject, Delete,
+        // Comments-tab actions -- deliberately covering everything the
+        // original standalone Comments window supported (status is
+        // Open/Ignored/Done, not a binary done flag; Reference Item and
+        // Assign To are first-class, not afterthoughts) after an earlier
+        // pass at this tab shipped without them and lost real
+        // functionality when the standalone window's button was removed.
+        // All scoped to whichever project is currently open in Revit,
+        // since comments (unlike tasks) are inherently per-project.
+        LoadComments, AddComment, SetCommentStatus, SetCommentAssignedTo, DeleteComment, GoToCommentElement, JumpToCommentLevel }
 
     public class TasksRequest
     {
@@ -104,5 +114,36 @@ namespace METools.Tasks
         public string CurrentUser { get; set; } = "";
         public string ReferencedElementId { get; set; } = "";
         public string ReferencedSummary { get; set; } = "";
+
+        // Comments-tab fields.
+        public string CommentText { get; set; } = "";
+        public string CommentId { get; set; } = "";
+        public string CommentAssignedTo { get; set; } = "";
+        public METools.Comments.CommentStatus NewCommentStatus { get; set; }
+        public string CommentLevelName { get; set; } = "";
+        public string CommentScopeBoxName { get; set; } = "";
+
+        // AddComment only: whether to capture whatever's currently
+        // selected in the Revit canvas as this comment's Reference Item.
+        // Explicit, not automatic -- selecting something right before
+        // adding an unrelated comment shouldn't silently attach it.
+        public bool IncludeSelectedElementAsReference { get; set; }
+    }
+
+    // What the Comments tab actually shows -- always scoped to whichever
+    // project is currently open (or "none" if there isn't one), since
+    // comments don't have a cross-project view the way Tasks does.
+    public class CommentsTabResult
+    {
+        public bool HasOpenProject { get; set; }
+        public string ProjectDisplayName { get; set; } = "";
+        public List<ProjectComment> Comments { get; set; } = new List<ProjectComment>();
+        public string Message { get; set; }
+
+        // The active view's level/scope box right now -- shown so adding
+        // a comment makes clear where it'll be tagged, same context
+        // CommentsHandler.Refresh already reports for the standalone window.
+        public string CurrentLevelName { get; set; } = "";
+        public string CurrentScopeBoxName { get; set; } = "";
     }
 }

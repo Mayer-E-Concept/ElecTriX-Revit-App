@@ -28,10 +28,22 @@ namespace METools.Tasks
         // surface (an error, or a storage warning).
         public Action<List<ProjectTask>, TaskStats, string> OnComplete { get; set; }
 
+        // Fired for the Comments-tab actions instead of OnComplete -- a
+        // completely separate data shape (project-scoped comments, not
+        // the cross-project task list), so it gets its own callback
+        // rather than overloading OnComplete with two unrelated shapes.
+        public Action<CommentsTabResult> OnCommentsComplete { get; set; }
+
         public void Execute(UIApplication app)
         {
             var request = Request;
             if (request == null) return;
+
+            if (IsCommentsAction(request.Action))
+            {
+                HandleCommentsAction(app, request);
+                return;
+            }
 
             string error = null;
 
@@ -99,6 +111,215 @@ namespace METools.Tasks
             Done = list.Count(t => t.Status == "done"),
         };
 
+        private static bool IsCommentsAction(TasksAction action) =>
+            action == TasksAction.LoadComments || action == TasksAction.AddComment ||
+            action == TasksAction.SetCommentStatus || action == TasksAction.SetCommentAssignedTo ||
+            action == TasksAction.DeleteComment || action == TasksAction.GoToCommentElement ||
+            action == TasksAction.JumpToCommentLevel;
+
+        // Comments are inherently per-project, unlike the cross-project
+        // Tasks list -- every action here is scoped to whichever project
+        // is currently open, with a clear "nothing open" result rather
+        // than an error when there isn't one.
+        //
+        // Deliberately mirrors CommentsHandler.cs's real behavior action
+        // for action (level/scope-box capture, 3-state status, Reference
+        // Item, Assign To, Delete, Jump to Level) -- an earlier version of
+        // this tab only covered a plain add/mark-done and quietly lost
+        // real functionality once the standalone Comments window's ribbon
+        // button was removed. This is the corrected, full version.
+        private void HandleCommentsAction(UIApplication app, TasksRequest request)
+        {
+            var uidoc = app.ActiveUIDocument;
+            if (uidoc == null)
+            {
+                OnCommentsComplete?.Invoke(new CommentsTabResult { HasOpenProject = false });
+                return;
+            }
+
+            var doc = uidoc.Document;
+            string message = null;
+
+            switch (request.Action)
+            {
+                case TasksAction.AddComment:
+                {
+                    if (string.IsNullOrWhiteSpace(request.CommentText))
+                    {
+                        message = "Comment text can't be empty.";
+                        break;
+                    }
+
+                    var projectId = METools.Comments.CommentsStorage.GetOrCreateProjectId(doc);
+                    if (string.IsNullOrEmpty(projectId)) { message = "Could not identify this project."; break; }
+
+                    var levelName = CurrentLevelName(uidoc) ?? "(no level)";
+                    var scopeBoxName = CurrentScopeBoxName(uidoc) ?? "";
+
+                    // Explicit, not automatic -- only attached if the
+                    // person checked "reference selected element" at
+                    // add-time, so selecting something for an unrelated
+                    // reason right before adding a comment can't silently
+                    // attach it.
+                    string refElId = "", refSummary = "";
+                    if (request.IncludeSelectedElementAsReference)
+                    {
+                        var selectedIds = uidoc.Selection.GetElementIds();
+                        var selected = selectedIds.Count > 0 ? doc.GetElement(selectedIds.First()) : null;
+                        if (selected != null)
+                        {
+                            refElId = selected.UniqueId;
+                            refSummary = $"{selected.Category?.Name} - {selected.Name}";
+                        }
+                    }
+
+                    var author = SafeUsername(app);
+                    METools.Comments.CommentsStorage.Mutate(projectId, list => list.Add(new METools.Comments.ProjectComment
+                    {
+                        Author = author,
+                        LevelName = levelName,
+                        ScopeBoxName = scopeBoxName,
+                        Text = request.CommentText.Trim(),
+                        Status = METools.Comments.CommentStatus.Open,
+                        ReferencedElementId = refElId,
+                        ReferencedSummary = refSummary,
+                        AssignedTo = request.CommentAssignedTo ?? "",
+                    }), out message);
+                    break;
+                }
+
+                case TasksAction.SetCommentStatus:
+                {
+                    var projectId = METools.Comments.CommentsStorage.TryGetExistingProjectId(doc);
+                    if (string.IsNullOrEmpty(projectId)) { message = "Could not identify this project."; break; }
+                    var resolver = SafeUsername(app);
+                    METools.Comments.CommentsStorage.Mutate(projectId, list =>
+                    {
+                        var c = list.Find(x => x.Id == request.CommentId);
+                        if (c == null) return;
+                        c.Status = request.NewCommentStatus;
+                        c.ResolvedBy = resolver;
+                        c.ResolvedUtc = DateTime.UtcNow;
+                    }, out message);
+                    break;
+                }
+
+                case TasksAction.SetCommentAssignedTo:
+                {
+                    var projectId = METools.Comments.CommentsStorage.TryGetExistingProjectId(doc);
+                    if (string.IsNullOrEmpty(projectId)) { message = "Could not identify this project."; break; }
+                    METools.Comments.CommentsStorage.Mutate(projectId, list =>
+                    {
+                        var c = list.Find(x => x.Id == request.CommentId);
+                        if (c != null) c.AssignedTo = request.CommentAssignedTo ?? "";
+                    }, out message);
+                    break;
+                }
+
+                case TasksAction.DeleteComment:
+                {
+                    var projectId = METools.Comments.CommentsStorage.TryGetExistingProjectId(doc);
+                    if (string.IsNullOrEmpty(projectId)) { message = "Could not identify this project."; break; }
+                    METools.Comments.CommentsStorage.Mutate(projectId, list =>
+                        list.RemoveAll(x => x.Id == request.CommentId), out message);
+                    break;
+                }
+
+                case TasksAction.GoToCommentElement:
+                    // Reuses the exact same UniqueId-based lookup Tasks'
+                    // own GoToElement already does -- same navigation
+                    // mechanics either way.
+                    GoToElement(app, request.ReferencedElementId);
+                    break;
+
+                case TasksAction.JumpToCommentLevel:
+                    JumpToLevel(uidoc, request.CommentLevelName, request.CommentScopeBoxName);
+                    break;
+
+                case TasksAction.LoadComments:
+                    // Nothing to do -- just falls through to the reload below.
+                    break;
+            }
+
+            var currentProjectId = METools.Comments.CommentsStorage.TryGetExistingProjectId(doc);
+            var result = new CommentsTabResult
+            {
+                HasOpenProject = true,
+                ProjectDisplayName = doc.Title,
+                Message = message,
+                CurrentLevelName = CurrentLevelName(uidoc) ?? "",
+                CurrentScopeBoxName = CurrentScopeBoxName(uidoc) ?? "",
+            };
+
+            if (!string.IsNullOrEmpty(currentProjectId))
+            {
+                result.Comments = METools.Comments.CommentsStorage.LoadAll(currentProjectId, out var loadWarning);
+                if (string.IsNullOrEmpty(result.Message)) result.Message = loadWarning;
+            }
+
+            OnCommentsComplete?.Invoke(result);
+        }
+
+        private static string SafeUsername(UIApplication app)
+        {
+            try { return app.Application.Username; } catch { return "Unknown"; }
+        }
+
+        // Mirrors CommentsHandler.CurrentLevelName exactly.
+        private static string CurrentLevelName(UIDocument uidoc)
+        {
+            try { return (uidoc?.ActiveView as ViewPlan)?.GenLevel?.Name; }
+            catch { return null; }
+        }
+
+        // Mirrors CommentsHandler.CurrentScopeBoxName exactly -- "Scope Box"
+        // is a real, standard Revit view parameter, looked up by its
+        // stable display name rather than a BuiltInParameter constant.
+        private static string CurrentScopeBoxName(UIDocument uidoc)
+        {
+            try { return uidoc?.ActiveView?.LookupParameter("Scope Box")?.AsValueString(); }
+            catch { return null; }
+        }
+
+        // Mirrors CommentsHandler.JumpTo exactly: two different building
+        // sections can share the same level name (e.g. "Obergeschoss 1"
+        // for both Haus 1 and Haus 2), distinguished only by Scope Box --
+        // matching level name alone can jump to the wrong section's
+        // same-named level. Falls back to the first matching-level view
+        // for comments saved before Scope Box was captured.
+        private static void JumpToLevel(UIDocument uidoc, string levelName, string scopeBoxName)
+        {
+            if (uidoc == null || string.IsNullOrWhiteSpace(levelName)) return;
+            try
+            {
+                var doc = uidoc.Document;
+                var levelIds = new HashSet<ElementId>(
+                    new FilteredElementCollector(doc).OfClass(typeof(Level))
+                        .Cast<Level>()
+                        .Where(l => string.Equals(l.Name, levelName, StringComparison.OrdinalIgnoreCase))
+                        .Select(l => l.Id));
+                if (levelIds.Count == 0) return;
+
+                var candidatePlans = new FilteredElementCollector(doc).OfClass(typeof(ViewPlan))
+                    .Cast<ViewPlan>()
+                    .Where(v => !v.IsTemplate && v.ViewType == ViewType.FloorPlan
+                                && v.GenLevel != null && levelIds.Contains(v.GenLevel.Id))
+                    .ToList();
+
+                ViewPlan plan = null;
+                if (!string.IsNullOrWhiteSpace(scopeBoxName))
+                {
+                    plan = candidatePlans.FirstOrDefault(v =>
+                        string.Equals(v.LookupParameter("Scope Box")?.AsValueString(), scopeBoxName,
+                                      StringComparison.OrdinalIgnoreCase));
+                }
+                if (plan == null) plan = candidatePlans.FirstOrDefault();
+
+                if (plan != null) uidoc.ActiveView = plan;
+            }
+            catch { /* best effort -- see CommentsHandler.JumpTo */ }
+        }
+
         private void GoToElement(UIApplication app, string elementUniqueId)
         {
             var uidoc = app.ActiveUIDocument;
@@ -158,6 +379,25 @@ namespace METools.Tasks
             if (string.IsNullOrEmpty(projectId))
                 return "Could not identify this project.";
 
+            var (displayName, keywords, overlaps) = BuildRegistrationInfo(doc, projectId);
+
+            var ok = TasksStorage.RegisterProject(projectId, displayName, keywords, null, out var storageError);
+            if (!ok)
+                return $"Could not register this project: {storageError}";
+
+            var message = $"Registered '{displayName}' for Tasks -- matches on: {string.Join(", ", keywords)}.";
+            if (overlaps.Count > 0)
+                message += " Heads up -- " + string.Join("; ", overlaps.Distinct()) +
+                    ". Emails matching only the shared term will route to Unassigned instead of guessing which project -- narrow one of the keywords if you want it to auto-route.";
+            return message;
+        }
+
+        // Split out from RegisterCurrentProject as its own method (rather
+        // than inlined) so the "pull fields, build keywords, check
+        // overlaps" logic has one clear place to live if anything else
+        // ever needs the same registration info.
+        private static (string displayName, List<string> keywords, List<string> overlaps) BuildRegistrationInfo(Document doc, string projectId)
+        {
             string ProjectField(string paramName)
             {
                 try { return doc.ProjectInformation?.LookupParameter(paramName)?.AsString(); }
@@ -181,10 +421,7 @@ namespace METools.Tasks
             // Check for overlap with already-registered projects BEFORE
             // writing anything -- same normalize-and-either-contains logic
             // real routing uses, so this warning is an accurate preview of
-            // what would actually collide, not a guess at one. This is the
-            // cheapest point to catch it: at registration time, instead of
-            // only discovering the conflict later when a real email lands
-            // in "unassigned" because two projects both matched.
+            // what would actually collide, not a guess at one.
             var existingRegistry = TasksStorage.LoadProjectRegistry();
             var overlaps = new List<string>();
             foreach (var keyword in keywords)
@@ -192,7 +429,7 @@ namespace METools.Tasks
                 var normKeyword = TasksStorage.Normalize(keyword);
                 foreach (var other in existingRegistry)
                 {
-                    if (other.ProjectId == projectId) continue; // don't compare a project against its own existing entry when re-registering
+                    if (other.ProjectId == projectId) continue;
 
                     var otherCandidates = new List<string> { other.DisplayName };
                     if (other.Keywords != null) otherCandidates.AddRange(other.Keywords);
@@ -208,15 +445,7 @@ namespace METools.Tasks
                 }
             }
 
-            var ok = TasksStorage.RegisterProject(projectId, displayName, keywords, null, out var storageError);
-            if (!ok)
-                return $"Could not register this project: {storageError}";
-
-            var message = $"Registered '{displayName}' for Tasks -- matches on: {string.Join(", ", keywords)}.";
-            if (overlaps.Count > 0)
-                message += " Heads up -- " + string.Join("; ", overlaps.Distinct()) +
-                    ". Emails matching only the shared term will route to Unassigned instead of guessing which project -- narrow one of the keywords if you want it to auto-route.";
-            return message;
+            return (displayName, keywords, overlaps);
         }
     }
 }

@@ -26,6 +26,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Threading;
 using Autodesk.Revit.UI;
+using TextBox = System.Windows.Controls.TextBox;
 
 namespace METools.Tasks
 {
@@ -48,6 +49,31 @@ namespace METools.Tasks
         private Dictionary<string, string> _projectNames = new Dictionary<string, string>();
         private List<ProjectRegistryEntry> _registryEntries = new List<ProjectRegistryEntry>();
         private StackPanel _listPanel;
+
+        // Cached from the last RenderList call, purely so OnThemeChanged
+        // can rebuild the visuals with the SAME data on a theme flip,
+        // without needing a full reload through the ExternalEvent/Revit
+        // round-trip just to recolor what's already on screen.
+        private List<ProjectTask> _lastTasks = new List<ProjectTask>();
+        private TaskStats _lastStats = new TaskStats();
+        private string _lastMessage;
+
+        // Outer Tasks/Comments split -- Comments used to be its own
+        // separate window; it's a tab here now since both are really the
+        // same thing ("per-project team coordination"), just with
+        // different data shapes. Comments stays scoped to whichever
+        // project is currently open (unlike the Tasks tab, which is
+        // deliberately cross-project), since that's its actual nature.
+        private Button _outerTabTasks, _outerTabComments;
+        private FrameworkElement _tasksTabContent, _commentsTabContent;
+        private TextBlock _commentsProjectLabel;
+        private TextBlock _commentsLevelLabel;
+        private StackPanel _commentsListPanel;
+        private TextBox _commentsInput;
+        private TextBox _commentsAssignInput;
+        private Button _commentsReferenceToggle;
+        private bool _pendingIncludeReference;
+        private CommentsTabResult _lastCommentsResult;
         private TextBlock _statTotal, _statUnassigned, _statInProgress, _statDone;
         private Button _unassignedTabBtn, _inProgressTabBtn, _mineTabBtn, _doneTabBtn;
         private TaskTab _currentTab = TaskTab.Unassigned;
@@ -74,6 +100,7 @@ namespace METools.Tasks
             _handler = handler;
             _externalEvent = externalEvent;
             _handler.OnComplete = (list, stats, message) => Dispatcher.Invoke(() => RenderList(list, stats, message));
+            _handler.OnCommentsComplete = result => Dispatcher.Invoke(() => RenderComments(result));
 
             _registryEntries = TasksStorage.LoadProjectRegistry();
             _projectNames = BuildDisplayNameLookup(_registryEntries);
@@ -81,6 +108,53 @@ namespace METools.Tasks
             InitWindow("Tasks", 600);
             BuildStatusBar("", "Revit 2025");
 
+            // Outer tab row -- added first, so it's not the last child
+            // RootDock sees (see file header on DockPanel ordering).
+            var outerTabsRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(16, 10, 16, 0) };
+            _outerTabTasks = ToggleBtn("Tasks", true, () => SwitchOuterTab(false));
+            _outerTabComments = ToggleBtn("Comments", false, () => SwitchOuterTab(true));
+            outerTabsRow.Children.Add(_outerTabTasks);
+            outerTabsRow.Children.Add(new Border { Width = 6 });
+            outerTabsRow.Children.Add(_outerTabComments);
+            DockPanel.SetDock(outerTabsRow, Dock.Top);
+            RootDock.Children.Add(outerTabsRow);
+
+            _tasksTabContent = BuildTasksTabContent();
+            _commentsTabContent = BuildCommentsTabPanel();
+            _commentsTabContent.Visibility = Visibility.Collapsed;
+
+            var outerContainer = new Grid();
+            outerContainer.Children.Add(_tasksTabContent);
+            outerContainer.Children.Add(_commentsTabContent);
+
+            // Last child added to RootDock -- fills remaining space, see
+            // file header.
+            RootDock.Children.Add(outerContainer);
+
+            _autoRefreshTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(30) };
+            _autoRefreshTimer.Tick += (s, e) =>
+            {
+                if (_commentsTabContent.Visibility == Visibility.Visible) RequestLoadComments();
+                else RequestRefresh();
+            };
+            _autoRefreshTimer.Start();
+
+            Closed += (s, e) =>
+            {
+                _autoRefreshTimer.Stop();
+                if (_instance == this) _instance = null;
+            };
+
+            RequestRefresh();
+        }
+
+        // Everything that used to be built directly in the constructor --
+        // stats strip, inner Unassigned/In Progress/Mine/Done tabs, the
+        // task list -- unchanged, just now returned as one element so it
+        // can be a sibling of the Comments panel instead of the window's
+        // only content.
+        private FrameworkElement BuildTasksTabContent()
+        {
             var content = new StackPanel { Margin = new Thickness(16, 12, 16, 12) };
 
             content.Children.Add(BuildStatsStrip());
@@ -114,21 +188,282 @@ namespace METools.Tasks
             };
             content.Children.Add(scroller);
 
-            // Last child added to RootDock -- fills remaining space, see
-            // file header.
-            RootDock.Children.Add(content);
+            return content;
+        }
 
-            _autoRefreshTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(30) };
-            _autoRefreshTimer.Tick += (s, e) => RequestRefresh();
-            _autoRefreshTimer.Start();
+        private FrameworkElement BuildCommentsTabPanel()
+        {
+            var panel = new StackPanel { Margin = new Thickness(16, 12, 16, 12) };
 
-            Closed += (s, e) =>
+            _commentsProjectLabel = new TextBlock
             {
-                _autoRefreshTimer.Stop();
-                if (_instance == this) _instance = null;
+                Text = "", FontSize = 12, FontWeight = FontWeights.SemiBold,
+                Foreground = MeToolsTheme.BrText, Margin = new Thickness(0, 0, 0, 4),
             };
+            panel.Children.Add(_commentsProjectLabel);
 
-            RequestRefresh();
+            _commentsLevelLabel = new TextBlock
+            {
+                Text = "", FontSize = 10.5, Foreground = MeToolsTheme.BrMuted, Margin = new Thickness(0, 0, 0, 8),
+            };
+            panel.Children.Add(_commentsLevelLabel);
+
+            _commentsInput = new TextBox
+            {
+                FontSize = 12, Padding = new Thickness(6), TextWrapping = TextWrapping.Wrap,
+                AcceptsReturn = true, Height = 50,
+                Background = MeToolsTheme.BrInput, Foreground = MeToolsTheme.BrText,
+                BorderBrush = MeToolsTheme.BrBorder,
+            };
+            panel.Children.Add(_commentsInput);
+
+            var optionsRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 6, 0, 6) };
+            _commentsReferenceToggle = ToggleBtn("Reference selected element", false, ToggleIncludeReference);
+            optionsRow.Children.Add(_commentsReferenceToggle);
+            optionsRow.Children.Add(new Border { Width = 12 });
+            optionsRow.Children.Add(new TextBlock
+            {
+                Text = "Assign to:", FontSize = 11, Foreground = MeToolsTheme.BrMuted,
+                VerticalAlignment = VerticalAlignment.Center,
+            });
+            optionsRow.Children.Add(new Border { Width = 6 });
+            _commentsAssignInput = new TextBox
+            {
+                Width = 140, FontSize = 11, Padding = new Thickness(4),
+                Background = MeToolsTheme.BrInput, Foreground = MeToolsTheme.BrText,
+                BorderBrush = MeToolsTheme.BrBorder, VerticalContentAlignment = VerticalAlignment.Center,
+            };
+            optionsRow.Children.Add(_commentsAssignInput);
+            panel.Children.Add(optionsRow);
+
+            var addRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 12) };
+            addRow.Children.Add(ActionBtn("Add comment", false, SendAddComment));
+            panel.Children.Add(addRow);
+
+            _commentsListPanel = new StackPanel();
+            var scroller = new ScrollViewer
+            {
+                Content = _commentsListPanel, MaxHeight = 380,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            };
+            panel.Children.Add(scroller);
+
+            return panel;
+        }
+
+        private void ToggleIncludeReference()
+        {
+            _pendingIncludeReference = !_pendingIncludeReference;
+            UpdateToggle(_commentsReferenceToggle, _pendingIncludeReference);
+        }
+
+        private void SwitchOuterTab(bool showComments)
+        {
+            UpdateToggle(_outerTabTasks, !showComments);
+            UpdateToggle(_outerTabComments, showComments);
+            _tasksTabContent.Visibility = showComments ? Visibility.Collapsed : Visibility.Visible;
+            _commentsTabContent.Visibility = showComments ? Visibility.Visible : Visibility.Collapsed;
+            if (showComments) RequestLoadComments();
+        }
+
+        private void RequestLoadComments()
+        {
+            _handler.Request = new TasksRequest { Action = TasksAction.LoadComments };
+            _externalEvent.Raise();
+        }
+
+        private void SendAddComment()
+        {
+            var text = _commentsInput.Text;
+            if (string.IsNullOrWhiteSpace(text)) return;
+
+            _handler.Request = new TasksRequest
+            {
+                Action = TasksAction.AddComment,
+                CommentText = text,
+                CommentAssignedTo = _commentsAssignInput.Text ?? "",
+                IncludeSelectedElementAsReference = _pendingIncludeReference,
+                CurrentUser = CurrentUsername,
+            };
+            _externalEvent.Raise();
+
+            _commentsInput.Text = "";
+            _commentsAssignInput.Text = "";
+            _pendingIncludeReference = false;
+            UpdateToggle(_commentsReferenceToggle, false);
+        }
+
+        private void SendSetCommentStatus(string commentId, METools.Comments.CommentStatus status)
+        {
+            _handler.Request = new TasksRequest
+            {
+                Action = TasksAction.SetCommentStatus, CommentId = commentId,
+                NewCommentStatus = status, CurrentUser = CurrentUsername,
+            };
+            _externalEvent.Raise();
+        }
+
+        private void SendSetCommentAssignedTo(string commentId, string assignedTo)
+        {
+            _handler.Request = new TasksRequest { Action = TasksAction.SetCommentAssignedTo, CommentId = commentId, CommentAssignedTo = assignedTo ?? "" };
+            _externalEvent.Raise();
+        }
+
+        private void SendGoToCommentElement(string elementId)
+        {
+            _handler.Request = new TasksRequest { Action = TasksAction.GoToCommentElement, ReferencedElementId = elementId };
+            _externalEvent.Raise();
+        }
+
+        private void SendJumpToCommentLevel(string levelName, string scopeBoxName)
+        {
+            _handler.Request = new TasksRequest { Action = TasksAction.JumpToCommentLevel, CommentLevelName = levelName, CommentScopeBoxName = scopeBoxName };
+            _externalEvent.Raise();
+        }
+
+        private void ConfirmAndDeleteComment(METools.Comments.ProjectComment c)
+        {
+            var subject = string.IsNullOrWhiteSpace(c.Text) ? "(empty comment)" : c.Text;
+            var result = MessageBox.Show(
+                $"Delete this comment permanently?\n\n\"{subject}\"\n\nThis can't be undone.",
+                "Delete comment", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
+            if (result != MessageBoxResult.Yes) return;
+
+            _handler.Request = new TasksRequest { Action = TasksAction.DeleteComment, CommentId = c.Id };
+            _externalEvent.Raise();
+        }
+
+        private void RenderComments(CommentsTabResult result)
+        {
+            _lastCommentsResult = result;
+            _commentsListPanel.Children.Clear();
+
+            if (!result.HasOpenProject)
+            {
+                _commentsProjectLabel.Text = "";
+                _commentsLevelLabel.Text = "";
+                _commentsListPanel.Children.Add(InfoBox("Open a project in Revit to see and add its comments."));
+                return;
+            }
+
+            _commentsProjectLabel.Text = $"Comments for: {result.ProjectDisplayName}";
+            _commentsLevelLabel.Text = string.IsNullOrWhiteSpace(result.CurrentLevelName)
+                ? "New comments will be tagged with no level (open a floor plan view to tag one)."
+                : $"New comments will be tagged: {result.CurrentLevelName}" +
+                  (string.IsNullOrWhiteSpace(result.CurrentScopeBoxName) ? "" : $" ({result.CurrentScopeBoxName})");
+
+            if (!string.IsNullOrWhiteSpace(result.Message))
+                _commentsListPanel.Children.Add(InfoBox(result.Message));
+
+            if (result.Comments.Count == 0)
+            {
+                _commentsListPanel.Children.Add(new TextBlock
+                {
+                    Text = "No comments yet.", FontSize = 12, Foreground = MeToolsTheme.BrMuted,
+                    Margin = new Thickness(4, 8, 4, 8),
+                });
+                return;
+            }
+
+            foreach (var c in result.Comments.OrderByDescending(x => x.CreatedUtc))
+                _commentsListPanel.Children.Add(BuildCommentRow(c));
+        }
+
+        private Border BuildCommentRow(METools.Comments.ProjectComment c)
+        {
+            var sp = new StackPanel();
+
+            sp.Children.Add(new TextBlock
+            {
+                Text = c.Text, FontSize = 12.5, Foreground = MeToolsTheme.BrText,
+                TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 4),
+            });
+
+            var statusWord = c.Status switch
+            {
+                METools.Comments.CommentStatus.Done => $"done ({c.ResolvedBy})",
+                METools.Comments.CommentStatus.Ignored => $"ignored ({c.ResolvedBy})",
+                _ => "open",
+            };
+            var levelPart = string.IsNullOrWhiteSpace(c.LevelName) ? "" : $" \u00b7 {c.LevelName}" +
+                (string.IsNullOrWhiteSpace(c.ScopeBoxName) ? "" : $" ({c.ScopeBoxName})");
+            var meta = $"{c.Author} \u00b7 {c.CreatedUtc.ToLocalTime():g}{levelPart} \u00b7 {statusWord}";
+            sp.Children.Add(new TextBlock
+            {
+                Text = meta, FontSize = 10.5, Foreground = MeToolsTheme.BrMuted,
+                Margin = new Thickness(0, 0, 0, 4),
+            });
+
+            if (!string.IsNullOrWhiteSpace(c.ReferencedSummary))
+            {
+                sp.Children.Add(new TextBlock
+                {
+                    Text = $"\U0001F4CC {c.ReferencedSummary}", FontSize = 10.5, Foreground = MeToolsTheme.BrMuted,
+                    Margin = new Thickness(0, 0, 0, 6), TextWrapping = TextWrapping.Wrap,
+                });
+            }
+
+            // Assign To -- pre-filled with the current value, its own
+            // "Set" button rather than saving on every keystroke.
+            var assignRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 6) };
+            assignRow.Children.Add(new TextBlock
+            {
+                Text = "Assigned to:", FontSize = 10.5, Foreground = MeToolsTheme.BrMuted,
+                VerticalAlignment = VerticalAlignment.Center,
+            });
+            assignRow.Children.Add(new Border { Width = 6 });
+            var assignBox = new TextBox
+            {
+                Width = 120, FontSize = 10.5, Padding = new Thickness(3),
+                Text = c.AssignedTo ?? "", Background = MeToolsTheme.BrInput,
+                Foreground = MeToolsTheme.BrText, BorderBrush = MeToolsTheme.BrBorder,
+            };
+            assignRow.Children.Add(assignBox);
+            assignRow.Children.Add(new Border { Width = 6 });
+            assignRow.Children.Add(ActionBtn("Set", true, () => SendSetCommentAssignedTo(c.Id, assignBox.Text)));
+            sp.Children.Add(assignRow);
+
+            var btnRow = new StackPanel { Orientation = Orientation.Horizontal };
+            void AddBtn(string label, Action onClick)
+            {
+                if (btnRow.Children.Count > 0) btnRow.Children.Add(new Border { Width = 6 });
+                btnRow.Children.Add(ActionBtn(label, true, onClick));
+            }
+
+            if (c.Status != METools.Comments.CommentStatus.Done)
+                AddBtn("Mark done", () => SendSetCommentStatus(c.Id, METools.Comments.CommentStatus.Done));
+            if (c.Status != METools.Comments.CommentStatus.Ignored)
+                AddBtn("Ignore", () => SendSetCommentStatus(c.Id, METools.Comments.CommentStatus.Ignored));
+            if (c.Status != METools.Comments.CommentStatus.Open)
+                AddBtn("Reopen", () => SendSetCommentStatus(c.Id, METools.Comments.CommentStatus.Open));
+            if (!string.IsNullOrWhiteSpace(c.ReferencedElementId))
+                AddBtn("Go to", () => SendGoToCommentElement(c.ReferencedElementId));
+            if (!string.IsNullOrWhiteSpace(c.LevelName))
+                AddBtn("Jump to level", () => SendJumpToCommentLevel(c.LevelName, c.ScopeBoxName));
+            AddBtn("Delete", () => ConfirmAndDeleteComment(c));
+
+            sp.Children.Add(btnRow);
+
+            return new Border
+            {
+                Background = MeToolsTheme.BrSurface, BorderBrush = MeToolsTheme.BrBorder,
+                BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(10),
+                Padding = new Thickness(10, 8, 10, 8), Margin = new Thickness(0, 0, 0, 8),
+                Child = sp,
+            };
+        }
+
+        // MeToolsWindowBase calls this whenever the light/dark theme
+        // flips -- rebuilding with the same cached data (rather than
+        // reloading through the ExternalEvent) is enough, since the
+        // colors are recomputed fresh on every RenderList call regardless.
+        // Without this override, the cards would just sit with whatever
+        // color was baked in until the next natural refresh happened to
+        // rebuild them -- not permanently wrong, just slow to catch up.
+        protected override void OnThemeChanged()
+        {
+            RenderList(_lastTasks, _lastStats, _lastMessage);
+            if (_lastCommentsResult != null) RenderComments(_lastCommentsResult);
         }
 
         private StackPanel BuildStatChip(string label, out TextBlock valueBlock)
@@ -324,6 +659,10 @@ namespace METools.Tasks
 
         private void RenderList(List<ProjectTask> allTasks, TaskStats stats, string message)
         {
+            _lastTasks = allTasks;
+            _lastStats = stats;
+            _lastMessage = message;
+
             _registryEntries = TasksStorage.LoadProjectRegistry();
             _projectNames = BuildDisplayNameLookup(_registryEntries);
 

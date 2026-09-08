@@ -281,39 +281,27 @@ namespace METools
             RibbonLicenseWatcher.Register(ccButton);
             RibbonLanguageWatcher.Register(ccButton, "ribbon.collision_checker");
 
-            // -- Comments ----------------------------------------------------
-            var cmtBtn = new PushButtonData(
-                "Comments", S._("ribbon.comments"), dll,
-                "METools.Comments.CommentsCommand")
-            {
-                ToolTip         = "Leave a comment tagged to a level; teammates get notified when they open this project.",
-                LongDescription = $"Comments -- {VENDOR}\n\nLeave a note on the level you're working on -- a teammate " +
-                                  "on another computer gets a popup with a sound cue when they open this project and " +
-                                  "navigate there.\n\n" +
-                                  "* Requires a shared network folder (configured once in this tool's own settings)\n" +
-                                  "* See every comment for this project, by whom, on which level, and its status\n" +
-                                  "* Mark Done, Ignore, or Reopen from either the popup or the full list",
-                Image           = LoadIcon("icon_comments_light_16.png"),
-                LargeImage      = LoadIcon("icon_comments_light_32.png"),
-            };
-            var cmtButton = panelTeam.AddItem(cmtBtn) as PushButton;
-            RibbonThemeWatcher.Register(cmtButton, "icon_comments");
-            RibbonLicenseWatcher.Register(cmtButton);
-            RibbonLanguageWatcher.Register(cmtButton, "ribbon.comments");
-
-            // -- Tasks ---------------------------------------------------------
-            // Customer emails processed by the standalone METools.MailBridge
-            // service become tasks here -- translated/summarized, filed per
-            // project, self-assignable. Same shared folder as Comments.
+            // -- Workboard (Tasks + Comments) -----------------------------------
+            // Comments used to be its own separate button/window here; merged
+            // into this one as a second tab alongside Tasks, since both are
+            // really the same idea -- per-project team coordination reading
+            // and writing the same shared folder, just two different data
+            // shapes (a task list vs. running notes). Comments' background
+            // notifier (CommentsWatcher/CommentsHandler, registered earlier
+            // in this file) is completely unaffected -- only this entry
+            // point moved, same as when Time Tracker merged into Activity Log
+            // below. The standalone Comments files are unused now but left
+            // in place rather than deleted, in case anything else still
+            // depends on them.
             var taskBtn = new PushButtonData(
                 "Tasks", S._("ribbon.tasks"), dll,
                 "METools.Tasks.TasksCommand")
             {
-                ToolTip = "Customer emails filed as per-project tasks -- translated, summarized, self-assignable.",
-                LongDescription = $"Tasks -- {VENDOR}\n\nIncoming customer emails are translated, summarized, and filed here as tasks for the matching project.\n\n" +
-                    "* Requires the same shared network folder as Comments (configured there)\n" +
-                    "* Assign to yourself, mark done, or jump to a pinned element\n" +
-                    "* Auto-refreshes while the window is open",
+                ToolTip = "Tasks from customer emails, plus per-project comments -- two tabs, one shared folder.",
+                LongDescription = $"Workboard -- {VENDOR}\n\nTwo tabs, one shared folder:\n\n" +
+                    "* Tasks: incoming customer emails are translated, summarized, and filed here per project -- assign to yourself, mark done, or jump to a pinned element.\n" +
+                    "* Comments: leave a note on the project you're working in -- teammates see it, mark it done, or jump to what it's about.\n\n" +
+                    "Requires a shared network folder (configured once in Comments' own settings).",
                 Image = LoadIcon("icon_tasks_light_16.png") ?? LoadIcon("icon_comments_light_16.png"),
                 LargeImage = LoadIcon("icon_tasks_light_32.png") ?? LoadIcon("icon_comments_light_32.png"),
             };

@@ -11,6 +11,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Text.Json;
 using System.Threading;
+using METools;
 using METools.Comments;
 
 namespace METools.Tasks
@@ -44,40 +45,14 @@ namespace METools.Tasks
             public List<ProjectTask> Tasks { get; set; } = new List<ProjectTask>();
         }
 
-        // Same two-case distinction as CommentsStorage.TryReadRaw: a
-        // missing/empty file means "nothing yet"; a file that exists but
-        // won't parse is left completely alone so a network hiccup can't
-        // wipe out tasks the mail bridge (or another machine) already
-        // wrote.
+        // Thin wrapper so LoadAll/LoadAllAcrossProjects don't need to
+        // change at all -- the actual read-modify-write mechanics now
+        // live in SharedJsonStorage, shared with CommentsStorage.
         private static bool TryReadRaw(string path, out List<ProjectTask> list, out string parseError)
         {
-            list = new List<ProjectTask>();
-            parseError = null;
-            if (path == null || !File.Exists(path)) return true;
-
-            for (int attempt = 0; attempt < 3; attempt++)
-            {
-                try
-                {
-                    var json = File.ReadAllText(path);
-                    if (string.IsNullOrWhiteSpace(json)) return true;
-                    var file = JsonSerializer.Deserialize<TasksFileWrapper>(json);
-                    list = file?.Tasks ?? new List<ProjectTask>();
-                    return true;
-                }
-                catch (IOException)
-                {
-                    Thread.Sleep(150); // likely the mail bridge or another machine writing right now
-                }
-                catch (Exception ex)
-                {
-                    parseError = ex.Message;
-                    return false;
-                }
-            }
-
-            parseError = "File was locked/busy after several attempts.";
-            return false;
+            var ok = SharedJsonStorage.TryReadRaw<TasksFileWrapper>(path, out var wrapper, out parseError);
+            list = wrapper?.Tasks ?? new List<ProjectTask>();
+            return ok;
         }
 
         public static List<ProjectTask> LoadAll(string projectId) => LoadAll(projectId, out _);
@@ -268,57 +243,24 @@ namespace METools.Tasks
             return false;
         }
 
+        // Read-modify-write with retry -- delegated to SharedJsonStorage,
+        // the same helper CommentsStorage uses. This just supplies the
+        // tasks-specific wrapper type and file path; the JSON shape on
+        // disk is completely unchanged.
         public static bool Mutate(string projectId, Action<List<ProjectTask>> mutation, out string error)
         {
-            error = "";
-            var folder = CommentsStorage.GetSharedFolder();
-            if (string.IsNullOrWhiteSpace(folder))
-            {
-                error = "No shared folder configured yet (set it up in Comments settings).";
-                return false;
-            }
             if (string.IsNullOrWhiteSpace(projectId))
             {
                 error = "Could not identify this project.";
                 return false;
             }
 
-            try { Directory.CreateDirectory(folder); }
-            catch (Exception ex) { error = "Shared folder not reachable: " + ex.Message; return false; }
-
-            var path = GetFilePath(projectId);
-
-            for (int attempt = 0; attempt < 5; attempt++)
-            {
-                try
-                {
-                    if (!TryReadRaw(path, out var list, out string parseError))
-                    {
-                        error = $"Shared tasks file appears corrupted ({parseError}). Nothing was changed -- " +
-                                "check the file on the shared drive directly before trying again.";
-                        return false;
-                    }
-
-                    mutation(list);
-
-                    var json = JsonSerializer.Serialize(new TasksFileWrapper { Tasks = list },
-                        new JsonSerializerOptions { WriteIndented = true });
-                    File.WriteAllText(path, json);
-                    return true;
-                }
-                catch (IOException)
-                {
-                    Thread.Sleep(200);
-                }
-                catch (Exception ex)
-                {
-                    error = ex.Message;
-                    return false;
-                }
-            }
-
-            error = "Shared tasks file was busy after several attempts -- try again.";
-            return false;
+            return SharedJsonStorage.Mutate<TasksFileWrapper>(
+                CommentsStorage.GetSharedFolder(),
+                GetFilePath(projectId),
+                wrapper => mutation(wrapper.Tasks),
+                "No shared folder configured yet (set it up in Comments settings).",
+                out error);
         }
 
         // Reloads fresh (same as any Mutate call) right before deciding,
