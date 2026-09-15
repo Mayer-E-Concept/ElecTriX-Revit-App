@@ -1,8 +1,12 @@
 {
   "version": 2,
-  "dgSpecHash": "b02fmHkPL6k=",
+  "dgSpecHash": "jOM4wWV9CXg=",
   "success": true,
   "projectFilePath": "X:\\02_sabloane\\01_Revit\\ElecTriX-Revit-App\\METools.csproj",
-  "expectedPackageFiles": [],
+  "expectedPackageFiles": [
+    "C:\\Users\\StefanPicu\\.nuget\\packages\\microsoft.netcore.app.runtime.win-x64\\8.0.28\\microsoft.netcore.app.runtime.win-x64.8.0.28.nupkg.sha512",
+    "C:\\Users\\StefanPicu\\.nuget\\packages\\microsoft.windowsdesktop.app.runtime.win-x64\\8.0.28\\microsoft.windowsdesktop.app.runtime.win-x64.8.0.28.nupkg.sha512",
+    "C:\\Users\\StefanPicu\\.nuget\\packages\\microsoft.aspnetcore.app.runtime.win-x64\\8.0.28\\microsoft.aspnetcore.app.runtime.win-x64.8.0.28.nupkg.sha512"
+  ],
   "logs": []
 }
