@@ -238,12 +238,14 @@ namespace METools.FamilyPlacer
             Grid.SetColumn(_lblSelCount, 0); selRow.Children.Add(_lblSelCount);
             var btnRow = new StackPanel { Orientation = Orientation.Horizontal };
             var btnSel  = SmallBtn(S._("circuittagger.select_in_revit"), true,  OnSelectClicked);
+            var btnSelBox = SmallBtn(S._("circuittagger.select_box"),    true,  OnSelectBoxClicked);
             var btnLoad = SmallBtn(S._("circuittagger.load"),               false, OnLoadFromSelectionClicked);
             btnLoad.ToolTip = S._("circuittagger.load_tip");
             var btnClr  = SmallBtn(S._("circuittagger.clear"),              false, OnClearClicked);
             btnSel.Margin  = new Thickness(0, 0, 6, 0);
+            btnSelBox.Margin = new Thickness(0, 0, 6, 0);
             btnLoad.Margin = new Thickness(0, 0, 6, 0);
-            btnRow.Children.Add(btnSel); btnRow.Children.Add(btnLoad); btnRow.Children.Add(btnClr);
+            btnRow.Children.Add(btnSel); btnRow.Children.Add(btnSelBox); btnRow.Children.Add(btnLoad); btnRow.Children.Add(btnClr);
             Grid.SetColumn(btnRow, 1); selRow.Children.Add(btnRow);
             sp.Children.Add(selRow);
 
@@ -1372,6 +1374,25 @@ namespace METools.FamilyPlacer
             _handler.Request = new CircuitTaggerRequest
             {
                 Action     = CircuitTaggerAction.PickElementsInteractive,
+                ElementIds = _selected.Select(x => x.ElementId).ToList(),
+            };
+            _extEvent.Raise();
+        }
+
+        // A native Revit box/crossing selection session -- drag a window,
+        // narrow it with Revit's own Filter (funnel icon) if wanted, then
+        // finish with the ribbon's green checkmark or Escape. Shares
+        // HandlePickSessionDone with OnSelectClicked above unchanged --
+        // that method already treats "a batch of newly-picked ids"
+        // generically. See CircuitTaggerAction.PickElementsBoxSelect's
+        // comment for why this is a separate button/action rather than a
+        // mode folded into the one-by-one picker.
+        private void OnSelectBoxClicked()
+        {
+            Hide();
+            _handler.Request = new CircuitTaggerRequest
+            {
+                Action     = CircuitTaggerAction.PickElementsBoxSelect,
                 ElementIds = _selected.Select(x => x.ElementId).ToList(),
             };
             _extEvent.Raise();

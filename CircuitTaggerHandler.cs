@@ -61,6 +61,8 @@ namespace METools.FamilyPlacer
                     ExecuteClearCircuitData(doc, req.CircuitLabelsToClear); break;
                 case CircuitTaggerAction.PickElementsInteractive:
                     ExecutePickElementsInteractive(doc, uiDoc, req); break;
+                case CircuitTaggerAction.PickElementsBoxSelect:
+                    ExecutePickElementsBoxSelect(doc, uiDoc, req); break;
                 case CircuitTaggerAction.SetPendingMarks:
                     ExecuteSetPendingMarks(doc, uiDoc, req); break;
             }
@@ -165,6 +167,54 @@ namespace METools.FamilyPlacer
                     SetPendingMark(doc, view, new[] { picked.ElementId }, true); // mark the just-added element right away
                     try { uiDoc.RefreshActiveView(); } catch { }
                 }
+            }
+            catch (Exception ex) { errorMessage = ex.Message; }
+
+            OnPickSessionDone?.Invoke(newlyPicked, errorMessage);
+        }
+
+        // A single PickObjects (plural) session -- see the enum comment on
+        // PickElementsBoxSelect for why this is deliberately its own
+        // method rather than a mode inside ExecutePickElementsInteractive
+        // above. Reuses the exact same OnPickSessionDone callback, so the
+        // Window's HandlePickSessionDone needs no changes at all -- it
+        // already treats "a batch of newly-picked ids" generically,
+        // regardless of which picking method produced them.
+        private void ExecutePickElementsBoxSelect(Document doc, UIDocument uiDoc, CircuitTaggerRequest req)
+        {
+            var newlyPicked = new List<ElementId>();
+            if (doc == null || uiDoc == null) { OnPickSessionDone?.Invoke(newlyPicked, "No active document."); return; }
+
+            var filter = new ElectricalElementFilter();
+            var alreadyQueued = new HashSet<long>((req?.ElementIds ?? new List<ElementId>()).Select(id => id.Value));
+            string errorMessage = null;
+
+            try
+            {
+                var picked = uiDoc.Selection.PickObjects(
+                    Autodesk.Revit.UI.Selection.ObjectType.Element, filter,
+                    S._("circuittagger.select_prompt"));
+
+                foreach (var reference in picked)
+                {
+                    var id = reference.ElementId;
+                    if (alreadyQueued.Contains(id.Value)) continue;
+                    if (newlyPicked.Contains(id)) continue;
+                    if (doc.GetElement(id) == null) continue;
+                    newlyPicked.Add(id);
+                }
+
+                if (newlyPicked.Count > 0)
+                {
+                    SetPendingMark(doc, uiDoc.ActiveView, newlyPicked, true);
+                    try { uiDoc.RefreshActiveView(); } catch { }
+                }
+            }
+            catch (Autodesk.Revit.Exceptions.OperationCanceledException)
+            {
+                // Nothing picked, or the session was cancelled outright --
+                // same as cancelling the one-by-one loop with nothing
+                // queued yet: not an error, just an empty result.
             }
             catch (Exception ex) { errorMessage = ex.Message; }
 

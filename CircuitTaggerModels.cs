@@ -98,6 +98,19 @@ namespace METools.FamilyPlacer
         // inside Execute() -- see CircuitTaggerHandler.ExecutePickElementsInteractive
         // for why this moved here from a direct WPF click handler call.
         PickElementsInteractive,
+        // A single PickObjects (plural) session -- native window/crossing
+        // box selection plus Revit's own Filter (funnel icon) to narrow
+        // by category, finished with the ribbon's green checkmark or
+        // Escape. Deliberately a separate action from PickElementsInteractive
+        // above, not a merged mode: PickObjects has a well-known quirk
+        // where a stray click on empty space mid-session silently clears
+        // everything picked in that same session -- exactly the bug
+        // PickElementsInteractive was rewritten to avoid. Keeping this as
+        // its own short one-shot session limits that risk to just this
+        // one box-select action; anything already merged into the
+        // Window's persistent _selected list from an earlier session
+        // (one-by-one or a previous box-select) is never at risk.
+        PickElementsBoxSelect,
         // One-shot apply/clear of the magenta "already queued" graphic
         // override for a specific set of ElementIds (Request.ElementIds),
         // using Request.MarkOn. Used by Clear-all and the per-row remove
