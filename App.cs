@@ -340,7 +340,7 @@ namespace METools
             // translated, so unlike the buttons above this one skips
             // RibbonLanguageWatcher and uses a plain literal for its label.
             var meecoBtn = new PushButtonData(
-                "Meeco", "Meeco", dll,
+                "Meeco", "Assistant", dll,
                 "METools.Meeco.OpenMeecoCommand")
             {
                 ToolTip         = "Open Meeco, the AI assistant for Tasks, Comments, the project database, and (when the AI Connector is running) live Revit access.",
