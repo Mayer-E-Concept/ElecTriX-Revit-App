@@ -134,6 +134,22 @@ namespace METools
             ["ribbon.comments"]              = "Comments",
             ["ribbon.tasks"]                 = "Workboard",
             ["ribbon.activity_log"]          = "Activity\n& Time",
+
+            // ── Ribbon tooltips ─────────────────────────────────────────────
+            ["tooltip.settings"] = "ME-Tools-Einstellungen: Darstellung, Sprache, Lizenz und Worksets.",
+            ["tooltip.diagnostics"] = "Find Stray Elements, Projekt-Gesundheitscheck und Importierte Objekte -- Werkzeuge für Modellzustand und Aufräumen.",
+            ["tooltip.family_placer"] = "Platziert gestapelte Kombinationen elektrischer Familien mit konfigurierbarer Höhe und Versatz.",
+            ["tooltip.family_browser"] = "Geladene elektrische Familien nach Kategorie durchsuchen und platzieren.",
+            ["tooltip.lamp_placer"] = "Platziert Leuchten gleichmäßig verteilt in ausgewählten Räumen.",
+            ["tooltip.fix_level"] = "Weist allen sichtbaren elektrischen Elementen in der aktiven Ansicht die korrekte Planungsebene zu.",
+            ["tooltip.level_manager"] = "Zeigt jede Ebene im Projekt wie einen Schnitt an, neue hinzufügen oder Ebenen aus einer IFC-Datei importieren.",
+            ["tooltip.project_transfer"] = "Kopiert Filter, Zeichnungsansichten/Legenden, Pläne und Listen von diesem Projekt in ein anderes.",
+            ["tooltip.circuit_tagger"] = "Elemente auswählen, Stromkreisparameter (FI, Stromkreis, Vorsicherung) zuweisen und Tags platzieren.",
+            ["tooltip.statistics"] = "Zählt alle elektrischen Elemente nach Kategorie und Geschoss.",
+            ["tooltip.batch_params"] = "Nummeriert einen Parameter über viele Elemente neu (manuell oder entlang einer Linie), oder fügt in großer Menge Präfix/Suffix hinzu, sucht & ersetzt, setzt oder löscht einen Parameter über eine gefilterte Auswahl.",
+            ["tooltip.collision_checker"] = "Findet, wo Leerrohre/Kabeltrassen Wände kreuzen, springt zu jeder Stelle und platziert eine Durchbruchsmarkierung -- die Markierung folgt, wenn die Trasse später verschoben wird.",
+            ["tooltip.tasks"] = "Aufgaben aus Kunden-E-Mails, plus projektbezogene Kommentare -- zwei Tabs, ein gemeinsamer Ordner.",
+            ["tooltip.activity_log"] = "Zeigt, wer welche Elemente hinzugefügt, geändert oder gelöscht hat und wann -- plus Zeitaufwand pro Benutzer und Projekt.",
             ["settings.back"]           = "Back",
             ["settings.tab.appearance"] = "Appearance",
             ["settings.tab.language"]   = "Language",
@@ -501,6 +517,11 @@ namespace METools
             ["commentpopup.go_to_item"]  = "Go to Item",
             ["commentpopup.ignore"]      = "Ignore",
             ["commentpopup.mark_done"]   = "Mark Done",
+
+            // ── Tasks notification popup ────────────────────────────────────
+            ["taskpopup.new_task"]      = "New task",
+            ["taskpopup.reminder"]      = "Task reminder",
+            ["taskpopup.assign_to_me"]  = "Assign to Me",
 
             // ── License activation window ───────────────────────────────────
             ["license.window_title"]   = "ME-Tools — Activation Required",
@@ -1231,6 +1252,22 @@ namespace METools
             ["ribbon.comments"]              = "Comments",
             ["ribbon.tasks"]                 = "Workboard",
             ["ribbon.activity_log"]          = "Aktivität\n& Zeit",
+
+            // ── Ribbon tooltips ─────────────────────────────────────────────
+            ["tooltip.settings"] = "Setări ME-Tools: aspect, limbă, licență și worksets.",
+            ["tooltip.diagnostics"] = "Find Stray Elements, verificarea sănătății proiectului și Obiecte importate -- unelte pentru starea modelului și curățare.",
+            ["tooltip.family_placer"] = "Plasează combinații suprapuse de familii electrice cu înălțime și decalaj configurabile.",
+            ["tooltip.family_browser"] = "Răsfoiește și plasează familiile electrice CAx încărcate, pe categorii.",
+            ["tooltip.lamp_placer"] = "Plasează corpuri de iluminat distribuite uniform în încăperile selectate.",
+            ["tooltip.fix_level"] = "Atribuie nivelul corect tuturor elementelor electrice vizibile din vederea activă.",
+            ["tooltip.level_manager"] = "Vezi fiecare nivel al proiectului afișat ca o secțiune, adaugă niveluri noi sau importă niveluri dintr-un fișier IFC.",
+            ["tooltip.project_transfer"] = "Copiază filtre, vederi de desen/legende, planșe și tabele din acest proiect în altul.",
+            ["tooltip.circuit_tagger"] = "Selectează elemente, atribuie parametrii de circuit (FI, Stromkreis, Vorsicherung) și plasează etichete.",
+            ["tooltip.statistics"] = "Numără toate elementele electrice pe categorie și etaj.",
+            ["tooltip.batch_params"] = "Renumerotează un parametru pe mai multe elemente (manual sau de-a lungul unei linii), sau adaugă în masă prefix/sufix, caută & înlocuiește, setează sau șterge un parametru pe un set filtrat.",
+            ["tooltip.collision_checker"] = "Găsește unde tuburile/jgheaburile de cabluri traversează pereții, sari la fiecare și plasează un marcaj de gaură -- marcajul urmează dacă traseul este mutat ulterior.",
+            ["tooltip.tasks"] = "Sarcini din emailurile clienților, plus comentarii per proiect -- două taburi, un folder partajat.",
+            ["tooltip.activity_log"] = "Vezi cine a adăugat, modificat sau șters elemente și când -- plus timpul petrecut pe utilizator și proiect.",
             ["settings.back"]           = "Zurück",
             ["settings.tab.appearance"] = "Darstellung",
             ["settings.tab.language"]   = "Sprache",
@@ -1592,6 +1629,11 @@ namespace METools
             ["commentpopup.go_to_item"]  = "Zum Element",
             ["commentpopup.ignore"]      = "Ignorieren",
             ["commentpopup.mark_done"]   = "Erledigt",
+
+            // ── Tasks notification popup ────────────────────────────────────
+            ["taskpopup.new_task"]      = "Neue Aufgabe",
+            ["taskpopup.reminder"]      = "Aufgaben-Erinnerung",
+            ["taskpopup.assign_to_me"]  = "Mir zuweisen",
 
             // ── License activation window ───────────────────────────────────
             ["license.window_title"]   = "ME-Tools — Aktivierung erforderlich",
@@ -2319,6 +2361,22 @@ namespace METools
             ["ribbon.comments"]              = "Comments",
             ["ribbon.tasks"]                 = "Workboard",
             ["ribbon.activity_log"]          = "Activitate\nsi timp",
+
+            // ── Ribbon tooltips ─────────────────────────────────────────────
+            ["tooltip.settings"] = "Setări ME-Tools: aspect, limbă, licență și worksets.",
+            ["tooltip.diagnostics"] = "Find Stray Elements, verificarea sănătății proiectului și Obiecte importate -- unelte pentru starea modelului și curățare.",
+            ["tooltip.family_placer"] = "Plasează combinații suprapuse de familii electrice cu înălțime și decalaj configurabile.",
+            ["tooltip.family_browser"] = "Răsfoiește și plasează familiile electrice CAx încărcate, pe categorii.",
+            ["tooltip.lamp_placer"] = "Plasează corpuri de iluminat distribuite uniform în încăperile selectate.",
+            ["tooltip.fix_level"] = "Atribuie nivelul corect tuturor elementelor electrice vizibile din vederea activă.",
+            ["tooltip.level_manager"] = "Vezi fiecare nivel al proiectului afișat ca o secțiune, adaugă niveluri noi sau importă niveluri dintr-un fișier IFC.",
+            ["tooltip.project_transfer"] = "Copiază filtre, vederi de desen/legende, planșe și tabele din acest proiect în altul.",
+            ["tooltip.circuit_tagger"] = "Selectează elemente, atribuie parametrii de circuit (FI, Stromkreis, Vorsicherung) și plasează etichete.",
+            ["tooltip.statistics"] = "Numără toate elementele electrice pe categorie și etaj.",
+            ["tooltip.batch_params"] = "Renumerotează un parametru pe mai multe elemente (manual sau de-a lungul unei linii), sau adaugă în masă prefix/sufix, caută & înlocuiește, setează sau șterge un parametru pe un set filtrat.",
+            ["tooltip.collision_checker"] = "Găsește unde tuburile/jgheaburile de cabluri traversează pereții, sari la fiecare și plasează un marcaj de gaură -- marcajul urmează dacă traseul este mutat ulterior.",
+            ["tooltip.tasks"] = "Sarcini din emailurile clienților, plus comentarii per proiect -- două taburi, un folder partajat.",
+            ["tooltip.activity_log"] = "Vezi cine a adăugat, modificat sau șters elemente și când -- plus timpul petrecut pe utilizator și proiect.",
             ["settings.back"]           = "Inapoi",
             ["settings.tab.appearance"] = "Aspect",
             ["settings.tab.language"]   = "Limba",
@@ -2680,6 +2738,11 @@ namespace METools
             ["commentpopup.go_to_item"]  = "Mergi la element",
             ["commentpopup.ignore"]      = "Ignorare",
             ["commentpopup.mark_done"]   = "Finalizat",
+
+            // ── Tasks notification popup ────────────────────────────────────
+            ["taskpopup.new_task"]      = "Sarcină nouă",
+            ["taskpopup.reminder"]      = "Reamintire sarcină",
+            ["taskpopup.assign_to_me"]  = "Asignează-mi",
 
             // ── License activation window ───────────────────────────────────
             ["license.window_title"]   = "ME-Tools — Activare necesara",

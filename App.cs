@@ -30,6 +30,11 @@ namespace METools
             // convention (no actual ordering dependency between the two).
             METools.Comments.CommentsHandler.Ensure();
 
+            // -- Project Tasks background notifier (same shared folder, same
+            // sound setting as Comments) -- new task and stale/unassigned
+            // reminder popups, mirroring CommentsWatcher's own pattern --------
+            METools.Tasks.TasksWatcher.Register(app);
+
             // -- Activity Log background tracker (Added/Modified/Deleted per
             // user, shared folder same as Comments) -------------------------
             METools.ActivityLog.ActivityLogWatcher.Register(app);
@@ -68,7 +73,7 @@ namespace METools
                 "Settings", S._("ribbon.settings"), dll,
                 "METools.SettingsCommand")
             {
-                ToolTip         = "ME-Tools settings: appearance, language, license and worksets.",
+                ToolTip         = S._("tooltip.settings"),
                 LongDescription = $"Settings -- {VENDOR}\n\nAppearance ? Language ? License ? Worksets\n\n" +
                                   $"License status: {LicenseManager.StatusText}",
                 Image           = LoadIcon("icon_settings_light_16.png"),
@@ -78,7 +83,7 @@ namespace METools
             if (settingsButton != null)
                 SettingsCommand.RibbonButton = settingsButton;
             RibbonThemeWatcher.Register(settingsButton, "icon_settings");
-            RibbonLanguageWatcher.Register(settingsButton, "ribbon.settings");
+            RibbonLanguageWatcher.Register(settingsButton, "ribbon.settings", "tooltip.settings");
 
             // -- Diagnostics (Find Stray Elements ? Project Health Check ? Imported Objects) --
             // Moved here from three separate places: Project Health Check
@@ -94,7 +99,7 @@ namespace METools
                 "Diagnostics", S._("ribbon.diagnostics"), dll,
                 "METools.DiagnosticsCommand")
             {
-                ToolTip         = "Find Stray Elements, Project Health Check, and Imported Objects -- model-health and cleanup tools.",
+                ToolTip         = S._("tooltip.diagnostics"),
                 LongDescription = $"Diagnostics -- {VENDOR}\n\nFind Stray Elements · Project Health Check · Imported Objects\n\n" +
                                   "Tools for finding and fixing things that are wrong with a project, rather than day-to-day design work.",
                 Image           = LoadIcon("icon_healthcheck_light_16.png") ?? LoadIcon("icon_settings_light_16.png"),
@@ -103,63 +108,63 @@ namespace METools
             var diagButton = panelDiagnostics.AddItem(diagBtn) as PushButton;
             RibbonThemeWatcher.Register(diagButton, "icon_healthcheck");
             RibbonLicenseWatcher.Register(diagButton);
-            RibbonLanguageWatcher.Register(diagButton, "ribbon.diagnostics");
+            RibbonLanguageWatcher.Register(diagButton, "ribbon.diagnostics", "tooltip.diagnostics");
 
             // -- Family Placer -----------------------------------------------
             var fpBtn = new PushButtonData(
                 "FamilyPlacer", S._("ribbon.family_placer"), dll,
                 "METools.FamilyPlacer.FamilyPlacerCommand")
             {
-                ToolTip         = "Place stacked combinations of electrical families with configurable height and offset.",
+                ToolTip         = S._("tooltip.family_placer"),
                 LongDescription = $"Family Placer -- {VENDOR}\n\nBuild a stack of electrical families, set their mounting height (Niveau) and offset factor, then place them all at once.\n\n? SPACEBAR to rotate before placing\n? Multi-Place: collect multiple positions, ESC to finish\n? Wall detection active -- free workplane also supported\n? Save and load placement templates for reuse",
                 Image           = LoadIcon("icon_fp_light_16.png"),
                 LargeImage      = LoadIcon("icon_fp_light_32.png"),
             };
             var fpButton = panelPlacement.AddItem(fpBtn) as PushButton;
             RibbonThemeWatcher.Register(fpButton, "icon_fp");
-            RibbonLanguageWatcher.Register(fpButton, "ribbon.family_placer");
+            RibbonLanguageWatcher.Register(fpButton, "ribbon.family_placer", "tooltip.family_placer");
 
             // -- Family Browser ---------------------------------------------
             var fbBtn = new PushButtonData(
                 "FamilyBrowser", S._("ribbon.family_browser"), dll,
                 "METools.FamilyBrowserCommand")
             {
-                ToolTip         = "Browse and place loaded electrical CAx families by category.",
+                ToolTip         = S._("tooltip.family_browser"),
                 LongDescription = $"Family Browser -- {VENDOR}\n\nLists all loaded _E_CAx families grouped by category.\nHover a family to reveal the Place button.",
                 Image           = LoadIcon("icon_fb_light_16.png") ?? LoadIcon("icon_fp_light_16.png"),
                 LargeImage      = LoadIcon("icon_fb_light_32.png") ?? LoadIcon("icon_fp_light_32.png"),
             };
             var fbButton = panelPlacement.AddItem(fbBtn) as PushButton;
             RibbonThemeWatcher.Register(fbButton, "icon_fb");
-            RibbonLanguageWatcher.Register(fbButton, "ribbon.family_browser");
+            RibbonLanguageWatcher.Register(fbButton, "ribbon.family_browser", "tooltip.family_browser");
 
             // -- Lamp Placer -------------------------------------------------
             var lpBtn = new PushButtonData(
                 "LampPlacer", S._("ribbon.lamp_placer"), dll,
                 "METools.LampPlacer.LampPlacerCommand")
             {
-                ToolTip         = "Place lighting fixtures evenly distributed across selected rooms.",
+                ToolTip         = S._("tooltip.lamp_placer"),
                 LongDescription = $"Lamp Placer -- {VENDOR}\n\nSelect a room and lamps are placed automatically.\n\n? Configurable wall margin and lamp spacing\n? Height = UKD (underside of ceiling)\n? Multiple rooms simultaneously\n? Manual grid (rows ? columns) or area-based auto mode",
                 Image           = LoadIcon("icon_lamp_light_16.png"),
                 LargeImage      = LoadIcon("icon_lamp_light_32.png"),
             };
             var lpButton = panelPlacement.AddItem(lpBtn) as PushButton;
             RibbonThemeWatcher.Register(lpButton, "icon_lamp");
-            RibbonLanguageWatcher.Register(lpButton, "ribbon.lamp_placer");
+            RibbonLanguageWatcher.Register(lpButton, "ribbon.lamp_placer", "tooltip.lamp_placer");
 
             // -- Fix Level ---------------------------------------------------
             var flBtn = new PushButtonData(
                 "FixLevel", S._("ribbon.fix_level"), dll,
                 "METools.FixLevelCommand")
             {
-                ToolTip         = "Assign the correct schedule level to all visible electrical elements in the active view.",
+                ToolTip         = S._("tooltip.fix_level"),
                 LongDescription = $"Fix Level -- {VENDOR}\n\nSets the 'Schedule Level' parameter of all electrical elements visible in the current floor plan view.",
                 Image           = LoadIcon("icon_fl_fix_light_16.png") ?? LoadIcon("icon_fp_light_16.png"),
                 LargeImage      = LoadIcon("icon_fl_fix_light_32.png") ?? LoadIcon("icon_fp_light_32.png"),
             };
             var flButton = panelLevels.AddItem(flBtn) as PushButton;
             RibbonThemeWatcher.Register(flButton, "icon_fl_fix");
-            RibbonLanguageWatcher.Register(flButton, "ribbon.fix_level");
+            RibbonLanguageWatcher.Register(flButton, "ribbon.fix_level", "tooltip.fix_level");
 
             // -- Level Manager (also handles IFC level import -- see its own
             // "Import from IFC" tab; that used to be a separate ribbon button) --
@@ -167,7 +172,7 @@ namespace METools
                 "LevelManager", S._("ribbon.level_manager"), dll,
                 "METools.LevelManager.LevelManagerCommand")
             {
-                ToolTip         = "See every level in the project laid out like a section, add new ones, or import levels from an IFC file.",
+                ToolTip         = S._("tooltip.level_manager"),
                 LongDescription = $"Level & IFC Manager -- {VENDOR}\n\nTwo tabs in one window:\n\n" +
                                   "Project Levels -- shows all project levels stacked top-to-bottom by elevation, like a section.\n" +
                                   "* Auto-groups levels by shared naming (e.g. UKD / FFB) -- no project-specific setup needed\n" +
@@ -181,14 +186,14 @@ namespace METools
             var lmButton = panelLevels.AddItem(lmBtn) as PushButton;
             RibbonThemeWatcher.Register(lmButton, "icon_lm");
             RibbonLicenseWatcher.Register(lmButton);
-            RibbonLanguageWatcher.Register(lmButton, "ribbon.level_manager");
+            RibbonLanguageWatcher.Register(lmButton, "ribbon.level_manager", "tooltip.level_manager");
 
             // -- Project Transfer ---------------------------------------------
             var ptBtn = new PushButtonData(
                 "ProjectTransfer", S._("ribbon.project_transfer"), dll,
                 "METools.ProjectTransfer.ProjectTransferCommand")
             {
-                ToolTip         = "Copy filters, drafting views/legends, sheets and schedules from this project into another one.",
+                ToolTip         = S._("tooltip.project_transfer"),
                 LongDescription = $"Project Transfer -- {VENDOR}\n\nCopies Filters, Views, Sheets and Schedules from the active project into another project -- either already open in Revit, or opened from disk.\n\n* Views: Drafting Views and Legends only (plan/section/3D views depend on this project's own levels & grids)\n* Sheets: copied together with whatever is placed on them; sheets flag a warning if they hold a plan/section/3D view\n* Duplicate type names in the target keep the target's own version",
                 Image           = LoadIcon("icon_pt_light_16.png") ?? LoadIcon("icon_fp_light_16.png"),
                 LargeImage      = LoadIcon("icon_pt_light_32.png") ?? LoadIcon("icon_fp_light_32.png"),
@@ -196,14 +201,14 @@ namespace METools
             var ptButton = panelLevels.AddItem(ptBtn) as PushButton;
             RibbonThemeWatcher.Register(ptButton, "icon_pt");
             RibbonLicenseWatcher.Register(ptButton);
-            RibbonLanguageWatcher.Register(ptButton, "ribbon.project_transfer");
+            RibbonLanguageWatcher.Register(ptButton, "ribbon.project_transfer", "tooltip.project_transfer");
 
             // -- Circuit Tagger ---------------------------------------------
             var ctBtn = new PushButtonData(
                 "CircuitTagger", S._("ribbon.circuit_tagger"), dll,
                 "METools.FamilyPlacer.CircuitTaggerCommand")
             {
-                ToolTip         = "Select elements, assign circuit parameters (FI, Stromkreis, Vorsicherung) and place tags.",
+                ToolTip         = S._("tooltip.circuit_tagger"),
                 LongDescription = $"Circuit Tagger -- {VENDOR}\n\nSelect any electrical elements, enter circuit parameters and an apartment group tag, then apply.\n\n" +
                                   "* Writes CAx_Vorsicherung, CAx_FI, CAx_Stromkreis, CAx_Beleuchtungskreis, CAx_Apartment\n" +
                                   "* Places a multicategory tag (ME-Tools_CircuitTag) next to each element\n" +
@@ -216,21 +221,21 @@ namespace METools
             var ctButton = panelCircuits.AddItem(ctBtn) as PushButton;
             RibbonThemeWatcher.Register(ctButton, "icon_ct");
             RibbonLicenseWatcher.Register(ctButton);
-            RibbonLanguageWatcher.Register(ctButton, "ribbon.circuit_tagger");
+            RibbonLanguageWatcher.Register(ctButton, "ribbon.circuit_tagger", "tooltip.circuit_tagger");
 
             // -- Statistics ------------------------------------------------
             var statsBtn = new PushButtonData(
                 "Statistics", S._("ribbon.statistics"), dll,
                 "METools.StatisticsCommand")
             {
-                ToolTip         = "Count all electrical elements by category and floor.",
+                ToolTip         = S._("tooltip.statistics"),
                 LongDescription = $"Statistics -- {VENDOR}\n\nCounts all electrical elements by category with a per-floor breakdown.\n\nExport to CSV.",
                 Image           = LoadIcon("icon_stats_light_16.png"),
                 LargeImage      = LoadIcon("icon_stats_light_32.png"),
             };
             var statsButton = panelCircuits.AddItem(statsBtn) as PushButton;
             RibbonThemeWatcher.Register(statsButton, "icon_stats");
-            RibbonLanguageWatcher.Register(statsButton, "ribbon.statistics");
+            RibbonLanguageWatcher.Register(statsButton, "ribbon.statistics", "tooltip.statistics");
 
             // -- Batch Params (Renumber + Bulk Edit) --------------------------
             // Inspired by DiRoots' ReOrdering (renumber an instance parameter
@@ -243,7 +248,7 @@ namespace METools
                 "BatchParams", S._("ribbon.batch_params"), dll,
                 "METools.BatchParams.BatchParamsCommand")
             {
-                ToolTip         = "Renumber a parameter across many elements (manually or along a line), or bulk add-prefix/suffix/find-replace/clear one parameter across a filtered set.",
+                ToolTip         = S._("tooltip.batch_params"),
                 LongDescription = $"Batch Params -- {VENDOR}\n\nFilter elements by scope (selection / active view / whole model) and category, then:\n\n" +
                                   "* Renumber tab: prefix + counter + suffix into any text parameter, ordered manually (click one by one) or along a picked detail line\n" +
                                   "* Bulk Edit tab: add prefix, add suffix, find & replace, set, or clear one parameter across every matched element in one click\n\n" +
@@ -254,7 +259,7 @@ namespace METools
             var bpButton = panelCircuits.AddItem(bpBtn) as PushButton;
             RibbonThemeWatcher.Register(bpButton, "icon_bp");
             RibbonLicenseWatcher.Register(bpButton);
-            RibbonLanguageWatcher.Register(bpButton, "ribbon.batch_params");
+            RibbonLanguageWatcher.Register(bpButton, "ribbon.batch_params", "tooltip.batch_params");
 
             // -- Collision Checker (conduits/cable trays vs walls) -----------
             // Finds where a conduit/cable tray run crosses a wall, lists each
@@ -267,7 +272,7 @@ namespace METools
                 "CollisionChecker", S._("ribbon.collision_checker"), dll,
                 "METools.CollisionChecker.CollisionCheckerCommand")
             {
-                ToolTip         = "Find where conduits/cable trays cross walls, jump to each one, and place a hole marker -- the hole follows if you later move the run.",
+                ToolTip         = S._("tooltip.collision_checker"),
                 LongDescription = $"Collision Checker -- {VENDOR}\n\nScans conduits and cable trays against every wall in the chosen scope (selection / active view / whole model) and lists every crossing point, with its level, category, and wall type.\n\n" +
                                   "* Go To selects the run and zooms to it\n" +
                                   "* Unresolved crossings are marked red in the current view\n" +
@@ -279,7 +284,7 @@ namespace METools
             var ccButton = panelCircuits.AddItem(ccBtn) as PushButton;
             RibbonThemeWatcher.Register(ccButton, "icon_cc");
             RibbonLicenseWatcher.Register(ccButton);
-            RibbonLanguageWatcher.Register(ccButton, "ribbon.collision_checker");
+            RibbonLanguageWatcher.Register(ccButton, "ribbon.collision_checker", "tooltip.collision_checker");
 
             // -- Workboard (Tasks + Comments) -----------------------------------
             // Comments used to be its own separate button/window here; merged
@@ -297,7 +302,7 @@ namespace METools
                 "Tasks", S._("ribbon.tasks"), dll,
                 "METools.Tasks.TasksCommand")
             {
-                ToolTip = "Tasks from customer emails, plus per-project comments -- two tabs, one shared folder.",
+                ToolTip = S._("tooltip.tasks"),
                 LongDescription = $"Workboard -- {VENDOR}\n\nTwo tabs, one shared folder:\n\n" +
                     "* Tasks: incoming customer emails are translated, summarized, and filed here per project -- assign to yourself, mark done, or jump to a pinned element.\n" +
                     "* Comments: leave a note on the project you're working in -- teammates see it, mark it done, or jump to what it's about.\n\n" +
@@ -308,7 +313,7 @@ namespace METools
             var taskButton = panelTeam.AddItem(taskBtn) as PushButton;
             RibbonThemeWatcher.Register(taskButton, "icon_tasks");
             RibbonLicenseWatcher.Register(taskButton);
-            RibbonLanguageWatcher.Register(taskButton, "ribbon.tasks");
+            RibbonLanguageWatcher.Register(taskButton, "ribbon.tasks", "tooltip.tasks");
 
             // -- Activity Log & Time Tracker ------------------------------------
             // Time Tracker used to be its own button here; merged into this one
@@ -320,7 +325,7 @@ namespace METools
                 "ActivityLog", S._("ribbon.activity_log"), dll,
                 "METools.ActivityLog.ActivityLogCommand")
             {
-                ToolTip         = "See who added, modified, or deleted which elements and when -- plus time spent per user, per project.",
+                ToolTip         = S._("tooltip.activity_log"),
                 LongDescription = $"Activity Log & Time Tracker -- {VENDOR}\n\nThree tabs, one shared folder:\n\n" +
                                   "* Activity: Added/Modified/Deleted elements across the electrical/MEP categories ElecTriX works with, per user, per session. Filter by user, action, or a text search; export to CSV.\n" +
                                   "* Team Totals: total time, session count, and last activity for every teammate on this project.\n" +
@@ -331,7 +336,7 @@ namespace METools
             };
             var alButton = panelTeam.AddItem(alBtn) as PushButton;
             RibbonThemeWatcher.Register(alButton, "icon_activitylog");
-            RibbonLanguageWatcher.Register(alButton, "ribbon.activity_log");
+            RibbonLanguageWatcher.Register(alButton, "ribbon.activity_log", "tooltip.activity_log");
 
             // -- Meeco (AI assistant) ------------------------------------------
             // Opens the standalone Meeco app rather than running inside Revit's
