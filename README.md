@@ -32,7 +32,9 @@ Free for **14 days** as a trial. After that, every tool except Settings refuses 
 
 **Settings** — Configure the add-in once: language, theme, license activation, standard worksets for new workshared projects, and default mounting heights per family category.
 
-**Project Health Check** — Run this first on any new or detached project, before using Circuit Tagger. It checks whether the tag family and the 6 shared parameters are set up. If anything's missing, click **Fix All** to load/bind it in one step.
+### Diagnostics panel
+
+**Diagnostics** — Bundles three model-health and cleanup checks in one tool: **Project Health Check** (run this first on any new or detached project, before using Circuit Tagger — checks whether the tag family and the 6 shared parameters are set up, with **Fix All** to load/bind anything missing in one step), **Find Stray Elements**, and **Imported Objects**.
 
 ### Placement panel
 
@@ -58,11 +60,15 @@ Free for **14 days** as a trial. After that, every tool except Settings refuses 
 
 **Batch Params** — Pick a scope and category, **Scan**, then either **Renumber** (prefix + counter + suffix, ordered by clicking elements or along a drawn line) or **Bulk Edit** (add prefix/suffix, find & replace, set, or clear one parameter across every matched element). Every Apply shows a preview first — review it, then **Confirm & Apply**. Works on any category and any text parameter, not just electrical ones.
 
+**Collision Checker** — Finds where conduits/cable trays cross walls, jumps to each one, and places a hole marker — the hole follows automatically if the run is later moved.
+
 ### Team panel
 
-**Comments** — Leave a note tied to a level or a specific element (**+ Reference Item** to pin it to one thing). Teammates get a popup with **Go There** to jump straight to it.
+**Workboard** — Two tabs, one shared folder: **Tasks** (created automatically from customer emails — assign one to yourself or someone else, mark it done) and **Comments** (leave a note tied to a level or a specific element, **+ Reference Item** to pin it to one thing — teammates get a popup with **Go There** to jump straight to it).
 
 **Activity Log** — See who added, changed, or deleted which electrical elements, and when. Filter by user/action, or **Export CSV**.
+
+**Meeco** — Opens Meeco, an AI assistant for Tasks, Comments, the project database, and (when Nonica's AI Connector is running) live Revit access. Runs as its own standalone app — this button just finds or launches it.
 
 ---
 

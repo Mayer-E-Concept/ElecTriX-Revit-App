@@ -21,12 +21,18 @@ namespace METools.Meeco
     {
         // Checked in this order -- Release first, since that's what an
         // actual daily-use build would be, falling back to Debug since
-        // that's what's most likely to exist during development. Update
-        // this if Meeco's project ever moves.
+        // that's what's most likely to exist during development. The
+        // TFM-named folder (net8.0-windows10.0.22621.0) must match
+        // Meeco.csproj's own TargetFramework exactly -- .NET builds each
+        // target framework into its own uniquely-named subfolder, so if
+        // that value ever changes again (say, if the WinRT speech
+        // dependency is removed), these paths need updating to match or
+        // this will silently launch a stale build from the old TFM
+        // folder again, exactly like this one did.
         private static readonly string[] CandidatePaths =
         {
-            @"X:\02_sabloane\01_Revit\Meeco-Assistant\bin\Release\net8.0-windows\Meeco.exe",
-            @"X:\02_sabloane\01_Revit\Meeco-Assistant\bin\Debug\net8.0-windows\Meeco.exe",
+            @"X:\02_sabloane\01_Revit\Meeco-Assistant\bin\Release\net8.0-windows10.0.22621.0\Meeco.exe",
+            @"X:\02_sabloane\01_Revit\Meeco-Assistant\bin\Debug\net8.0-windows10.0.22621.0\Meeco.exe",
         };
 
         [DllImport("user32.dll")]

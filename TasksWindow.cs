@@ -35,6 +35,7 @@ namespace METools.Tasks
         private static TasksWindow _instance;
 
         private enum TaskTab { Unassigned, InProgress, Mine, Done }
+        private enum OuterTab { Tasks, Comments, Projects }
 
         // Fully-qualified rather than a using directive, on purpose:
         // Autodesk.Revit.ApplicationServices.Application and
@@ -64,8 +65,9 @@ namespace METools.Tasks
         // different data shapes. Comments stays scoped to whichever
         // project is currently open (unlike the Tasks tab, which is
         // deliberately cross-project), since that's its actual nature.
-        private Button _outerTabTasks, _outerTabComments;
-        private FrameworkElement _tasksTabContent, _commentsTabContent;
+        private Button _outerTabTasks, _outerTabComments, _outerTabProjects;
+        private FrameworkElement _tasksTabContent, _commentsTabContent, _projectsTabContent;
+        private StackPanel _projectsListPanel;
         private TextBlock _commentsProjectLabel;
         private TextBlock _commentsLevelLabel;
         private StackPanel _commentsListPanel;
@@ -77,6 +79,7 @@ namespace METools.Tasks
         private TextBlock _statTotal, _statUnassigned, _statInProgress, _statDone;
         private Button _unassignedTabBtn, _inProgressTabBtn, _mineTabBtn, _doneTabBtn;
         private TaskTab _currentTab = TaskTab.Unassigned;
+        private Border _registrationBanner;
 
         private string CurrentUsername => _revitApp?.Username ?? Environment.UserName;
 
@@ -111,21 +114,27 @@ namespace METools.Tasks
             // Outer tab row -- added first, so it's not the last child
             // RootDock sees (see file header on DockPanel ordering).
             var outerTabsRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(16, 10, 16, 0) };
-            _outerTabTasks = ToggleBtn("Tasks", true, () => SwitchOuterTab(false));
-            _outerTabComments = ToggleBtn("Comments", false, () => SwitchOuterTab(true));
+            _outerTabTasks = ToggleBtn("Tasks", true, () => SwitchOuterTab(OuterTab.Tasks));
+            _outerTabComments = ToggleBtn("Comments", false, () => SwitchOuterTab(OuterTab.Comments));
+            _outerTabProjects = ToggleBtn("Projects", false, () => SwitchOuterTab(OuterTab.Projects));
             outerTabsRow.Children.Add(_outerTabTasks);
             outerTabsRow.Children.Add(new Border { Width = 6 });
             outerTabsRow.Children.Add(_outerTabComments);
+            outerTabsRow.Children.Add(new Border { Width = 6 });
+            outerTabsRow.Children.Add(_outerTabProjects);
             DockPanel.SetDock(outerTabsRow, Dock.Top);
             RootDock.Children.Add(outerTabsRow);
 
             _tasksTabContent = BuildTasksTabContent();
             _commentsTabContent = BuildCommentsTabPanel();
             _commentsTabContent.Visibility = Visibility.Collapsed;
+            _projectsTabContent = BuildProjectsTabContent();
+            _projectsTabContent.Visibility = Visibility.Collapsed;
 
             var outerContainer = new Grid();
             outerContainer.Children.Add(_tasksTabContent);
             outerContainer.Children.Add(_commentsTabContent);
+            outerContainer.Children.Add(_projectsTabContent);
 
             // Last child added to RootDock -- fills remaining space, see
             // file header.
@@ -179,6 +188,17 @@ namespace METools.Tasks
             actionsRow.Children.Add(ActionBtn("Register current project", true, RegisterCurrentProject));
             content.Children.Add(actionsRow);
 
+            // Hidden by default -- RenderList shows this specifically
+            // when a project is open and confirmed unregistered, so an
+            // email mentioning it has nowhere deterministic to route to.
+            // A missing registration is easy to forget (it's a one-time,
+            // manual step with no other reminder), and silently routing
+            // to Unassigned forever is a worse failure mode than a
+            // visible nudge.
+            _registrationBanner = InfoBox("");
+            _registrationBanner.Visibility = Visibility.Collapsed;
+            content.Children.Add(_registrationBanner);
+
             _listPanel = new StackPanel();
             var scroller = new ScrollViewer
             {
@@ -189,6 +209,83 @@ namespace METools.Tasks
             content.Children.Add(scroller);
 
             return content;
+        }
+
+        // Grouped by registered project (Unassigned first, since those are
+        // the ones actually needing a human decision), reusing
+        // BuildTaskRow for each task -- same visual language as the
+        // Tasks tab, just organized differently. Populated fresh every
+        // time RenderList runs, from the same already-loaded task list,
+        // rather than a separate ExternalEvent round-trip -- there's
+        // nothing here that isn't already sitting in memory.
+        private FrameworkElement BuildProjectsTabContent()
+        {
+            var content = new StackPanel { Margin = new Thickness(16, 12, 16, 12) };
+            content.Children.Add(ActionBtn("Refresh", true, RequestRefresh));
+
+            _projectsListPanel = new StackPanel { Margin = new Thickness(0, 10, 0, 0) };
+            var scroller = new ScrollViewer
+            {
+                Content = _projectsListPanel,
+                MaxHeight = 480,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            };
+            content.Children.Add(scroller);
+
+            return content;
+        }
+
+        private void RenderProjectsTab(List<ProjectTask> allTasks)
+        {
+            _projectsListPanel.Children.Clear();
+
+            var unassigned = allTasks.Where(t => t.ProjectId == "unassigned").OrderByDescending(t => t.ReceivedAtUtc).ToList();
+            _projectsListPanel.Children.Add(Sec($"UNASSIGNED ({unassigned.Count})"));
+            if (unassigned.Count == 0)
+            {
+                _projectsListPanel.Children.Add(new TextBlock
+                {
+                    Text = "Nothing unassigned.", FontSize = 12, Foreground = MeToolsTheme.BrMuted,
+                    Margin = new Thickness(4, 0, 4, 14),
+                });
+            }
+            else
+            {
+                foreach (var task in unassigned)
+                    _projectsListPanel.Children.Add(BuildTaskRow(task));
+                _projectsListPanel.Children.Add(new Border { Height = 8 });
+            }
+
+            foreach (var entry in _registryEntries.OrderBy(r => r.DisplayName, StringComparer.OrdinalIgnoreCase))
+            {
+                var projectTasks = allTasks.Where(t => t.ProjectId == entry.ProjectId)
+                    .OrderByDescending(t => t.ReceivedAtUtc).ToList();
+                _projectsListPanel.Children.Add(Sec($"{entry.DisplayName} ({projectTasks.Count})"));
+                if (projectTasks.Count == 0)
+                {
+                    _projectsListPanel.Children.Add(new TextBlock
+                    {
+                        Text = "No tasks yet.", FontSize = 12, Foreground = MeToolsTheme.BrMuted,
+                        Margin = new Thickness(4, 0, 4, 14),
+                    });
+                }
+                else
+                {
+                    foreach (var task in projectTasks)
+                        _projectsListPanel.Children.Add(BuildTaskRow(task));
+                    _projectsListPanel.Children.Add(new Border { Height = 8 });
+                }
+            }
+
+            if (_registryEntries.Count == 0)
+            {
+                _projectsListPanel.Children.Add(new TextBlock
+                {
+                    Text = "No projects registered yet -- open one in Revit and click \"Register current project\" on the Tasks tab.",
+                    FontSize = 12, Foreground = MeToolsTheme.BrMuted, TextWrapping = TextWrapping.Wrap,
+                    Margin = new Thickness(4, 0, 4, 8),
+                });
+            }
         }
 
         private FrameworkElement BuildCommentsTabPanel()
@@ -257,13 +354,15 @@ namespace METools.Tasks
             UpdateToggle(_commentsReferenceToggle, _pendingIncludeReference);
         }
 
-        private void SwitchOuterTab(bool showComments)
+        private void SwitchOuterTab(OuterTab tab)
         {
-            UpdateToggle(_outerTabTasks, !showComments);
-            UpdateToggle(_outerTabComments, showComments);
-            _tasksTabContent.Visibility = showComments ? Visibility.Collapsed : Visibility.Visible;
-            _commentsTabContent.Visibility = showComments ? Visibility.Visible : Visibility.Collapsed;
-            if (showComments) RequestLoadComments();
+            UpdateToggle(_outerTabTasks, tab == OuterTab.Tasks);
+            UpdateToggle(_outerTabComments, tab == OuterTab.Comments);
+            UpdateToggle(_outerTabProjects, tab == OuterTab.Projects);
+            _tasksTabContent.Visibility = tab == OuterTab.Tasks ? Visibility.Visible : Visibility.Collapsed;
+            _commentsTabContent.Visibility = tab == OuterTab.Comments ? Visibility.Visible : Visibility.Collapsed;
+            _projectsTabContent.Visibility = tab == OuterTab.Projects ? Visibility.Visible : Visibility.Collapsed;
+            if (tab == OuterTab.Comments) RequestLoadComments();
         }
 
         private void RequestLoadComments()
@@ -666,6 +765,22 @@ namespace METools.Tasks
             _registryEntries = TasksStorage.LoadProjectRegistry();
             _projectNames = BuildDisplayNameLookup(_registryEntries);
 
+            // Only shown when a project is genuinely open and confirmed
+            // NOT in the registry -- CurrentProjectFileTitle is null
+            // whenever nothing's open at all, which isn't the same thing
+            // and shouldn't nag.
+            if (_handler.CurrentProjectFileTitle != null && !_handler.CurrentProjectRegistered)
+            {
+                ((TextBlock)_registrationBanner.Child).Text =
+                    $"'{_handler.CurrentProjectFileTitle}' isn't registered yet -- emails mentioning it will land in " +
+                    "Unassigned instead of routing here automatically. Click \"Register current project\" above to fix that.";
+                _registrationBanner.Visibility = Visibility.Visible;
+            }
+            else
+            {
+                _registrationBanner.Visibility = Visibility.Collapsed;
+            }
+
             _statTotal.Text = stats.Total.ToString();
             _statUnassigned.Text = stats.Unassigned.ToString();
             _statInProgress.Text = stats.InProgress.ToString();
@@ -703,6 +818,8 @@ namespace METools.Tasks
                 foreach (var task in sorted)
                     _listPanel.Children.Add(BuildTaskRow(task));
             }
+
+            RenderProjectsTab(allTasks);
 
             ResizeToFitContent();
         }
@@ -806,6 +923,32 @@ namespace METools.Tasks
                         ? "Could not match this to a project automatically."
                         : $"Could not match this to a project automatically \u2014 possible match: \"{task.ProjectGuessRaw}\".";
                     sp.Children.Add(InfoBox(guessNote));
+                }
+
+                // Always available, regardless of whether a suggestion
+                // above found anything -- a real project's own internal
+                // codename (e.g. "MRQS-PG24") can differ completely from
+                // what an email informally calls it, in which case even
+                // fuzzy matching against ProjectGuessRaw finds nothing to
+                // suggest. This is the actual fallback for that case: a
+                // registered project is a registered project, whether or
+                // not this specific task's own text happens to resemble
+                // it.
+                if (_registryEntries.Count > 0)
+                {
+                    var manualRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 6) };
+                    var picker = StyledCombo();
+                    picker.Width = 180;
+                    picker.DisplayMemberPath = "DisplayName";
+                    picker.ItemsSource = _registryEntries.OrderBy(r => r.DisplayName, StringComparer.OrdinalIgnoreCase).ToList();
+                    manualRow.Children.Add(picker);
+                    manualRow.Children.Add(new Border { Width = 6 });
+                    manualRow.Children.Add(ActionBtn("Move to project", true, () =>
+                    {
+                        if (picker.SelectedItem is ProjectRegistryEntry chosen)
+                            SendMoveRequest(task, chosen);
+                    }));
+                    sp.Children.Add(manualRow);
                 }
             }
 

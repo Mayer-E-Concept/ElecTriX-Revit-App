@@ -34,6 +34,16 @@ namespace METools.Tasks
         // rather than overloading OnComplete with two unrelated shapes.
         public Action<CommentsTabResult> OnCommentsComplete { get; set; }
 
+        // Set fresh on every Execute() call, read by TasksWindow right
+        // after OnComplete fires -- computed here rather than left for
+        // the window to figure out on its own, since only this handler
+        // has API-thread access to the currently-open document at all.
+        // Null CurrentProjectFileTitle means no project is open right
+        // now, not that it's unregistered -- the window uses that
+        // distinction to decide whether to show anything at all.
+        public bool CurrentProjectRegistered { get; private set; }
+        public string CurrentProjectFileTitle { get; private set; }
+
         public void Execute(UIApplication app)
         {
             var request = Request;
@@ -96,6 +106,25 @@ namespace METools.Tasks
                 case TasksAction.Refresh:
                     // Pure reload -- nothing to do against the document.
                     break;
+            }
+
+            // Read-only lookup (TryGetExistingProjectId, not
+            // GetOrCreateProjectId) -- this runs on every single refresh,
+            // including ones that have nothing to do with registration,
+            // so it must never mint or write anything itself.
+            var uidocForCheck = app.ActiveUIDocument;
+            if (uidocForCheck != null)
+            {
+                CurrentProjectFileTitle = uidocForCheck.Document.Title;
+                var currentProjectId = METools.Comments.CommentsStorage.TryGetExistingProjectId(uidocForCheck.Document);
+                var registry = TasksStorage.LoadProjectRegistry();
+                CurrentProjectRegistered = !string.IsNullOrEmpty(currentProjectId) &&
+                    registry.Any(r => r.ProjectId == currentProjectId);
+            }
+            else
+            {
+                CurrentProjectFileTitle = null;
+                CurrentProjectRegistered = false;
             }
 
             var list = TasksStorage.LoadAllAcrossProjects(out var warning);
