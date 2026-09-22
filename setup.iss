@@ -14,7 +14,7 @@
 ; NOTE: every Source/DestDir entry is a SINGLE line (Inno requirement).
 
 #define AppName     "ME-Tools"
-#define AppVersion  "2.3.4"
+#define AppVersion  "A_2.3.5"
 #define Publisher   "Mayer E-Concept SRL"
 
 ; --- adjust this absolute path to your machine if it differs ------------------
@@ -23,6 +23,16 @@
 ; net8.0-windows -> Revit 2025 AND 2026 (same binary, installed to both below)
 #define Dll2025Path ProjectDir + "\bin\Release\net8.0-windows\METools.dll"
 ; --------------------------------------------------------------------------------
+
+; --- Meeco (the standalone assistant) -- a SEPARATE project, its own .exe,
+; not something built as part of METools.csproj. Assumes it's been published
+; self-contained first (so an end-user's machine needs nothing pre-installed):
+;     cd <MeecoProjectDir> && dotnet publish -c Release -r win-x64 --self-contained -o installer_output\meeco_publish
+; If that publish command or output folder name ever changes, update
+; MeecoPublishDir below to match -- Inno just copies whatever's actually
+; sitting there. ---------------------------------------------------------------
+#define MeecoProjectDir "X:\02_sabloane\01_Revit\Meeco-Assistant"
+#define MeecoPublishDir MeecoProjectDir + "\installer_output\meeco_publish"
 
 [Setup]
 ; Keep this AppId STABLE across versions so upgrades replace cleanly. Do not change it.
@@ -52,25 +62,42 @@ CloseApplications=yes
 RestartApplications=no
 UninstallDisplayName={#AppName} {#AppVersion}
 
+; The actual "choose what to install" screen this whole change is for.
+; ElecTriX itself is Flags: fixed -- always installed, not something to
+; opt out of -- Meeco is the one genuine choice, matching what's actually
+; being asked for: everyone gets the core Revit tools, the assistant is
+; optional. Tier-based gating later (different subscription levels getting
+; different components) is a natural extension of this same mechanism --
+; whatever decides that later just needs to pre-select/deselect this
+; checkbox or pass /COMPONENTS= on a silent install, nothing structural
+; needs to change here for that to work.
+[Components]
+Name: "electrix"; Description: "ElecTriX for Revit (core electrical/MEP tools)"; Types: full custom; Flags: fixed
+Name: "assistant"; Description: "Meeco -- AI assistant (Tasks, Comments, database access, and live Revit access when the AI Connector is running)"; Types: full
+
+[Types]
+Name: "full"; Description: "Full installation (ElecTriX + Meeco)"
+Name: "custom"; Description: "Custom installation"; Flags: iscustom
+
 [Files]
 ; -- Revit 2025 + 2026 (same .NET 8 build, installed to both unconditionally --
 ; there's no per-version difference to ask the user about) -----------------
-Source: "{#Dll2025Path}"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2025"; Flags: ignoreversion
-Source: "{#ProjectDir}\METools_2025.addin"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2025"; DestName: "METools.addin"; Flags: ignoreversion
+Source: "{#Dll2025Path}"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2025"; Components: electrix; Flags: ignoreversion
+Source: "{#ProjectDir}\METools_2025.addin"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2025"; DestName: "METools.addin"; Components: electrix; Flags: ignoreversion
 ; Seeds the Settings > Worksets "standard list" on first install (the code reads
 ; this from [install folder]\config\standard_worksets.json, NOT %APPDATA%).
 ; onlyifdoesntexist so upgrading never overwrites a customer's own edited list.
-Source: "{#ProjectDir}\standard_worksets.json"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2025\config"; Flags: ignoreversion onlyifdoesntexist
+Source: "{#ProjectDir}\standard_worksets.json"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2025\config"; Components: electrix; Flags: ignoreversion onlyifdoesntexist
 
-Source: "{#Dll2025Path}"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2026"; Flags: ignoreversion
-Source: "{#ProjectDir}\METools_2026.addin"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2026"; DestName: "METools.addin"; Flags: ignoreversion
-Source: "{#ProjectDir}\standard_worksets.json"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2026\config"; Flags: ignoreversion onlyifdoesntexist
+Source: "{#Dll2025Path}"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2026"; Components: electrix; Flags: ignoreversion
+Source: "{#ProjectDir}\METools_2026.addin"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2026"; DestName: "METools.addin"; Components: electrix; Flags: ignoreversion
+Source: "{#ProjectDir}\standard_worksets.json"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2026\config"; Components: electrix; Flags: ignoreversion onlyifdoesntexist
 
 ; -- Project Comments: pre-fills the shared network folder so every teammate
 ; gets it working out of the box instead of typing the UNC path in by hand.
 ; onlyifdoesntexist so re-installing/upgrading never overwrites someone's own
 ; customized path (e.g. if a specific person needs a different folder).
-Source: "{#ProjectDir}\comments-settings-default.json"; DestDir: "{userappdata}\METools"; DestName: "comments-settings.json"; Flags: ignoreversion onlyifdoesntexist
+Source: "{#ProjectDir}\comments-settings-default.json"; DestDir: "{userappdata}\METools"; DestName: "comments-settings.json"; Components: electrix; Flags: ignoreversion onlyifdoesntexist
 
 ; -- Project Health Check: bundled tag family + shared-parameter definitions,
 ; so "Fix All" can load the ME-Tools_CircuitTag family and bind the 6 Circuit
@@ -79,8 +106,21 @@ Source: "{#ProjectDir}\comments-settings-default.json"; DestDir: "{userappdata}\
 ; These ARE overwritten on every install/update (no onlyifdoesntexist) since
 ; they're app-owned assets, not user data -- if the family or parameter file
 ; is ever updated, everyone should get the new copy.
-Source: "{#ProjectDir}\Resources\ME-Tools_CircuitTag.rfa"; DestDir: "{commonappdata}\METools\Resources"; Flags: ignoreversion
-Source: "{#ProjectDir}\Resources\METools_SharedParameters.txt"; DestDir: "{commonappdata}\METools\Resources"; Flags: ignoreversion
+Source: "{#ProjectDir}\Resources\ME-Tools_CircuitTag.rfa"; DestDir: "{commonappdata}\METools\Resources"; Components: electrix; Flags: ignoreversion
+Source: "{#ProjectDir}\Resources\METools_SharedParameters.txt"; DestDir: "{commonappdata}\METools\Resources"; Components: electrix; Flags: ignoreversion
+
+; -- Meeco (the assistant), only copied when that Component is selected --
+; installed as its own standalone app, entirely separate from ElecTriX's
+; Revit-Addins destinations above, since it's meant to run on its own too
+; (per its own future roadmap, not just as a Revit companion). The whole
+; published, self-contained folder is copied recursively (Meeco.exe plus
+; its bundled runtime and every dependency), EXCLUDING appsettings.json --
+; that one real config file (API key, shared folder path, current user)
+; gets its own entry below with onlyifdoesntexist, so re-running this
+; installer to upgrade Meeco never wipes out someone's already-configured
+; settings the way a blind wildcard copy would.
+Source: "{#MeecoPublishDir}\*"; DestDir: "{commonpf}\Mayer E-Concept\Meeco"; Components: assistant; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "appsettings.json"
+Source: "{#MeecoPublishDir}\appsettings.json"; DestDir: "{commonpf}\Mayer E-Concept\Meeco"; Components: assistant; Flags: ignoreversion onlyifdoesntexist
 
 [UninstallDelete]
 Type: files; Name: "{commonappdata}\Autodesk\Revit\Addins\2025\METools.dll"
@@ -96,6 +136,21 @@ Type: files; Name: "{commonappdata}\METools\Resources\ME-Tools_CircuitTag.rfa"
 Type: files; Name: "{commonappdata}\METools\Resources\METools_SharedParameters.txt"
 Type: dirifempty; Name: "{commonappdata}\METools\Resources"
 Type: dirifempty; Name: "{commonappdata}\METools"
+; Meeco's whole install folder -- filesandordirs rather than listing each
+; file individually, since a self-contained publish is dozens of files
+; (the bundled runtime plus every dependency), not just Meeco.exe itself.
+; A full uninstall removing the assistant's own settings (appsettings.json
+; included) along with everything else is the expected behavior here --
+; "uninstall" means gone, not "gone except the config."
+Type: filesandordirs; Name: "{commonpf}\Mayer E-Concept\Meeco"
+Type: dirifempty; Name: "{commonpf}\Mayer E-Concept"
+
+[Icons]
+; Only created when the assistant component was actually installed --
+; Meeco is meant to be usable on its own, not just launched from Revit's
+; ribbon, so it gets a normal Start Menu entry like any other standalone
+; app, not just the in-Revit button OpenMeecoCommand.cs provides.
+Name: "{group}\Meeco"; Filename: "{commonpf}\Mayer E-Concept\Meeco\Meeco.exe"; WorkingDir: "{commonpf}\Mayer E-Concept\Meeco"; Components: assistant
 
 [Messages]
 WelcomeLabel2=This will install [name/ver] for Autodesk Revit 2025 and 2026.%n%nPlease close Revit before continuing.

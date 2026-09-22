@@ -19,18 +19,25 @@ namespace METools.Meeco
     [Transaction(TransactionMode.ReadOnly)]
     public class OpenMeecoCommand : IExternalCommand
     {
-        // Checked in this order -- Release first, since that's what an
-        // actual daily-use build would be, falling back to Debug since
-        // that's what's most likely to exist during development. The
-        // TFM-named folder (net8.0-windows10.0.22621.0) must match
-        // Meeco.csproj's own TargetFramework exactly -- .NET builds each
-        // target framework into its own uniquely-named subfolder, so if
-        // that value ever changes again (say, if the WinRT speech
-        // dependency is removed), these paths need updating to match or
-        // this will silently launch a stale build from the old TFM
-        // folder again, exactly like this one did.
+        // Checked in this order. The first path is where setup.iss
+        // actually installs Meeco on a real customer machine (only
+        // present at all if the "assistant" Component was selected at
+        // install time) -- that's the only one that matters for anyone
+        // who isn't actively developing both projects side by side. The
+        // X:\ dev-machine paths below it are fallbacks that only ever
+        // resolve to anything on this project's own dev machine; Release
+        // first since that's what an actual daily-use build would be,
+        // Debug as the last resort. The TFM-named folder
+        // (net8.0-windows10.0.22621.0) must match Meeco.csproj's own
+        // TargetFramework exactly -- .NET builds each target framework
+        // into its own uniquely-named subfolder, so if that value ever
+        // changes again (say, if the WinRT speech dependency is
+        // removed), the dev-path entries need updating to match or
+        // they'll silently point at a stale build from the old TFM
+        // folder again, exactly like this one did once before.
         private static readonly string[] CandidatePaths =
         {
+            @"C:\Program Files\Mayer E-Concept\Meeco\Meeco.exe",
             @"X:\02_sabloane\01_Revit\Meeco-Assistant\bin\Release\net8.0-windows10.0.22621.0\Meeco.exe",
             @"X:\02_sabloane\01_Revit\Meeco-Assistant\bin\Debug\net8.0-windows10.0.22621.0\Meeco.exe",
         };
@@ -67,9 +74,10 @@ namespace METools.Meeco
                 var exePath = Array.Find(CandidatePaths, File.Exists);
                 if (exePath == null)
                 {
-                    message = "Couldn't find Meeco.exe. Checked:\n" + string.Join("\n", CandidatePaths) +
-                              "\n\nBuild the Meeco project first, or update the path in OpenMeecoCommand.cs " +
-                              "if it's moved.";
+                    message = "Couldn't find Meeco. Either it wasn't installed with your license " +
+                              "(the Assistant is an optional component in setup_metools), or it needs " +
+                              "to be built first if you're developing it locally. Checked:\n" +
+                              string.Join("\n", CandidatePaths);
                     return Result.Failed;
                 }
 
