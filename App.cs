@@ -338,23 +338,23 @@ namespace METools
             RibbonThemeWatcher.Register(alButton, "icon_activitylog");
             RibbonLanguageWatcher.Register(alButton, "ribbon.activity_log", "tooltip.activity_log");
 
-            // -- Meeco (AI assistant) ------------------------------------------
-            // Opens the standalone Meeco app rather than running inside Revit's
-            // own process -- OpenMeecoCommand just finds-or-launches it and
-            // brings its window to the front. "Meeco" is a product name, not
+            // -- Nexus (AI assistant) ------------------------------------------
+            // Opens the standalone Nexus app rather than running inside Revit's
+            // own process -- OpenNexusCommand just finds-or-launches it and
+            // brings its window to the front. "Nexus" is a product name, not
             // translated, so unlike the buttons above this one skips
             // RibbonLanguageWatcher and uses a plain literal for its label.
-            var meecoBtn = new PushButtonData(
-                "Meeco", "Assistant", dll,
-                "METools.Meeco.OpenMeecoCommand")
+            var nexusBtn = new PushButtonData(
+                "Nexus", "Assistant", dll,
+                "METools.Nexus.OpenNexusCommand")
             {
-                ToolTip         = "Open Meeco, the AI assistant for Tasks, Comments, the project database, and (when the AI Connector is running) live Revit access.",
-                LongDescription = $"Meeco -- {VENDOR}\n\nA standalone assistant that can read and act on Tasks and Comments, browse the shared project database, and reach into a live Revit session through Nonica's AI Connector when it's running.\n\nOpens as its own window -- if it's already running, this brings it to the front instead of starting a second copy.",
-                Image           = LoadIcon("icon_meeco_light_16.png"),
-                LargeImage      = LoadIcon("icon_meeco_light_32.png"),
+                ToolTip         = "Open Nexus, the AI assistant for Tasks, Comments, the project database, and (when the AI Connector is running) live Revit access.",
+                LongDescription = $"Nexus -- {VENDOR}\n\nA standalone assistant that can read and act on Tasks and Comments, browse the shared project database, and reach into a live Revit session through Nonica's AI Connector when it's running.\n\nOpens as its own window -- if it's already running, this brings it to the front instead of starting a second copy.",
+                Image           = LoadIcon("icon_nexus_light_16.png"),
+                LargeImage      = LoadIcon("icon_nexus_light_32.png"),
             };
-            var meecoButton = panelTeam.AddItem(meecoBtn) as PushButton;
-            RibbonThemeWatcher.Register(meecoButton, "icon_meeco");
+            var nexusButton = panelTeam.AddItem(nexusBtn) as PushButton;
+            RibbonThemeWatcher.Register(nexusButton, "icon_nexus");
 
             // Apply the correct light/dark icon set right now based on Revit's
             // current theme, and subscribe so it stays in sync if the user

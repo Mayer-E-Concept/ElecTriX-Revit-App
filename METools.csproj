@@ -65,7 +65,7 @@
     </ReadLinesFromFile>
     <PropertyGroup>
       <_SetupIssJoined>@(_SetupIssLines, '%0a')</_SetupIssJoined>
-      <_IssVersionMatch>$([System.Text.RegularExpressions.Regex]::Match($(_SetupIssJoined), 'AppVersion\s+"([\d\.]+)"').Groups[1].Value)</_IssVersionMatch>
+      <_IssVersionMatch>$([System.Text.RegularExpressions.Regex]::Match($(_SetupIssJoined), 'AppVersion\s+"[^"]*?(\d+(?:\.\d+)+)"').Groups[1].Value)</_IssVersionMatch>
     </PropertyGroup>
     <PropertyGroup Condition="'$(_IssVersionMatch)' != ''">
       <Version>$(_IssVersionMatch)</Version>
@@ -141,26 +141,49 @@
     <MakeDir Directories="$(RevitAddinsDir2025)\config" ContinueOnError="true" />
     <Copy SourceFiles="$(OutputPath)METools.dll" DestinationFolder="$(RevitAddinsDir2025)"
           SkipUnchangedFiles="false" OverwriteReadOnlyFiles="true" ContinueOnError="true" />
+    <PropertyGroup>
+      <_Dll2025Ok>$(MSBuildLastTaskResult)</_Dll2025Ok>
+    </PropertyGroup>
     <Copy SourceFiles="$(ProjectDir)METools_2025.addin" DestinationFiles="$(RevitAddinsDir2025)\METools.addin"
           SkipUnchangedFiles="false" OverwriteReadOnlyFiles="true" ContinueOnError="true" />
+    <PropertyGroup>
+      <_Addin2025Ok>$(MSBuildLastTaskResult)</_Addin2025Ok>
+    </PropertyGroup>
     <Copy SourceFiles="@(EmbeddedResource)" DestinationFolder="$(RevitAddinsDir2025)\Icons"
           SkipUnchangedFiles="false" OverwriteReadOnlyFiles="true" ContinueOnError="true" />
     <Copy SourceFiles="$(OutputPath)config\standard_worksets.json" DestinationFolder="$(RevitAddinsDir2025)\config"
           SkipUnchangedFiles="false" OverwriteReadOnlyFiles="true" ContinueOnError="true" />
-    <Message Text="✓ ME-Tools deployed to $(RevitAddinsDir2025)" Importance="high" />
+    <!-- Only the DLL and .addin manifest are checked here — those are the
+         two files that actually determine what Revit loads and runs; the
+         icons/worksets copies above can fail without anyone ending up
+         running a stale build, which is the specific confusion this check
+         exists to catch. -->
+    <Message Condition="'$(_Dll2025Ok)' == 'true' and '$(_Addin2025Ok)' == 'true'"
+              Text="✓ ME-Tools deployed to $(RevitAddinsDir2025)" Importance="high" />
+    <Warning Condition="'$(_Dll2025Ok)' != 'true' or '$(_Addin2025Ok)' != 'true'"
+             Text="Deploy to $(RevitAddinsDir2025) did NOT fully succeed (see the MSB3021 warning above for which file and why -- usually Revit 2025 is open right now, locking it). The ribbon there is still running whatever build it loaded last, not this one, until Revit is closed and this is rebuilt." />
 
     <!-- ── Revit 2026 (same DLL, second folder) ─────────────────────────── -->
     <MakeDir Directories="$(RevitAddinsDir2026)\Icons" ContinueOnError="true" />
     <MakeDir Directories="$(RevitAddinsDir2026)\config" ContinueOnError="true" />
     <Copy SourceFiles="$(OutputPath)METools.dll" DestinationFolder="$(RevitAddinsDir2026)"
           SkipUnchangedFiles="false" OverwriteReadOnlyFiles="true" ContinueOnError="true" />
+    <PropertyGroup>
+      <_Dll2026Ok>$(MSBuildLastTaskResult)</_Dll2026Ok>
+    </PropertyGroup>
     <Copy SourceFiles="$(ProjectDir)METools_2026.addin" DestinationFiles="$(RevitAddinsDir2026)\METools.addin"
           SkipUnchangedFiles="false" OverwriteReadOnlyFiles="true" ContinueOnError="true" />
+    <PropertyGroup>
+      <_Addin2026Ok>$(MSBuildLastTaskResult)</_Addin2026Ok>
+    </PropertyGroup>
     <Copy SourceFiles="@(EmbeddedResource)" DestinationFolder="$(RevitAddinsDir2026)\Icons"
           SkipUnchangedFiles="false" OverwriteReadOnlyFiles="true" ContinueOnError="true" />
     <Copy SourceFiles="$(OutputPath)config\standard_worksets.json" DestinationFolder="$(RevitAddinsDir2026)\config"
           SkipUnchangedFiles="false" OverwriteReadOnlyFiles="true" ContinueOnError="true" />
-    <Message Text="✓ ME-Tools also deployed to $(RevitAddinsDir2026)" Importance="high" />
+    <Message Condition="'$(_Dll2026Ok)' == 'true' and '$(_Addin2026Ok)' == 'true'"
+              Text="✓ ME-Tools also deployed to $(RevitAddinsDir2026)" Importance="high" />
+    <Warning Condition="'$(_Dll2026Ok)' != 'true' or '$(_Addin2026Ok)' != 'true'"
+             Text="Deploy to $(RevitAddinsDir2026) did NOT fully succeed (see the MSB3021 warning above for which file and why -- usually Revit 2026 is open right now, locking it). The ribbon there is still running whatever build it loaded last, not this one, until Revit is closed and this is rebuilt." />
 
   </Target>
 

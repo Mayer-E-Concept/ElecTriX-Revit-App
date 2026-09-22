@@ -68,7 +68,7 @@ Free for **14 days** as a trial. After that, every tool except Settings refuses 
 
 **Activity Log** — See who added, changed, or deleted which electrical elements, and when. Filter by user/action, or **Export CSV**.
 
-**Meeco** — Opens Meeco, an AI assistant for Tasks, Comments, the project database, and (when Nonica's AI Connector is running) live Revit access. Runs as its own standalone app — this button just finds or launches it.
+**Nexus** — Opens Nexus, an AI assistant for Tasks, Comments, the project database, and (when Nonica's AI Connector is running) live Revit access. Runs as its own standalone app — this button just finds or launches it.
 
 ---
 
