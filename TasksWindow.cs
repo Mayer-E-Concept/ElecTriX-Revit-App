@@ -81,6 +81,14 @@ namespace METools.Tasks
         private TaskTab _currentTab = TaskTab.Unassigned;
         private Border _registrationBanner;
 
+        // Tasks the user has clicked to expand in the Projects tab --
+        // RenderProjectsTab rebuilds every row from scratch on every
+        // refresh, so this is what keeps something the user just opened
+        // from silently re-collapsing on the next auto-refresh tick.
+        // Only meaningful for rows rendered with collapsible: true; the
+        // Requests tab's own flat list never consults this at all.
+        private readonly HashSet<string> _expandedTaskIds = new HashSet<string>();
+
         private string CurrentUsername => _revitApp?.Username ?? Environment.UserName;
 
         public static void ShowOrActivate(UIApplication uiApp)
@@ -108,14 +116,25 @@ namespace METools.Tasks
             _registryEntries = TasksStorage.LoadProjectRegistry();
             _projectNames = BuildDisplayNameLookup(_registryEntries);
 
-            InitWindow("Tasks", 600);
+            InitWindow("Workboard", 600);
             BuildStatusBar("", "Revit 2025");
 
             // Outer tab row -- added first, so it's not the last child
             // RootDock sees (see file header on DockPanel ordering).
             var outerTabsRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(16, 10, 16, 0) };
-            _outerTabTasks = ToggleBtn("Tasks", true, () => SwitchOuterTab(OuterTab.Tasks));
-            _outerTabComments = ToggleBtn("Comments", false, () => SwitchOuterTab(OuterTab.Comments));
+            // Labels only, not the internal OuterTab.Tasks/Comments enum
+            // values below -- the email-derived tab now reads "Requests"
+            // and the in-model note tab (which already had a full
+            // assign/resolve workflow) now reads "Tasks", since that's
+            // the more useful, general-purpose name for it. Internal
+            // identifiers deliberately kept as-is throughout this file
+            // and TasksHandler/TasksStorage -- renaming those too would
+            // touch the on-disk JSON schema and file names that
+            // MailBridge is already writing into in production, which is
+            // a much bigger, riskier change than what was actually asked
+            // for here.
+            _outerTabTasks = ToggleBtn("Requests", true, () => SwitchOuterTab(OuterTab.Tasks));
+            _outerTabComments = ToggleBtn("Tasks", false, () => SwitchOuterTab(OuterTab.Comments));
             _outerTabProjects = ToggleBtn("Projects", false, () => SwitchOuterTab(OuterTab.Projects));
             outerTabsRow.Children.Add(_outerTabTasks);
             outerTabsRow.Children.Add(new Border { Width = 6 });
@@ -265,14 +284,14 @@ namespace METools.Tasks
                 {
                     _projectsListPanel.Children.Add(new TextBlock
                     {
-                        Text = "No tasks yet.", FontSize = 12, Foreground = MeToolsTheme.BrMuted,
+                        Text = "No requests yet.", FontSize = 12, Foreground = MeToolsTheme.BrMuted,
                         Margin = new Thickness(4, 0, 4, 14),
                     });
                 }
                 else
                 {
                     foreach (var task in projectTasks)
-                        _projectsListPanel.Children.Add(BuildTaskRow(task));
+                        _projectsListPanel.Children.Add(BuildTaskRow(task, collapsible: true));
                     _projectsListPanel.Children.Add(new Border { Height = 8 });
                 }
             }
@@ -281,7 +300,7 @@ namespace METools.Tasks
             {
                 _projectsListPanel.Children.Add(new TextBlock
                 {
-                    Text = "No projects registered yet -- open one in Revit and click \"Register current project\" on the Tasks tab.",
+                    Text = "No projects registered yet -- open one in Revit and click \"Register current project\" on the Requests tab.",
                     FontSize = 12, Foreground = MeToolsTheme.BrMuted, TextWrapping = TextWrapping.Wrap,
                     Margin = new Thickness(4, 0, 4, 8),
                 });
@@ -721,8 +740,8 @@ namespace METools.Tasks
         {
             var subject = string.IsNullOrWhiteSpace(task.TranslatedSubject) ? "(no subject)" : task.TranslatedSubject;
             var result = MessageBox.Show(
-                $"Delete this task permanently?\n\n\"{subject}\"\n\nThis can't be undone.",
-                "Delete task", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
+                $"Delete this request permanently?\n\n\"{subject}\"\n\nThis can't be undone.",
+                "Delete request", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
 
             if (result == MessageBoxResult.Yes)
                 SendRequest(TasksAction.Delete, task);
@@ -824,9 +843,17 @@ namespace METools.Tasks
             ResizeToFitContent();
         }
 
-        private Border BuildTaskRow(ProjectTask task)
+        // collapsible=true is used specifically for rows shown under a
+        // real project in the Projects tab -- once a request has a home,
+        // it doesn't need to shout its full translated content on every
+        // glance the way something still needing a decision does. The
+        // Requests tab's own flat list, and the Unassigned group at the
+        // top of the Projects tab, both call this with the default
+        // (false) and always render fully expanded, exactly as before.
+        private Border BuildTaskRow(ProjectTask task, bool collapsible = false)
         {
             var sp = new StackPanel();
+            var isExpanded = !collapsible || _expandedTaskIds.Contains(task.Id);
 
             sp.Children.Add(new TextBlock
             {
@@ -860,7 +887,9 @@ namespace METools.Tasks
 
             // A quiet nudge, not a loud alarm: only for tasks nobody has
             // claimed yet, past a threshold long enough that it's genuinely
-            // been sitting rather than just "arrived this morning."
+            // been sitting rather than just "arrived this morning." Shown
+            // even collapsed -- "nobody's on this yet" is exactly the kind
+            // of status this feature is meant to keep visible, not hide.
             if (string.IsNullOrWhiteSpace(task.AssignedTo) && task.Status != "done" &&
                 (DateTime.UtcNow - task.ReceivedAtUtc).TotalHours >= StaleUnassignedHours)
             {
@@ -872,6 +901,43 @@ namespace METools.Tasks
                     Foreground = StaleWarningBrush,
                     Margin = new Thickness(0, 0, 0, 6),
                 });
+            }
+
+            // Assignment status -- also shown even collapsed (this is the
+            // "who's on it" info worth seeing at a glance), but the actual
+            // Mark done/Release/Assign-to-me buttons are actions, so those
+            // wait for the expanded view along with everything else below.
+            var isMine = string.Equals(task.AssignedTo, CurrentUsername, StringComparison.OrdinalIgnoreCase);
+            if (!string.IsNullOrWhiteSpace(task.AssignedTo))
+            {
+                sp.Children.Add(new TextBlock
+                {
+                    Text = task.Status == "done" ? $"Done ({task.AssignedTo})" : $"Assigned to {task.AssignedTo}",
+                    FontSize = 10.5,
+                    FontWeight = FontWeights.Medium,
+                    Foreground = isMine ? MeToolsTheme.BrActiveFg : MeToolsTheme.BrMuted,
+                    Margin = new Thickness(0, 0, 0, 6),
+                });
+            }
+
+            if (collapsible && !isExpanded)
+            {
+                sp.Children.Add(ActionBtn("Show details", true, () =>
+                {
+                    _expandedTaskIds.Add(task.Id);
+                    RenderProjectsTab(_lastTasks);
+                }));
+
+                return new Border
+                {
+                    Background = MeToolsTheme.BrSurface,
+                    BorderBrush = MeToolsTheme.BrBorder,
+                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(12),
+                    Padding = new Thickness(12, 10, 12, 10),
+                    Margin = new Thickness(0, 0, 0, 10),
+                    Child = sp,
+                };
             }
 
             if (!string.IsNullOrWhiteSpace(task.Summary))
@@ -952,6 +1018,33 @@ namespace METools.Tasks
                 }
             }
 
+            // Reassign -- distinct from the first-time-assignment picker
+            // above (which only ever shows for Unassigned): this is
+            // specifically for undoing a wrong guess once a request
+            // already has a project, whether that project was picked
+            // automatically or by hand and turned out to be the wrong one.
+            // Only offered on rows that came in collapsible, i.e. only
+            // from the Projects tab -- the flat Requests tab has no
+            // per-project grouping for this to make sense against.
+            if (collapsible && task.ProjectId != "unassigned" && _registryEntries.Count > 0)
+            {
+                var reassignRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 6) };
+                var reassignPicker = StyledCombo();
+                reassignPicker.Width = 180;
+                reassignPicker.DisplayMemberPath = "DisplayName";
+                reassignPicker.ItemsSource = _registryEntries
+                    .Where(r => r.ProjectId != task.ProjectId)
+                    .OrderBy(r => r.DisplayName, StringComparer.OrdinalIgnoreCase).ToList();
+                reassignRow.Children.Add(reassignPicker);
+                reassignRow.Children.Add(new Border { Width = 6 });
+                reassignRow.Children.Add(ActionBtn("Reassign to project", true, () =>
+                {
+                    if (reassignPicker.SelectedItem is ProjectRegistryEntry chosen)
+                        SendMoveRequest(task, chosen);
+                }));
+                sp.Children.Add(reassignRow);
+            }
+
             // Attachments get a highlighted box of their own, not just a
             // muted line -- easy to miss otherwise, and this was the whole
             // point of asking for it.
@@ -1005,24 +1098,11 @@ namespace METools.Tasks
             {
                 buttonsRow.Children.Add(ActionBtn("Assign to me", false, () => SendRequest(TasksAction.Claim, task)));
             }
-            else
+            else if (isMine && task.Status != "done")
             {
-                var isMine = string.Equals(task.AssignedTo, CurrentUsername, StringComparison.OrdinalIgnoreCase);
-                sp.Children.Add(new TextBlock
-                {
-                    Text = task.Status == "done" ? $"Done ({task.AssignedTo})" : $"Assigned to {task.AssignedTo}",
-                    FontSize = 10.5,
-                    FontWeight = FontWeights.Medium,
-                    Foreground = isMine ? MeToolsTheme.BrActiveFg : MeToolsTheme.BrMuted,
-                    Margin = new Thickness(0, 0, 0, 6),
-                });
-
-                if (isMine && task.Status != "done")
-                {
-                    buttonsRow.Children.Add(ActionBtn("Mark done", false, () => SendRequest(TasksAction.MarkDone, task)));
-                    buttonsRow.Children.Add(new Border { Width = 8 });
-                    buttonsRow.Children.Add(ActionBtn("Release", true, () => SendRequest(TasksAction.Release, task)));
-                }
+                buttonsRow.Children.Add(ActionBtn("Mark done", false, () => SendRequest(TasksAction.MarkDone, task)));
+                buttonsRow.Children.Add(new Border { Width = 8 });
+                buttonsRow.Children.Add(ActionBtn("Release", true, () => SendRequest(TasksAction.Release, task)));
             }
 
             if (!string.IsNullOrWhiteSpace(task.ReferencedElementId))
@@ -1036,6 +1116,18 @@ namespace METools.Tasks
 
             if (buttonsRow.Children.Count > 0)
                 sp.Children.Add(buttonsRow);
+
+            // Collapse it back -- only for rows that came in collapsible
+            // and got expanded; lets the user put one away again without
+            // waiting for the next refresh to do it for them.
+            if (collapsible)
+            {
+                sp.Children.Add(ActionBtn("Hide details", true, () =>
+                {
+                    _expandedTaskIds.Remove(task.Id);
+                    RenderProjectsTab(_lastTasks);
+                }));
+            }
 
             return new Border
             {

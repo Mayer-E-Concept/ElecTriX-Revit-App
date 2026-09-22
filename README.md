@@ -64,7 +64,7 @@ Free for **14 days** as a trial. After that, every tool except Settings refuses 
 
 ### Team panel
 
-**Workboard** — Two tabs, one shared folder: **Tasks** (created automatically from customer emails — assign one to yourself or someone else, mark it done) and **Comments** (leave a note tied to a level or a specific element, **+ Reference Item** to pin it to one thing — teammates get a popup with **Go There** to jump straight to it).
+**Workboard** — Two tabs, one shared folder: **Requests** (created automatically from customer emails — assign one to yourself or someone else, mark it done) and **Tasks** (leave a note tied to a level or a specific element, **+ Reference Item** to pin it to one thing — teammates get a popup with **Go There** to jump straight to it).
 
 **Activity Log** — See who added, changed, or deleted which electrical elements, and when. Filter by user/action, or **Export CSV**.
 

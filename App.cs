@@ -304,8 +304,8 @@ namespace METools
             {
                 ToolTip = S._("tooltip.tasks"),
                 LongDescription = $"Workboard -- {VENDOR}\n\nTwo tabs, one shared folder:\n\n" +
-                    "* Tasks: incoming customer emails are translated, summarized, and filed here per project -- assign to yourself, mark done, or jump to a pinned element.\n" +
-                    "* Comments: leave a note on the project you're working in -- teammates see it, mark it done, or jump to what it's about.\n\n" +
+                    "* Requests: incoming customer emails are translated, summarized, and filed here per project -- assign to yourself, mark done, or jump to a pinned element.\n" +
+                    "* Tasks: leave a note on the project you're working in -- teammates see it, assign it, mark it done, or jump to what it's about.\n\n" +
                     "Requires a shared network folder (configured once in Comments' own settings).",
                 Image = LoadIcon("icon_tasks_light_16.png") ?? LoadIcon("icon_comments_light_16.png"),
                 LargeImage = LoadIcon("icon_tasks_light_32.png") ?? LoadIcon("icon_comments_light_32.png"),
