@@ -14,7 +14,7 @@
 ; NOTE: every Source/DestDir entry is a SINGLE line (Inno requirement).
 
 #define AppName     "ME-Tools"
-#define AppVersion  "nxs_2.3.6"
+#define AppVersion  "nxs_2.3.7"
 #define Publisher   "Mayer E-Concept SRL"
 
 ; --- adjust this absolute path to your machine if it differs ------------------

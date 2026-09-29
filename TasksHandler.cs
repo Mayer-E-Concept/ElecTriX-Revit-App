@@ -410,15 +410,54 @@ namespace METools.Tasks
 
             var (displayName, keywords, overlaps) = BuildRegistrationInfo(doc, projectId);
 
-            var ok = TasksStorage.RegisterProject(projectId, displayName, keywords, null, out var storageError);
+            var projectFolder = FindProjectFolder(doc);
+            var ok = TasksStorage.RegisterProject(projectId, displayName, keywords, null, projectFolder, out var storageError);
             if (!ok)
                 return $"Could not register this project: {storageError}";
 
             var message = $"Registered '{displayName}' for Tasks -- matches on: {string.Join(", ", keywords)}.";
+            message += string.IsNullOrEmpty(projectFolder)
+                ? " The model isn't inside a 01_Projekte project folder, so its email attachments stay in MailFiles."
+                : $" Email attachments go to 01_Projekte\\{projectFolder}\\000_Mail-Eingang.";
             if (overlaps.Count > 0)
                 message += " Heads up -- " + string.Join("; ", overlaps.Distinct()) +
                     ". Emails matching only the shared term will route to Unassigned instead of guessing which project -- narrow one of the keywords if you want it to auto-route.";
             return message;
+        }
+
+        // The folder directly under "01_Projekte" that holds this model --
+        // the central model for a workshared project (a local copy can sit
+        // anywhere), else the file itself. Only the folder name is stored,
+        // so it doesn't matter whether Revit sees the share as X:\ or
+        // \\Database\...: MailBridge combines it with its own root path.
+        private static string FindProjectFolder(Document doc)
+        {
+            try
+            {
+                string modelPath = null;
+                if (doc.IsWorkshared)
+                {
+                    var central = doc.GetWorksharingCentralModelPath();
+                    if (central != null) modelPath = ModelPathUtils.ConvertModelPathToUserVisiblePath(central);
+                }
+                if (string.IsNullOrWhiteSpace(modelPath)) modelPath = doc.PathName;
+                if (string.IsNullOrWhiteSpace(modelPath)) return "";
+
+                var dir = new System.IO.DirectoryInfo(System.IO.Path.GetDirectoryName(modelPath));
+                while (dir?.Parent != null)
+                {
+                    var parentName = dir.Parent.Name;
+                    if (string.Equals(parentName, "01_Projekte", StringComparison.OrdinalIgnoreCase))
+                        return dir.Name;
+                    // Finished projects: 01_Projekte\00_Abgeschlossen\<project>
+                    if (string.Equals(parentName, "00_Abgeschlossen", StringComparison.OrdinalIgnoreCase)
+                        && string.Equals(dir.Parent.Parent?.Name, "01_Projekte", StringComparison.OrdinalIgnoreCase))
+                        return dir.Name;
+                    dir = dir.Parent;
+                }
+            }
+            catch { /* unusual path (cloud model etc.) -- just no folder */ }
+            return "";
         }
 
         // Split out from RegisterCurrentProject as its own method (rather

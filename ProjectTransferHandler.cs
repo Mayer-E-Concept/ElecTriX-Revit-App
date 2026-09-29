@@ -441,10 +441,205 @@ namespace METools.ProjectTransfer
                         }
                     }
                 }
+
+                // A filter itself has no color -- the color lives in each
+                // view/template the filter is applied to. Last, so views and
+                // templates copied above are already there to receive it.
+                if (buckets[0].Ids.Count > 0)
+                {
+                    using (var sub = new SubTransaction(targetDoc))
+                    {
+                        sub.Start();
+                        try
+                        {
+                            CopyFilterGraphics(sourceDoc, targetDoc, buckets[0].Ids, result);
+                            sub.Commit();
+                        }
+                        catch (Exception ex)
+                        {
+                            if (sub.HasStarted() && !sub.HasEnded()) sub.RollBack();
+                            result.Lines.Add($"Filter colors: failed — {ex.Message}");
+                        }
+                    }
+                }
                 tx.Commit();
             }
 
             OnCopyDone?.Invoke(result);
+        }
+
+        // ── Filter colors ────────────────────────────────────────────────────
+        // For every copied filter: each source view/template that uses it is
+        // matched by name in the target (same view type for normal views), and
+        // the filter is added there with the same overrides (line/pattern
+        // colors, patterns, weights, transparency, halftone), visibility and
+        // enabled state. If no view matches, it goes on the target's active
+        // view (or that view's template, when the template controls filters)
+        // so the color still arrives somewhere visible.
+        private static void CopyFilterGraphics(Document sourceDoc, Document targetDoc, List<ElementId> sourceFilterIds, TransferResult result)
+        {
+            var sourceViews = new FilteredElementCollector(sourceDoc).OfClass(typeof(View)).Cast<View>()
+                .Where(v => SupportsFilters(v)).ToList();
+            var targetViews = new FilteredElementCollector(targetDoc).OfClass(typeof(View)).Cast<View>()
+                .Where(v => SupportsFilters(v)).ToList();
+            var targetFilters = new FilteredElementCollector(targetDoc).OfClass(typeof(ParameterFilterElement))
+                .Cast<ParameterFilterElement>().GroupBy(f => f.Name, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(g => g.Key, g => g.First().Id, StringComparer.OrdinalIgnoreCase);
+            var patterns = new PatternMapper(sourceDoc, targetDoc);
+            var sourceActive = sourceDoc.ActiveView;
+            View targetActive = null;
+            try { targetActive = targetDoc.ActiveView; } catch { }
+
+            int applied = 0, withoutColor = 0;
+            var noView = new List<string>();
+            var failures = new List<string>();
+
+            foreach (var sourceFilterId in sourceFilterIds)
+            {
+                var filterName = sourceDoc.GetElement(sourceFilterId)?.Name ?? "";
+                if (!targetFilters.TryGetValue(filterName, out var targetFilterId)) continue;
+
+                var uses = sourceViews.Where(v => HasFilter(v, sourceFilterId)).ToList();
+                if (uses.Count == 0) { withoutColor++; continue; }
+
+                var appliedHere = 0;
+                foreach (var sv in uses)
+                {
+                    var tv = targetViews.FirstOrDefault(v => v.IsTemplate == sv.IsTemplate
+                        && string.Equals(v.Name, sv.Name, StringComparison.OrdinalIgnoreCase)
+                        && (sv.IsTemplate || v.ViewType == sv.ViewType));
+                    if (tv == null || HasFilter(tv, targetFilterId) || FiltersControlledByTemplate(targetDoc, tv)) continue;
+                    if (TryApply(sv, sourceFilterId, tv, targetFilterId, patterns, failures, filterName)) appliedHere++;
+                }
+
+                if (appliedHere == 0 && targetActive != null && SupportsFilters(targetActive))
+                {
+                    var tv = FiltersControlledByTemplate(targetDoc, targetActive)
+                        ? targetDoc.GetElement(targetActive.ViewTemplateId) as View
+                        : targetActive;
+                    var sv = uses.FirstOrDefault(v => sourceActive != null && v.Id == sourceActive.Id)
+                             ?? uses.FirstOrDefault(v => v.IsTemplate) ?? uses[0];
+                    if (tv != null && !HasFilter(tv, targetFilterId)
+                        && TryApply(sv, sourceFilterId, tv, targetFilterId, patterns, failures, filterName))
+                        appliedHere++;
+                }
+
+                if (appliedHere > 0) applied++;
+                else noView.Add(filterName);
+            }
+
+            if (applied > 0)
+                result.Lines.Add($"Filter colors: {Plural(applied, "filter", "filters")} got their color/overrides in the target");
+            if (noView.Count > 0)
+                result.Lines.Add($"Filter colors: no matching view in the target for {string.Join(", ", noView.Take(8))}" +
+                                 (noView.Count > 8 ? $" (+{noView.Count - 8} more)" : "") +
+                                 " — open a view in the target project and copy again to apply them there");
+            if (withoutColor > 0)
+                result.Lines.Add($"Filter colors: {Plural(withoutColor, "filter isn't", "filters aren't")} used in any view in the source, so there's no color to copy");
+            foreach (var f in failures.Take(5)) result.Lines.Add("Filter colors: " + f);
+        }
+
+        private static bool TryApply(View sv, ElementId sourceFilterId, View tv, ElementId targetFilterId,
+            PatternMapper patterns, List<string> failures, string filterName)
+        {
+            try
+            {
+                tv.AddFilter(targetFilterId);
+                tv.SetFilterOverrides(targetFilterId, patterns.Map(sv.GetFilterOverrides(sourceFilterId)));
+                tv.SetFilterVisibility(targetFilterId, sv.GetFilterVisibility(sourceFilterId));
+                tv.SetIsFilterEnabled(targetFilterId, sv.GetIsFilterEnabled(sourceFilterId));
+                return true;
+            }
+            catch (Exception ex)
+            {
+                failures.Add($"'{filterName}' on '{tv.Name}': {ex.Message}");
+                return false;
+            }
+        }
+
+        private static bool SupportsFilters(View v)
+        {
+            try { return v.AreGraphicsOverridesAllowed() && !(v is ViewSheet) && !(v is ViewSchedule); }
+            catch { return false; }
+        }
+
+        private static bool HasFilter(View v, ElementId filterId)
+        {
+            try { return v.GetFilters().Contains(filterId); } catch { return false; }
+        }
+
+        // A view whose template controls "V/G Overrides Filters" can't take
+        // filters of its own -- Revit throws.
+        private static bool FiltersControlledByTemplate(Document doc, View v)
+        {
+            if (v.IsTemplate || v.ViewTemplateId == ElementId.InvalidElementId) return false;
+            if (!(doc.GetElement(v.ViewTemplateId) is View template)) return false;
+            var filtersParam = new ElementId(BuiltInParameter.VIS_GRAPHICS_FILTERS);
+            return !template.GetNonControlledTemplateParameterIds().Contains(filtersParam);
+        }
+
+        // Override settings point at fill/line pattern elements by id, which
+        // mean nothing in another project -- matched by name (solid fill /
+        // solid line by kind, since their names are localized), else copied.
+        private class PatternMapper
+        {
+            private readonly Document _src, _dst;
+            private readonly Dictionary<ElementId, ElementId> _map = new Dictionary<ElementId, ElementId>();
+
+            public PatternMapper(Document src, Document dst) { _src = src; _dst = dst; }
+
+            public OverrideGraphicSettings Map(OverrideGraphicSettings o)
+            {
+                var r = new OverrideGraphicSettings(o);
+                r.SetProjectionLinePatternId(MapId(o.ProjectionLinePatternId));
+                r.SetCutLinePatternId(MapId(o.CutLinePatternId));
+                r.SetSurfaceForegroundPatternId(MapId(o.SurfaceForegroundPatternId));
+                r.SetSurfaceBackgroundPatternId(MapId(o.SurfaceBackgroundPatternId));
+                r.SetCutForegroundPatternId(MapId(o.CutForegroundPatternId));
+                r.SetCutBackgroundPatternId(MapId(o.CutBackgroundPatternId));
+                return r;
+            }
+
+            private ElementId MapId(ElementId id)
+            {
+                if (id == null || id == ElementId.InvalidElementId) return ElementId.InvalidElementId;
+                if (id == LinePatternElement.GetSolidPatternId()) return id;
+                if (_map.TryGetValue(id, out var known)) return known;
+
+                var mapped = ElementId.InvalidElementId;
+                var el = _src.GetElement(id);
+                if (el is FillPatternElement fpe)
+                {
+                    var fp = fpe.GetFillPattern();
+                    var candidates = new FilteredElementCollector(_dst).OfClass(typeof(FillPatternElement)).Cast<FillPatternElement>()
+                        .Where(x => x.GetFillPattern().Target == fp.Target).ToList();
+                    var match = fp.IsSolidFill
+                        ? candidates.FirstOrDefault(x => x.GetFillPattern().IsSolidFill)
+                        : candidates.FirstOrDefault(x => string.Equals(x.Name, fpe.Name, StringComparison.OrdinalIgnoreCase));
+                    mapped = match?.Id ?? CopyOne(id);
+                }
+                else if (el is LinePatternElement lpe)
+                {
+                    var match = new FilteredElementCollector(_dst).OfClass(typeof(LinePatternElement))
+                        .FirstOrDefault(x => string.Equals(x.Name, lpe.Name, StringComparison.OrdinalIgnoreCase));
+                    mapped = match?.Id ?? CopyOne(id);
+                }
+
+                _map[id] = mapped;
+                return mapped;
+            }
+
+            private ElementId CopyOne(ElementId id)
+            {
+                try
+                {
+                    var opts = new CopyPasteOptions();
+                    opts.SetDuplicateTypeNamesHandler(new KeepDestinationTypesHandler());
+                    return ElementTransformUtils.CopyElements(_src, new List<ElementId> { id }, _dst, Transform.Identity, opts)
+                        .FirstOrDefault() ?? ElementId.InvalidElementId;
+                }
+                catch { return ElementId.InvalidElementId; }
+            }
         }
 
         // Project parameter transfer is genuinely different from every

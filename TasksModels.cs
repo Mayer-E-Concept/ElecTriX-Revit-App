@@ -14,6 +14,8 @@
 // Graph message id.
 using System;
 using System.Collections.Generic;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using METools.Comments;
 
 namespace METools.Tasks
@@ -58,15 +60,26 @@ namespace METools.Tasks
         public List<ProjectTask> Tasks { get; set; } = new List<ProjectTask>();
     }
 
-    // One registry entry, read-only on this side -- MailBridge owns
-    // writing METools_ProjectRegistry.json; this add-in only reads
-    // DisplayName out of it to label tasks in the cross-project view.
+    // One registry entry in METools_ProjectRegistry.json -- written here
+    // by "Register current project", read by MailBridge to route emails.
+    // Same property names as MailBridge's ProjectRegistryEntry.
     public class ProjectRegistryEntry
     {
         public string ProjectId { get; set; } = "";
         public string DisplayName { get; set; } = "";
         public List<string> CustomerDomains { get; set; } = new List<string>();
         public List<string> Keywords { get; set; } = new List<string>();
+
+        // The project's folder directly under 01_Projekte (e.g.
+        // "2606_29_PLS_RS91"), taken from the model's location at
+        // registration. MailBridge files the project's email attachments
+        // in <that folder>\000_Mail-Eingang.
+        public string ProjectFolder { get; set; } = "";
+
+        // Registration rewrites the whole registry file; this keeps any
+        // field a newer MailBridge/add-in adds instead of dropping it.
+        [JsonExtensionData]
+        public Dictionary<string, JsonElement> ExtraFields { get; set; } = new Dictionary<string, JsonElement>();
     }
 
     // Counts across every project's task file combined -- always computed

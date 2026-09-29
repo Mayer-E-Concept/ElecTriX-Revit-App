@@ -389,10 +389,18 @@ namespace METools
             // finished starting.
             app.ControlledApplication.ApplicationInitialized += (s, e) => LicenseManager.ShowTrialNudgeIfDue();
 
+            // Update check against the release feed on the share -- see
+            // UpdateChecker.cs. Also deferred until Revit has finished starting.
+            UpdateChecker.Register(app);
+
             return Result.Succeeded;
         }
 
-        public Result OnShutdown(UIControlledApplication app) => Result.Succeeded;
+        public Result OnShutdown(UIControlledApplication app)
+        {
+            UpdateChecker.OnShutdown(); // starts a pending "install when Revit closes"
+            return Result.Succeeded;
+        }
 
         private System.Windows.Media.ImageSource LoadIcon(string fileName)
         {

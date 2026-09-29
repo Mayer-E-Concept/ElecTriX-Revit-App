@@ -134,6 +134,14 @@ namespace METools
             ["ribbon.comments"]              = "Comments",
             ["ribbon.tasks"]                 = "Workboard",
             ["ribbon.activity_log"]          = "Activity\n& Time",
+            // ── Update check (UpdateChecker.cs) ──
+            ["update.title_fmt"] = "ME-Tools {0} is available",
+            ["update.body_fmt"] = "You have version {0}.",
+            ["update.on_exit"] = "Install when I close Revit",
+            ["update.on_exit_sub"] = "Recommended. The update installs right after Revit closes.",
+            ["update.now"] = "Install now",
+            ["update.now_sub"] = "Save your work first: the installer will ask to close Revit.",
+            ["update.admin_note"] = "Windows will ask for administrator permission to install.",
 
             // ── Ribbon tooltips ─────────────────────────────────────────────
             ["tooltip.settings"] = "ME-Tools settings: appearance, language, license, and worksets.",
@@ -1252,6 +1260,14 @@ namespace METools
             ["ribbon.comments"]              = "Comments",
             ["ribbon.tasks"]                 = "Workboard",
             ["ribbon.activity_log"]          = "Aktivität\n& Zeit",
+            // ── Update check (UpdateChecker.cs) ──
+            ["update.title_fmt"] = "ME-Tools {0} ist verfügbar",
+            ["update.body_fmt"] = "Installiert ist Version {0}.",
+            ["update.on_exit"] = "Beim Schließen von Revit installieren",
+            ["update.on_exit_sub"] = "Empfohlen. Das Update wird direkt nach dem Beenden von Revit installiert.",
+            ["update.now"] = "Jetzt installieren",
+            ["update.now_sub"] = "Vorher speichern: Das Setup fordert zum Schließen von Revit auf.",
+            ["update.admin_note"] = "Windows fragt für die Installation nach Administratorrechten.",
 
             // ── Ribbon tooltips ─────────────────────────────────────────────
             ["tooltip.settings"] = "ME-Tools-Einstellungen: Darstellung, Sprache, Lizenz und Worksets.",
@@ -2361,6 +2377,14 @@ namespace METools
             ["ribbon.comments"]              = "Comments",
             ["ribbon.tasks"]                 = "Workboard",
             ["ribbon.activity_log"]          = "Activitate\nsi timp",
+            // ── Update check (UpdateChecker.cs) ──
+            ["update.title_fmt"] = "ME-Tools {0} este disponibil",
+            ["update.body_fmt"] = "Aveti versiunea {0}.",
+            ["update.on_exit"] = "Instaleaza cand inchid Revit",
+            ["update.on_exit_sub"] = "Recomandat. Actualizarea se instaleaza imediat dupa inchiderea Revit.",
+            ["update.now"] = "Instaleaza acum",
+            ["update.now_sub"] = "Salvati inainte: instalarea va cere inchiderea Revit.",
+            ["update.admin_note"] = "Windows va cere permisiuni de administrator pentru instalare.",
 
             // ── Ribbon tooltips ─────────────────────────────────────────────
             ["tooltip.settings"] = "Setări ME-Tools: aspect, limbă, licență și worksets.",

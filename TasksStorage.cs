@@ -160,7 +160,7 @@ namespace METools.Tasks
         // empty one -- the same rule Mutate() already follows for task
         // files.
         public static bool RegisterProject(string projectId, string displayName, List<string> keywords,
-            List<string> customerDomains, out string error)
+            List<string> customerDomains, string projectFolder, out string error)
         {
             error = "";
             var folder = CommentsStorage.GetSharedFolder();
@@ -212,6 +212,7 @@ namespace METools.Tasks
                         existing.DisplayName = displayName;
                         existing.Keywords = keywords;
                         if (customerDomains != null) existing.CustomerDomains = customerDomains;
+                        if (!string.IsNullOrWhiteSpace(projectFolder)) existing.ProjectFolder = projectFolder;
                     }
                     else
                     {
@@ -221,6 +222,7 @@ namespace METools.Tasks
                             DisplayName = displayName,
                             Keywords = keywords,
                             CustomerDomains = customerDomains ?? new List<string>(),
+                            ProjectFolder = projectFolder ?? "",
                         });
                     }
 
