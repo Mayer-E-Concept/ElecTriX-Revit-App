@@ -177,7 +177,11 @@ namespace METools.Comments
             }
         }
 
-        public static string GetSharedFolder() => LoadLocalSettings().SharedFolder ?? "";
+        // Follows a moved folder (_FOLDER_MOVED.json, see SharedFolderMove.cs).
+        public static string GetSharedFolder() => SharedFolderMove.ResolveCached(LoadLocalSettings().SharedFolder ?? "");
+
+        // Exactly what this PC has configured, without following a move.
+        public static string GetConfiguredSharedFolder() => LoadLocalSettings().SharedFolder ?? "";
 
         public static void SetSharedFolder(string path)
         {

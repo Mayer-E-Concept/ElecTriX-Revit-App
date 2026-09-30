@@ -17,7 +17,7 @@ param(
     [string]$Notes = "",
     [switch]$Build,
     # Only for testing the script somewhere else -- UpdateChecker.cs reads the default.
-    [string]$FeedDir = "\\Database\MEC_Database\02_sabloane\01_Revit\ElecTriX-Revit-App\releases"
+    [string]$FeedDir = "\\Database\MEC_Database\08_Aplicatii\ElecTriX-Revit-App\releases"
 )
 $ErrorActionPreference = "Stop"
 $Root = $PSScriptRoot
@@ -70,4 +70,4 @@ $feed = [ordered]@{ version = $version; installer = $installerName; notes = $Not
 [System.IO.File]::WriteAllText($feedFile, ($feed | ConvertTo-Json), (New-Object System.Text.UTF8Encoding $false))
 
 Write-Host "Published $installerName (version $version) to $FeedDir"
-Write-Host "Every Revit with an older ME-Tools (2.3.7 or later, which has the update check) offers it on its next start."
+Write-Host "Every Revit with an older ME-Tools (2.3.8 or later, which has the update check) offers it on its next start."

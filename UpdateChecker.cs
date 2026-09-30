@@ -31,7 +31,7 @@ namespace METools
 {
     public static class UpdateChecker
     {
-        public const string FeedDir = @"\\Database\MEC_Database\02_sabloane\01_Revit\ElecTriX-Revit-App\releases";
+        public const string FeedDir = @"\\Database\MEC_Database\08_Aplicatii\ElecTriX-Revit-App\releases";
 
         private class Feed
         {

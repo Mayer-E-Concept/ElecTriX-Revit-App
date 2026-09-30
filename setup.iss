@@ -14,11 +14,11 @@
 ; NOTE: every Source/DestDir entry is a SINGLE line (Inno requirement).
 
 #define AppName     "ME-Tools"
-#define AppVersion  "nxs_2.3.7"
+#define AppVersion  "nxs_2.3.8"
 #define Publisher   "Mayer E-Concept SRL"
 
 ; --- adjust this absolute path to your machine if it differs ------------------
-#define ProjectDir "X:\02_sabloane\01_Revit\ElecTriX-Revit-App"
+#define ProjectDir "X:\08_Aplicatii\ElecTriX-Revit-App"
 #define OutDir      ProjectDir + "\installer_output"
 ; net8.0-windows -> Revit 2025 AND 2026 (same binary, installed to both below)
 #define Dll2025Path ProjectDir + "\bin\Release\net8.0-windows\METools.dll"
@@ -31,7 +31,7 @@
 ; If that publish command or output folder name ever changes, update
 ; NexusPublishDir below to match -- Inno just copies whatever's actually
 ; sitting there. ---------------------------------------------------------------
-#define NexusProjectDir "X:\02_sabloane\01_Revit\Meeco-Assistant"
+#define NexusProjectDir "X:\08_Aplicatii\Meeco-Assistant"
 #define NexusPublishDir NexusProjectDir + "\installer_output\nexus_publish"
 
 [Setup]

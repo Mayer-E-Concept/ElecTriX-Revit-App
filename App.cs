@@ -19,6 +19,10 @@ namespace METools
             // so the ribbon setup below stays exactly as it was.
             SplashGate.Register(app);
 
+            // The shared folder moved? Switch to the new location before any
+            // watcher below touches the old one (see SharedFolderMove.cs).
+            SharedFolderMove.CheckAtStartup(app);
+
             // -- Project Comments background notifier (silent unless a shared
             // folder is configured in the Comments tool's own settings) --------
             METools.Comments.CommentsWatcher.Register(app);

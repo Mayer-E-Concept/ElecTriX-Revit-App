@@ -142,6 +142,10 @@ namespace METools
             ["update.now"] = "Install now",
             ["update.now_sub"] = "Save your work first: the installer will ask to close Revit.",
             ["update.admin_note"] = "Windows will ask for administrator permission to install.",
+            // ── Shared folder moved (SharedFolderMove.cs) ──
+            ["folder_moved.title"] = "The shared folder has moved",
+            ["folder_moved.body_fmt"] = "The shared folder for Comments, Workboard, Activity log and Time tracker was moved by the office.\n\nOld: {0}\nNew: {1}\n\nME-Tools has switched to the new folder automatically -- nothing else to do.",
+            ["folder_moved.merged_fmt"] = "{0} file(s) that were still written to the old folder have been moved over.",
 
             // ── Ribbon tooltips ─────────────────────────────────────────────
             ["tooltip.settings"] = "ME-Tools settings: appearance, language, license, and worksets.",
@@ -1268,6 +1272,10 @@ namespace METools
             ["update.now"] = "Jetzt installieren",
             ["update.now_sub"] = "Vorher speichern: Das Setup fordert zum Schließen von Revit auf.",
             ["update.admin_note"] = "Windows fragt für die Installation nach Administratorrechten.",
+            // ── Shared folder moved (SharedFolderMove.cs) ──
+            ["folder_moved.title"] = "Der gemeinsame Ordner ist umgezogen",
+            ["folder_moved.body_fmt"] = "Der gemeinsame Ordner für Kommentare, Workboard, Aktivitätsprotokoll und Zeiterfassung wurde vom Büro verschoben.\n\nAlt: {0}\nNeu: {1}\n\nME-Tools verwendet ab jetzt automatisch den neuen Ordner -- sonst ist nichts zu tun.",
+            ["folder_moved.merged_fmt"] = "{0} Datei(en), die noch in den alten Ordner geschrieben wurden, wurden übernommen.",
 
             // ── Ribbon tooltips ─────────────────────────────────────────────
             ["tooltip.settings"] = "ME-Tools-Einstellungen: Darstellung, Sprache, Lizenz und Worksets.",
@@ -2385,6 +2393,10 @@ namespace METools
             ["update.now"] = "Instaleaza acum",
             ["update.now_sub"] = "Salvati inainte: instalarea va cere inchiderea Revit.",
             ["update.admin_note"] = "Windows va cere permisiuni de administrator pentru instalare.",
+            // ── Shared folder moved (SharedFolderMove.cs) ──
+            ["folder_moved.title"] = "Folderul comun a fost mutat",
+            ["folder_moved.body_fmt"] = "Folderul comun pentru Comentarii, Workboard, Jurnal de activitate și Pontaj a fost mutat de birou.\n\nVechi: {0}\nNou: {1}\n\nME-Tools folosește de acum automat folderul nou -- nu mai trebuie făcut nimic.",
+            ["folder_moved.merged_fmt"] = "{0} fișier(e) scrise încă în folderul vechi au fost mutate.",
 
             // ── Ribbon tooltips ─────────────────────────────────────────────
             ["tooltip.settings"] = "Setări ME-Tools: aspect, limbă, licență și worksets.",

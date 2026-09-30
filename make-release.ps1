@@ -14,7 +14,7 @@
 $ErrorActionPreference = "Stop"
 
 # ---- paths (adjust to your machine) -----------------------------------------
-$ProjectDir = "X:\02_sabloane\01_Revit\11_Revit_AddOn"
+$ProjectDir = "X:\08_Aplicatii\ElecTriX-Revit-App"
 $Csproj     = Join-Path $ProjectDir "METools.csproj"
 $OutDir     = Join-Path $ProjectDir "bin\Release\net8.0-windows"
 $Dll        = Join-Path $OutDir "METools.dll"
