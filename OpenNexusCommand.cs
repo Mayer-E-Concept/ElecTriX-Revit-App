@@ -38,8 +38,8 @@ namespace METools.Nexus
         private static readonly string[] CandidatePaths =
         {
             @"C:\Program Files\Mayer E-Concept\Nexus\Nexus.exe",
-            @"X:\08_Aplicatii\Meeco-Assistant\bin\Release\net8.0-windows10.0.22621.0\Nexus.exe",
-            @"X:\08_Aplicatii\Meeco-Assistant\bin\Debug\net8.0-windows10.0.22621.0\Nexus.exe",
+            @"X:\08_Aplicatii\Nexus\bin\Release\net8.0-windows10.0.22621.0\Nexus.exe",
+            @"X:\08_Aplicatii\Nexus\bin\Debug\net8.0-windows10.0.22621.0\Nexus.exe",
         };
 
         [DllImport("user32.dll")]
