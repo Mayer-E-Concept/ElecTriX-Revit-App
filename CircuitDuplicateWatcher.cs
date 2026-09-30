@@ -93,6 +93,11 @@ namespace METools.CircuitDuplicate
 
                 if (matches.Count == 0) return;
 
+                // Read fresh (not cached) so toggling it on Circuit Tagger's
+                // Stats tab takes effect immediately. Only reached when a
+                // duplicate was actually detected, so the file read is rare.
+                if (!CircuitTaggerSettings.Load().DuplicatePromptEnabled) return;
+
                 _promptOpen = true;
                 var prompt = new CircuitDuplicatePromptWindow(oldBuilding ?? "", oldApartment ?? "", matches.Count);
                 prompt.Closed += (s, e2) => _promptOpen = false;

@@ -91,6 +91,21 @@ namespace METools.Tasks
 
         private string CurrentUsername => _revitApp?.Username ?? Environment.UserName;
 
+        private const double DefaultHeight = 720;
+
+        // Header controls docked on top, scroller filling the rest -- the
+        // scroller has to be a DockPanel/Grid fill child (not a StackPanel
+        // child) for it to get a finite height and actually scroll.
+        private static DockPanel Fill(StackPanel header, ScrollViewer scroller)
+        {
+            var dock = new DockPanel { Margin = header.Margin, LastChildFill = true };
+            header.Margin = new Thickness(0);
+            DockPanel.SetDock(header, Dock.Top);
+            dock.Children.Add(header);
+            dock.Children.Add(scroller);
+            return dock;
+        }
+
         public static void ShowOrActivate(UIApplication uiApp)
         {
             if (_instance != null && _instance.IsLoaded)
@@ -117,6 +132,21 @@ namespace METools.Tasks
             _projectNames = BuildDisplayNameLookup(_registryEntries);
 
             InitWindow("Workboard", 600);
+
+            // Fixed opening height instead of the base class's
+            // SizeToContent pass. That pass measured whichever tab was
+            // visible when the first (still empty) data arrived -- always
+            // the short Requests tab -- so switching to Tasks/Projects
+            // opened into a window too small to show them, and the 30s
+            // auto-refresh kept snapping a manually-resized window back.
+            // Each tab's list is now the fill element of its own DockPanel
+            // (see Fill below), so the lists scroll inside whatever height
+            // the window has rather than dictating it.
+            var wa = SystemParameters.WorkArea;
+            SizeToContent = SizeToContent.Manual;
+            Height    = Math.Min(DefaultHeight, wa.Height - 40);
+            MinHeight = Math.Min(360, Height);
+
             BuildStatusBar("", "Revit 2025");
 
             // Outer tab row -- added first, so it's not the last child
@@ -222,12 +252,10 @@ namespace METools.Tasks
             var scroller = new ScrollViewer
             {
                 Content = _listPanel,
-                MaxHeight = 480,
                 VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
             };
-            content.Children.Add(scroller);
 
-            return content;
+            return Fill(content, scroller);
         }
 
         // Grouped by registered project (Unassigned first, since those are
@@ -242,16 +270,15 @@ namespace METools.Tasks
             var content = new StackPanel { Margin = new Thickness(16, 12, 16, 12) };
             content.Children.Add(ActionBtn("Refresh", true, RequestRefresh));
 
-            _projectsListPanel = new StackPanel { Margin = new Thickness(0, 10, 0, 0) };
+            _projectsListPanel = new StackPanel();
             var scroller = new ScrollViewer
             {
                 Content = _projectsListPanel,
-                MaxHeight = 480,
+                Margin = new Thickness(0, 10, 0, 0),
                 VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
             };
-            content.Children.Add(scroller);
 
-            return content;
+            return Fill(content, scroller);
         }
 
         private void RenderProjectsTab(List<ProjectTask> allTasks)
@@ -359,12 +386,11 @@ namespace METools.Tasks
             _commentsListPanel = new StackPanel();
             var scroller = new ScrollViewer
             {
-                Content = _commentsListPanel, MaxHeight = 380,
+                Content = _commentsListPanel,
                 VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
             };
-            panel.Children.Add(scroller);
 
-            return panel;
+            return Fill(panel, scroller);
         }
 
         private void ToggleIncludeReference()
@@ -839,8 +865,6 @@ namespace METools.Tasks
             }
 
             RenderProjectsTab(allTasks);
-
-            ResizeToFitContent();
         }
 
         // collapsible=true is used specifically for rows shown under a

@@ -23,6 +23,9 @@ namespace METools.FamilyPlacer
         public string TagFamilyName { get; set; } = "";
         public string TagTypeName   { get; set; } = "";
 
+        // Stats tab toggle: whether CircuitDuplicateWatcher asks for a new
+        // House/Apartment when already-tagged elements get copied/pasted.
+        public bool DuplicatePromptEnabled { get; set; } = true;
 
         // Secondary label -- Graphics
         public string SubLabelFontName      { get; set; } = "Arial Narrow";
@@ -91,6 +94,7 @@ namespace METools.FamilyPlacer
             sb.AppendLine($"  \"StackGapMm\": {d.StackGapMm.ToString(ic)},");
             sb.AppendLine($"  \"TagFamilyName\": \"{Esc(d.TagFamilyName)}\",");
             sb.AppendLine($"  \"TagTypeName\": \"{Esc(d.TagTypeName)}\",");
+            sb.AppendLine($"  \"DuplicatePromptEnabled\": {(d.DuplicatePromptEnabled ? "true" : "false")},");
             sb.AppendLine($"  \"SubLabelFontName\": \"{Esc(d.SubLabelFontName)}\",");
             sb.AppendLine($"  \"SubLabelFontSizeMm\": {d.SubLabelFontSizeMm.ToString(ic)},");
             sb.AppendLine($"  \"SubLabelColorHex\": \"{Esc(d.SubLabelColorHex)}\",");
@@ -128,6 +132,7 @@ namespace METools.FamilyPlacer
                 if (TryReadString(trim, "SubLabelFontName",     out var s))   d.SubLabelFontName     = s;
                 if (TryReadString(trim, "SubLabelColorHex",     out var s2))  d.SubLabelColorHex     = s2;
                 if (TryReadString(trim, "SubLabelHAlign",       out var s3))  d.SubLabelHAlign       = s3;
+                if (TryReadBool(trim,   "DuplicatePromptEnabled", out var dp)) d.DuplicatePromptEnabled = dp;
                 if (TryReadBool(trim,   "SubLabelBold",         out var b))   d.SubLabelBold         = b;
                 if (TryReadBool(trim,   "SubLabelItalic",       out var b2))  d.SubLabelItalic       = b2;
                 if (TryReadBool(trim,   "SubLabelUnderline",    out var b3))  d.SubLabelUnderline    = b3;

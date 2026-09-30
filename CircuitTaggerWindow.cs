@@ -404,6 +404,25 @@ namespace METools.FamilyPlacer
             sp.Children.Add(hdrRow);
 
             sp.Children.Add(InfoBox(S._("circuittagger.stats_hint")));
+
+            // Turns off the "copied tagged elements -- pick a new
+            // House/Apartment" prompt (CircuitDuplicateWatcher). Saved
+            // straight away, no Save button, since it's a single toggle.
+            var cbDupPrompt = new CheckBox
+            {
+                Content = S._("circuittagger.dup_prompt_enabled"),
+                ToolTip = S._("circuittagger.dup_prompt_enabled_tip"),
+                IsChecked = _settingsData?.DuplicatePromptEnabled ?? true,
+                Foreground = MeToolsTheme.BrText, Margin = new Thickness(0, 0, 0, 8),
+            };
+            cbDupPrompt.Click += (s, e) =>
+            {
+                _settingsData = _settingsData ?? new CircuitTaggerSettingsData();
+                _settingsData.DuplicatePromptEnabled = cbDupPrompt.IsChecked == true;
+                CircuitTaggerSettings.Save(_settingsData);
+            };
+            sp.Children.Add(cbDupPrompt);
+
             var container = new Border
             {
                 BorderBrush = MeToolsTheme.BrBorder, BorderThickness = new Thickness(1),
