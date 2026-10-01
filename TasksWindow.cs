@@ -150,7 +150,7 @@ namespace METools.Tasks
             Height    = Math.Min(DefaultHeight, wa.Height - 40);
             MinHeight = Math.Min(360, Height);
 
-            BuildStatusBar("", "Revit 2025");
+            BuildStatusBar("");
 
             // Outer tab row -- added first, so it's not the last child
             // RootDock sees (see file header on DockPanel ordering).

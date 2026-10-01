@@ -19,6 +19,10 @@ namespace METools
             // so the ribbon setup below stays exactly as it was.
             SplashGate.Register(app);
 
+            // "Revit 2025" / "Revit 2027" in the windows' status bars -- the
+            // version actually running, now that one installer serves both.
+            try { MeToolsWindowBase.RevitVersionLabel = "Revit " + app.ControlledApplication.VersionNumber; } catch { }
+
             // The shared folder moved? Switch to the new location before any
             // watcher below touches the old one (see SharedFolderMove.cs).
             SharedFolderMove.CheckAtStartup(app);
@@ -348,17 +352,21 @@ namespace METools
             // brings its window to the front. "Nexus" is a product name, not
             // translated, so unlike the buttons above this one skips
             // RibbonLanguageWatcher and uses a plain literal for its label.
-            var nexusBtn = new PushButtonData(
-                "Nexus", "Assistant", dll,
-                "METools.Nexus.OpenNexusCommand")
+            // Only when the assistant was installed (it's optional in setup).
+            if (METools.Nexus.OpenNexusCommand.IsInstalled)
             {
-                ToolTip         = "Open Nexus, the AI assistant for Tasks, Comments, the project database, and (when the AI Connector is running) live Revit access.",
-                LongDescription = $"Nexus -- {VENDOR}\n\nA standalone assistant that can read and act on Tasks and Comments, browse the shared project database, and reach into a live Revit session through Nonica's AI Connector when it's running.\n\nOpens as its own window -- if it's already running, this brings it to the front instead of starting a second copy.",
-                Image           = LoadIcon("icon_nexus_light_16.png"),
-                LargeImage      = LoadIcon("icon_nexus_light_32.png"),
-            };
-            var nexusButton = panelTeam.AddItem(nexusBtn) as PushButton;
-            RibbonThemeWatcher.Register(nexusButton, "icon_nexus");
+                var nexusBtn = new PushButtonData(
+                    "Nexus", "Assistant", dll,
+                    "METools.Nexus.OpenNexusCommand")
+                {
+                    ToolTip         = "Open Nexus, the AI assistant for Tasks, Comments, the project database, and (when the AI Connector is running) live Revit access.",
+                    LongDescription = $"Nexus -- {VENDOR}\n\nA standalone assistant that can read and act on Tasks and Comments, browse the shared project database, and reach into a live Revit session through Nonica's AI Connector when it's running.\n\nOpens as its own window -- if it's already running, this brings it to the front instead of starting a second copy.",
+                    Image           = LoadIcon("icon_nexus_light_16.png"),
+                    LargeImage      = LoadIcon("icon_nexus_light_32.png"),
+                };
+                var nexusButton = panelTeam.AddItem(nexusBtn) as PushButton;
+                RibbonThemeWatcher.Register(nexusButton, "icon_nexus");
+            }
 
             // Apply the correct light/dark icon set right now based on Revit's
             // current theme, and subscribe so it stays in sync if the user

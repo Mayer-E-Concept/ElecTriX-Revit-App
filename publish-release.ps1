@@ -45,12 +45,14 @@ $installer = Join-Path $Root "installer_output\$installerName"
 if (-not (Test-Path $installer)) { throw "Installer not found: $installer -- build it first (or use -Build)" }
 
 # The installer must contain the current DLL, and that DLL must carry this version.
-$dll = Join-Path $Root "bin\Release\net8.0-windows\METools.dll"
-if (Test-Path $dll) {
+# Both builds: net8.0-windows (Revit 2025) and net10.0-windows (Revit 2027).
+foreach ($tfm in "net8.0-windows", "net10.0-windows") {
+    $dll = Join-Path $Root "bin\Release\$tfm\METools.dll"
+    if (-not (Test-Path $dll)) { throw "$tfm\METools.dll is missing -- build Release first (or use -Build)" }
     $dllVersion = (Get-Item $dll).VersionInfo.FileVersion
-    if (-not $dllVersion.StartsWith($version)) { throw "METools.dll is version $dllVersion, setup.iss says $version -- rebuild first" }
+    if (-not $dllVersion.StartsWith($version)) { throw "$tfm\METools.dll is version $dllVersion, setup.iss says $version -- rebuild first" }
     if ((Get-Item $installer).LastWriteTime -lt (Get-Item $dll).LastWriteTime) {
-        throw "The installer is older than METools.dll -- recompile setup.iss (or use -Build)"
+        throw "The installer is older than $tfm\METools.dll -- recompile setup.iss (or use -Build)"
     }
 }
 

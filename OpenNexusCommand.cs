@@ -42,6 +42,10 @@ namespace METools.Nexus
             @"X:\08_Aplicatii\Nexus\bin\Debug\net8.0-windows10.0.22621.0\Nexus.exe",
         };
 
+        // false when the assistant was left out at install time -- App.cs then
+        // doesn't put the Assistant button on the ribbon at all.
+        public static bool IsInstalled => Array.Exists(CandidatePaths, File.Exists);
+
         [DllImport("user32.dll")]
         private static extern bool SetForegroundWindow(IntPtr hWnd);
 

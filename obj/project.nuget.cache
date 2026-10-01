@@ -1,8 +1,15 @@
 {
   "version": 2,
-  "dgSpecHash": "4r36ASoiF2o=",
+  "dgSpecHash": "7wLJAbM0yII=",
   "success": true,
   "projectFilePath": "X:\\08_Aplicatii\\ElecTriX-Revit-App\\METools.csproj",
-  "expectedPackageFiles": [],
+  "expectedPackageFiles": [
+    "C:\\Users\\StefanPicu\\.nuget\\packages\\nice3point.revit.api.adwindows\\2027.0.0\\nice3point.revit.api.adwindows.2027.0.0.nupkg.sha512",
+    "C:\\Users\\StefanPicu\\.nuget\\packages\\nice3point.revit.api.revitapi\\2027.0.0\\nice3point.revit.api.revitapi.2027.0.0.nupkg.sha512",
+    "C:\\Users\\StefanPicu\\.nuget\\packages\\nice3point.revit.api.revitapiui\\2027.0.0\\nice3point.revit.api.revitapiui.2027.0.0.nupkg.sha512",
+    "C:\\Users\\StefanPicu\\.nuget\\packages\\microsoft.netcore.app.ref\\8.0.31\\microsoft.netcore.app.ref.8.0.31.nupkg.sha512",
+    "C:\\Users\\StefanPicu\\.nuget\\packages\\microsoft.windowsdesktop.app.ref\\8.0.31\\microsoft.windowsdesktop.app.ref.8.0.31.nupkg.sha512",
+    "C:\\Users\\StefanPicu\\.nuget\\packages\\microsoft.aspnetcore.app.ref\\8.0.31\\microsoft.aspnetcore.app.ref.8.0.31.nupkg.sha512"
+  ],
   "logs": []
 }

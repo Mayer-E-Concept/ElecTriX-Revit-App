@@ -343,9 +343,13 @@ namespace METools
             Close();
         }
 
+        // The running Revit ("Revit 2025" / "Revit 2027"), set by App.OnStartup.
+        public static string RevitVersionLabel = "Revit";
+
         // ── StatusBar (immer gleich) ───────────────────────────────────────
-        protected void BuildStatusBar(string left = "", string right = "Revit 2025")
+        protected void BuildStatusBar(string left = "", string right = null)
         {
+            right ??= RevitVersionLabel;
             StatusBarGrid = new Grid
             {
                 Height = 26,

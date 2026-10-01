@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- ME-Tools fuer Autodesk Revit 2027 - Mayer E-Concept SRL -->
+<!-- Installed to C:\Program Files\Autodesk\Revit\Addins\2027 (the all-users
+     Addins folder moved from ProgramData to Program Files with Revit 2027). -->
+<RevitAddIns>
+
+  <AddIn Type="Application">
+    <Name>ME-Tools</Name>
+    <Assembly>METools.dll</Assembly>
+    <AddInId>A1B2C3D4-E5F6-7890-ABCD-EF1234567890</AddInId>
+    <FullClassName>METools.App</FullClassName>
+    <VendorId>MAYER_E_CONCEPT</VendorId>
+    <VendorDescription>Mayer E-Concept SRL - www.mayer-econcept.ro</VendorDescription>
+  </AddIn>
+
+</RevitAddIns>

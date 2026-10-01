@@ -1,27 +1,30 @@
-; setup.iss -- ME-Tools installer (Revit 2025 + 2026)
+; setup.iss -- ME-Tools installer (Revit 2025 and/or 2027, Nexus optional)
 ; Mayer E-Concept SRL
 ; Build the installer:  open in Inno Setup 6 -> Compile   (or run ISCC.exe setup.iss)
 ;
-; Revit 2025 and 2026 both run on .NET 8 and share one compiled binary (see
-; METools.csproj's <TargetFramework>net8.0-windows</TargetFramework>) -- there
-; is nothing version-specific to choose between, so this always installs into
-; both versions' Addins folders unconditionally (previously asked the user to
-; pick 2025 and/or 2026 via a Tasks checklist; removed since that choice never
-; actually did anything -- same DLL either way, and copying the unused pair of
-; files into a folder for a Revit version that isn't installed is harmless).
+; Two builds of the same add-in (see METools.csproj):
+;   Revit 2025 -> bin\Release\net8.0-windows\METools.dll   -> ProgramData\Autodesk\Revit\Addins\2025
+;   Revit 2027 -> bin\Release\net10.0-windows\METools.dll  -> Program Files\Autodesk\Revit\Addins\2027
+;                 (Revit 2027 moved the all-users Addins folder to Program Files)
+; Each version, and the Nexus assistant, is its own checkbox. On a first install
+; (or an update from an installer without these choices) the versions whose
+; Revit is installed on this PC are preselected; after that the last choice is
+; kept, also for the silent auto-update. Unticking something removes it.
+; Revit 2026 is no longer offered; an existing 2026 copy is removed.
 ; Build Release before compiling this.
 ;
 ; NOTE: every Source/DestDir entry is a SINGLE line (Inno requirement).
 
 #define AppName     "ME-Tools"
-#define AppVersion  "nxs_2.4.1"
+#define AppVersion  "nxs_2.4.2"
 #define Publisher   "Mayer E-Concept SRL"
 
 ; --- adjust this absolute path to your machine if it differs ------------------
 #define ProjectDir "X:\08_Aplicatii\ElecTriX-Revit-App"
 #define OutDir      ProjectDir + "\installer_output"
-; net8.0-windows -> Revit 2025 AND 2026 (same binary, installed to both below)
+; net8.0-windows -> Revit 2025, net10.0-windows -> Revit 2027
 #define Dll2025Path ProjectDir + "\bin\Release\net8.0-windows\METools.dll"
+#define Dll2027Path ProjectDir + "\bin\Release\net10.0-windows\METools.dll"
 ; --------------------------------------------------------------------------------
 
 ; --- Nexus (the standalone assistant) -- a SEPARATE project, its own .exe,
@@ -62,42 +65,37 @@ CloseApplications=yes
 RestartApplications=no
 UninstallDisplayName={#AppName} {#AppVersion}
 
-; The actual "choose what to install" screen this whole change is for.
-; ElecTriX itself is Flags: fixed -- always installed, not something to
-; opt out of -- Nexus is the one genuine choice, matching what's actually
-; being asked for: everyone gets the core Revit tools, the assistant is
-; optional. Tier-based gating later (different subscription levels getting
-; different components) is a natural extension of this same mechanism --
-; whatever decides that later just needs to pre-select/deselect this
-; checkbox or pass /COMPONENTS= on a silent install, nothing structural
-; needs to change here for that to work.
+; The "choose what to install" screen: which Revit version(s), and whether
+; the Nexus assistant comes along. No [Types] presets -- the selection is
+; made in [Code] (installed Revit versions on a first install, the last
+; choice afterwards). A silent install can also pass /COMPONENTS=...
 [Components]
-Name: "electrix"; Description: "ElecTriX for Revit (core electrical/MEP tools)"; Types: full custom; Flags: fixed
-Name: "assistant"; Description: "Nexus -- AI assistant (Tasks, Comments, database access, and live Revit access when the AI Connector is running)"; Types: full
+Name: "revit2025"; Description: "ElecTriX for Revit 2025"
+Name: "revit2027"; Description: "ElecTriX for Revit 2027"
+Name: "assistant"; Description: "Nexus -- AI assistant (Requests, Tasks, shared project chats, voice, database access, and live Revit access when the AI Connector is running)"
 
 [Types]
-Name: "full"; Description: "Full installation (ElecTriX + Nexus)"
 Name: "custom"; Description: "Custom installation"; Flags: iscustom
 
 [Files]
-; -- Revit 2025 + 2026 (same .NET 8 build, installed to both unconditionally --
-; there's no per-version difference to ask the user about) -----------------
-Source: "{#Dll2025Path}"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2025"; Components: electrix; Flags: ignoreversion
-Source: "{#ProjectDir}\METools_2025.addin"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2025"; DestName: "METools.addin"; Components: electrix; Flags: ignoreversion
+; -- Revit 2025 (.NET 8 build) ----------------------------------------------
+Source: "{#Dll2025Path}"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2025"; Components: revit2025; Flags: ignoreversion
+Source: "{#ProjectDir}\METools_2025.addin"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2025"; DestName: "METools.addin"; Components: revit2025; Flags: ignoreversion
 ; Seeds the Settings > Worksets "standard list" on first install (the code reads
 ; this from [install folder]\config\standard_worksets.json, NOT %APPDATA%).
 ; onlyifdoesntexist so upgrading never overwrites a customer's own edited list.
-Source: "{#ProjectDir}\standard_worksets.json"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2025\config"; Components: electrix; Flags: ignoreversion onlyifdoesntexist
+Source: "{#ProjectDir}\standard_worksets.json"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2025\config"; Components: revit2025; Flags: ignoreversion onlyifdoesntexist
 
-Source: "{#Dll2025Path}"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2026"; Components: electrix; Flags: ignoreversion
-Source: "{#ProjectDir}\METools_2026.addin"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2026"; DestName: "METools.addin"; Components: electrix; Flags: ignoreversion
-Source: "{#ProjectDir}\standard_worksets.json"; DestDir: "{commonappdata}\Autodesk\Revit\Addins\2026\config"; Components: electrix; Flags: ignoreversion onlyifdoesntexist
+; -- Revit 2027 (.NET 10 build) -- the all-users Addins folder is in Program Files from 2027 on
+Source: "{#Dll2027Path}"; DestDir: "{commonpf}\Autodesk\Revit\Addins\2027"; Components: revit2027; Flags: ignoreversion
+Source: "{#ProjectDir}\METools_2027.addin"; DestDir: "{commonpf}\Autodesk\Revit\Addins\2027"; DestName: "METools.addin"; Components: revit2027; Flags: ignoreversion
+Source: "{#ProjectDir}\standard_worksets.json"; DestDir: "{commonpf}\Autodesk\Revit\Addins\2027\config"; Components: revit2027; Flags: ignoreversion onlyifdoesntexist
 
 ; -- Project Comments: pre-fills the shared network folder so every teammate
 ; gets it working out of the box instead of typing the UNC path in by hand.
 ; onlyifdoesntexist so re-installing/upgrading never overwrites someone's own
 ; customized path (e.g. if a specific person needs a different folder).
-Source: "{#ProjectDir}\comments-settings-default.json"; DestDir: "{userappdata}\METools"; DestName: "comments-settings.json"; Components: electrix; Flags: ignoreversion onlyifdoesntexist
+Source: "{#ProjectDir}\comments-settings-default.json"; DestDir: "{userappdata}\METools"; DestName: "comments-settings.json"; Components: revit2025 revit2027; Flags: ignoreversion onlyifdoesntexist
 
 ; -- Project Health Check: bundled tag family + shared-parameter definitions,
 ; so "Fix All" can load the ME-Tools_CircuitTag family and bind the 6 Circuit
@@ -106,8 +104,8 @@ Source: "{#ProjectDir}\comments-settings-default.json"; DestDir: "{userappdata}\
 ; These ARE overwritten on every install/update (no onlyifdoesntexist) since
 ; they're app-owned assets, not user data -- if the family or parameter file
 ; is ever updated, everyone should get the new copy.
-Source: "{#ProjectDir}\Resources\ME-Tools_CircuitTag.rfa"; DestDir: "{commonappdata}\METools\Resources"; Components: electrix; Flags: ignoreversion
-Source: "{#ProjectDir}\Resources\METools_SharedParameters.txt"; DestDir: "{commonappdata}\METools\Resources"; Components: electrix; Flags: ignoreversion
+Source: "{#ProjectDir}\Resources\ME-Tools_CircuitTag.rfa"; DestDir: "{commonappdata}\METools\Resources"; Components: revit2025 revit2027; Flags: ignoreversion
+Source: "{#ProjectDir}\Resources\METools_SharedParameters.txt"; DestDir: "{commonappdata}\METools\Resources"; Components: revit2025 revit2027; Flags: ignoreversion
 
 ; -- Nexus (the assistant), only copied when that Component is selected --
 ; installed as its own standalone app, entirely separate from ElecTriX's
@@ -122,11 +120,28 @@ Source: "{#ProjectDir}\Resources\METools_SharedParameters.txt"; DestDir: "{commo
 Source: "{#NexusPublishDir}\*"; DestDir: "{commonpf}\Mayer E-Concept\Nexus"; Components: assistant; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "appsettings.json"
 Source: "{#NexusPublishDir}\appsettings.json"; DestDir: "{commonpf}\Mayer E-Concept\Nexus"; Components: assistant; Flags: ignoreversion onlyifdoesntexist
 
+; Re-running setup with something unticked removes it (Inno doesn't do that
+; on its own), and the Revit 2026 copy older versions installed is removed.
+[InstallDelete]
+Type: files; Name: "{commonappdata}\Autodesk\Revit\Addins\2025\METools.dll"; Components: not revit2025
+Type: files; Name: "{commonappdata}\Autodesk\Revit\Addins\2025\METools.addin"; Components: not revit2025
+Type: files; Name: "{commonpf}\Autodesk\Revit\Addins\2027\METools.dll"; Components: not revit2027
+Type: files; Name: "{commonpf}\Autodesk\Revit\Addins\2027\METools.addin"; Components: not revit2027
+Type: files; Name: "{commonappdata}\Autodesk\Revit\Addins\2026\METools.dll"
+Type: files; Name: "{commonappdata}\Autodesk\Revit\Addins\2026\METools.addin"
+Type: files; Name: "{commonappdata}\Autodesk\Revit\Addins\2026\config\standard_worksets.json"
+Type: dirifempty; Name: "{commonappdata}\Autodesk\Revit\Addins\2026\config"
+Type: filesandordirs; Name: "{commonpf}\Mayer E-Concept\Nexus"; Components: not assistant
+
 [UninstallDelete]
 Type: files; Name: "{commonappdata}\Autodesk\Revit\Addins\2025\METools.dll"
 Type: files; Name: "{commonappdata}\Autodesk\Revit\Addins\2025\METools.addin"
 Type: files; Name: "{commonappdata}\Autodesk\Revit\Addins\2025\config\standard_worksets.json"
 Type: dirifempty; Name: "{commonappdata}\Autodesk\Revit\Addins\2025\config"
+Type: files; Name: "{commonpf}\Autodesk\Revit\Addins\2027\METools.dll"
+Type: files; Name: "{commonpf}\Autodesk\Revit\Addins\2027\METools.addin"
+Type: files; Name: "{commonpf}\Autodesk\Revit\Addins\2027\config\standard_worksets.json"
+Type: dirifempty; Name: "{commonpf}\Autodesk\Revit\Addins\2027\config"
 Type: files; Name: "{commonappdata}\Autodesk\Revit\Addins\2026\METools.dll"
 Type: files; Name: "{commonappdata}\Autodesk\Revit\Addins\2026\METools.addin"
 Type: files; Name: "{commonappdata}\Autodesk\Revit\Addins\2026\config\standard_worksets.json"
@@ -153,7 +168,9 @@ Type: dirifempty; Name: "{commonpf}\Mayer E-Concept"
 Name: "{group}\Nexus"; Filename: "{commonpf}\Mayer E-Concept\Nexus\Nexus.exe"; WorkingDir: "{commonpf}\Mayer E-Concept\Nexus"; Components: assistant
 
 [Messages]
-WelcomeLabel2=This will install [name/ver] for Autodesk Revit 2025 and 2026.%n%nPlease close Revit before continuing.
+WelcomeLabel2=This will install [name/ver] for Autodesk Revit 2025 and/or 2027, with the Nexus assistant if you like.%n%nPlease close Revit before continuing.
+SelectComponentsDesc=Which Revit versions should get ElecTriX, and should the Nexus assistant be installed?
+SelectComponentsLabel2=Tick the Revit versions you use (the ones installed on this PC are ticked already) and whether you want the Nexus assistant. Anything you untick is removed.
 
 [Code]
 { ────────────────────────────────────────────────────────────────────────────
@@ -175,6 +192,57 @@ begin
   try WizardForm.PageDescriptionLabel.Font.Color := ClrMuted; except end;
 end;
 
+{ ── Which components start ticked ────────────────────────────────────────────
+  Inno restores the previous selection by itself -- but installers before
+  2.4.2 had a single "electrix" component, so for those (and first installs)
+  the Revit versions installed on this PC are ticked instead. Runs from
+  InitializeWizard, which also runs for the silent auto-update. }
+function RevitInstalled(Version: String): Boolean;
+begin
+  Result := FileExists(ExpandConstant('{commonpf}\Autodesk\Revit ' + Version + '\Revit.exe'));
+end;
+
+function PreviousComponents: String;
+begin
+  Result := '';
+  RegQueryStringValue(HKLM, 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{B3F2C9A4-7E61-4D8B-9C0A-2F5E1A6D4B77}_is1',
+    'Inno Setup: Selected Components', Result);
+end;
+
+procedure PreselectComponents;
+var
+  Prev: String;
+begin
+  Prev := PreviousComponents;
+  if Pos('revit20', Prev) > 0 then Exit; { chosen with this installer before -- Inno keeps it }
+
+  if RevitInstalled('2025') or not RevitInstalled('2027') then
+    WizardSelectComponents('revit2025')
+  else
+    WizardSelectComponents('!revit2025');
+  if RevitInstalled('2027') then
+    WizardSelectComponents('revit2027')
+  else
+    WizardSelectComponents('!revit2027');
+  { First install: the assistant is ticked; an update keeps whatever was chosen before. }
+  if (Prev = '') or (Pos('assistant', Prev) > 0) then
+    WizardSelectComponents('assistant')
+  else
+    WizardSelectComponents('!assistant');
+end;
+
+{ At least one Revit version, or the assistant on its own. }
+function NextButtonClick(CurPageID: Integer): Boolean;
+begin
+  Result := True;
+  if (CurPageID = wpSelectComponents) and not WizardIsComponentSelected('revit2025')
+     and not WizardIsComponentSelected('revit2027') and not WizardIsComponentSelected('assistant') then
+  begin
+    MsgBox('Please select at least one Revit version (or the Nexus assistant).', mbError, MB_OK);
+    Result := False;
+  end;
+end;
+
 procedure InitializeWizard;
 begin
   { Same hex values as MeToolsTheme.cs's dark theme, converted by hand to the
@@ -186,6 +254,7 @@ begin
 
   WizardForm.Color := ClrBg;
   ApplyTitleColors;
+  PreselectComponents;
 end;
 
 { PageNameLabel/PageDescriptionLabel get re-styled by Inno whenever the page

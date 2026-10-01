@@ -48,12 +48,16 @@ if ($Obfuscate) {
     Write-Host "2/5  Obfuscation SKIPPED (`$Obfuscate = `$false)." -ForegroundColor Yellow
 }
 
-Write-Host "3/5  Re-signing the DLL..." -ForegroundColor Cyan
-$signtool = Find-SignTool
-& $signtool sign /f $Pfx /p $PfxPass /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 $Dll
+# Both builds go into the installer: net8.0-windows (Revit 2025) and net10.0-windows (Revit 2027).
+# (Obfuscation above only covers the Revit 2025 build's path; METools.Obfuscar.xml would need the 2027 one too.)
+$Dlls = @($Dll, (Join-Path $ProjectDir "bin\Release\net10.0-windows\METools.dll"))
 
-Write-Host "4/5  Verifying signature..." -ForegroundColor Cyan
-& $signtool verify /pa $Dll
+Write-Host "3/5  Re-signing the DLLs..." -ForegroundColor Cyan
+$signtool = Find-SignTool
+foreach ($d in $Dlls) { & $signtool sign /f $Pfx /p $PfxPass /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 $d }
+
+Write-Host "4/5  Verifying signatures..." -ForegroundColor Cyan
+foreach ($d in $Dlls) { & $signtool verify /pa $d }
 
 Write-Host "5/5  Compiling installer (Inno Setup)..." -ForegroundColor Cyan
 if (-not (Test-Path $Iscc)) { throw "ISCC.exe not found. Install Inno Setup 6." }

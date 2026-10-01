@@ -245,7 +245,7 @@ namespace METools
             // one -- confirmed against FamilyPlacerWindow, which already
             // calls BuildStatusBar before adding its own main content and
             // renders correctly.
-            BuildStatusBar("", "Revit 2025");
+            BuildStatusBar("");
             RootDock.Children.Add(_fbGrid);
         }
 

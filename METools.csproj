@@ -1,13 +1,16 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <!--
-    Revit 2025 and 2026 both run on .NET 8 and share one common Revit API
-    surface, so a single compiled DLL covers both — no multi-targeting
-    needed. (Revit 2024 support was dropped; that ran on .NET Framework 4.8,
-    a genuinely different runtime that needed its own separate build.)
+    Two builds from the same code:
+      net8.0-windows  -> Revit 2025 (runs on .NET 8; linked against the local Revit 2025 install)
+      net10.0-windows -> Revit 2027 (runs on .NET 10; linked against Autodesk's 2027 API
+                         reference assemblies from NuGet, so Revit 2027 doesn't have to be
+                         installed on the build PC). Code that has to differ uses #if REVIT2027.
+    Output: bin\<Configuration>\net8.0-windows\METools.dll and ...\net10.0-windows\METools.dll.
+    (Revit 2026 was dropped from the installer; Revit 2024 earlier, which ran on .NET Framework 4.8.)
   -->
   <PropertyGroup>
-    <TargetFramework>net8.0-windows</TargetFramework>
+    <TargetFrameworks>net8.0-windows;net10.0-windows</TargetFrameworks>
     <UseWPF>true</UseWPF>
     <AssemblyName>METools</AssemblyName>
     <RootNamespace>METools</RootNamespace>
@@ -77,10 +80,22 @@
     <Message Condition="'$(_IssVersionMatch)' != ''" Text="Version synced from setup.iss: $(_IssVersionMatch)" Importance="high" />
   </Target>
 
-  <!-- Revit API references — links against a Revit 2025 install (used at
-       runtime for 2026 too). Adjust these HintPaths if your install lives
-       elsewhere. -->
-  <ItemGroup>
+  <PropertyGroup Condition="'$(TargetFramework)' == 'net10.0-windows'">
+    <DefineConstants>$(DefineConstants);REVIT2027</DefineConstants>
+  </PropertyGroup>
+
+  <!-- Revit 2027: reference-only packages (compile against them, never copied
+       into the output; Revit supplies the real DLLs at runtime). 2027.0.0, the
+       first 2027 release, so the add-in also runs on every later 2027 update. -->
+  <ItemGroup Condition="'$(TargetFramework)' == 'net10.0-windows'">
+    <PackageReference Include="Nice3point.Revit.Api.RevitAPI" Version="2027.0.0" ExcludeAssets="runtime" PrivateAssets="all" />
+    <PackageReference Include="Nice3point.Revit.Api.RevitAPIUI" Version="2027.0.0" ExcludeAssets="runtime" PrivateAssets="all" />
+    <PackageReference Include="Nice3point.Revit.Api.AdWindows" Version="2027.0.0" ExcludeAssets="runtime" PrivateAssets="all" />
+  </ItemGroup>
+
+  <!-- Revit 2025 API references — links against a Revit 2025 install.
+       Adjust these HintPaths if your install lives elsewhere. -->
+  <ItemGroup Condition="'$(TargetFramework)' == 'net8.0-windows'">
     <Reference Include="RevitAPI">
       <HintPath>C:\Program Files\Autodesk\Revit 2025\RevitAPI.dll</HintPath>
       <Private>False</Private>
@@ -126,14 +141,30 @@
   </Target>
 
   <!--
-    Nach jedem Build: DLL + addin automatisch nach ProgramData kopieren, in
-    BEIDE Revit-Versionsordner (2025 und 2026 — dieselbe Binary für beide).
+    After each build: copy DLL + .addin into the matching Revit's Addins folder
+    on this PC: the .NET 8 build into Revit 2025's, the .NET 10 build into
+    Revit 2027's (only when Revit 2027 is installed here; its all-users Addins
+    folder moved to Program Files with 2027, which needs admin rights).
   -->
-  <Target Name="DeployToRevit" AfterTargets="SignAssembly">
+  <Target Name="DeployToRevit2027" AfterTargets="SignAssembly"
+          Condition="'$(TargetFramework)' == 'net10.0-windows' and Exists('C:\Program Files\Autodesk\Revit 2027\RevitAPI.dll')">
+    <PropertyGroup>
+      <RevitAddinsDir2027>C:\Program Files\Autodesk\Revit\Addins\2027</RevitAddinsDir2027>
+    </PropertyGroup>
+    <MakeDir Directories="$(RevitAddinsDir2027)\config" ContinueOnError="true" />
+    <Copy SourceFiles="$(OutputPath)METools.dll" DestinationFolder="$(RevitAddinsDir2027)"
+          SkipUnchangedFiles="false" OverwriteReadOnlyFiles="true" ContinueOnError="true" />
+    <Copy SourceFiles="$(ProjectDir)METools_2027.addin" DestinationFiles="$(RevitAddinsDir2027)\METools.addin"
+          SkipUnchangedFiles="false" OverwriteReadOnlyFiles="true" ContinueOnError="true" />
+    <Copy SourceFiles="$(OutputPath)config\standard_worksets.json" DestinationFolder="$(RevitAddinsDir2027)\config"
+          SkipUnchangedFiles="false" OverwriteReadOnlyFiles="true" ContinueOnError="true" />
+    <Message Text="ME-Tools (Revit 2027 build) copied to $(RevitAddinsDir2027) -- if that failed above, run the build as admin or use the installer." Importance="high" />
+  </Target>
+
+  <Target Name="DeployToRevit" AfterTargets="SignAssembly" Condition="'$(TargetFramework)' == 'net8.0-windows'">
 
     <PropertyGroup>
       <RevitAddinsDir2025>C:\ProgramData\Autodesk\Revit\Addins\2025</RevitAddinsDir2025>
-      <RevitAddinsDir2026>C:\ProgramData\Autodesk\Revit\Addins\2026</RevitAddinsDir2026>
     </PropertyGroup>
 
     <!-- ── Revit 2025 ────────────────────────────────────────────────────── -->
@@ -162,28 +193,6 @@
               Text="✓ ME-Tools deployed to $(RevitAddinsDir2025)" Importance="high" />
     <Warning Condition="'$(_Dll2025Ok)' != 'true' or '$(_Addin2025Ok)' != 'true'"
              Text="Deploy to $(RevitAddinsDir2025) did NOT fully succeed (see the MSB3021 warning above for which file and why -- usually Revit 2025 is open right now, locking it). The ribbon there is still running whatever build it loaded last, not this one, until Revit is closed and this is rebuilt." />
-
-    <!-- ── Revit 2026 (same DLL, second folder) ─────────────────────────── -->
-    <MakeDir Directories="$(RevitAddinsDir2026)\Icons" ContinueOnError="true" />
-    <MakeDir Directories="$(RevitAddinsDir2026)\config" ContinueOnError="true" />
-    <Copy SourceFiles="$(OutputPath)METools.dll" DestinationFolder="$(RevitAddinsDir2026)"
-          SkipUnchangedFiles="false" OverwriteReadOnlyFiles="true" ContinueOnError="true" />
-    <PropertyGroup>
-      <_Dll2026Ok>$(MSBuildLastTaskResult)</_Dll2026Ok>
-    </PropertyGroup>
-    <Copy SourceFiles="$(ProjectDir)METools_2026.addin" DestinationFiles="$(RevitAddinsDir2026)\METools.addin"
-          SkipUnchangedFiles="false" OverwriteReadOnlyFiles="true" ContinueOnError="true" />
-    <PropertyGroup>
-      <_Addin2026Ok>$(MSBuildLastTaskResult)</_Addin2026Ok>
-    </PropertyGroup>
-    <Copy SourceFiles="@(EmbeddedResource)" DestinationFolder="$(RevitAddinsDir2026)\Icons"
-          SkipUnchangedFiles="false" OverwriteReadOnlyFiles="true" ContinueOnError="true" />
-    <Copy SourceFiles="$(OutputPath)config\standard_worksets.json" DestinationFolder="$(RevitAddinsDir2026)\config"
-          SkipUnchangedFiles="false" OverwriteReadOnlyFiles="true" ContinueOnError="true" />
-    <Message Condition="'$(_Dll2026Ok)' == 'true' and '$(_Addin2026Ok)' == 'true'"
-              Text="✓ ME-Tools also deployed to $(RevitAddinsDir2026)" Importance="high" />
-    <Warning Condition="'$(_Dll2026Ok)' != 'true' or '$(_Addin2026Ok)' != 'true'"
-             Text="Deploy to $(RevitAddinsDir2026) did NOT fully succeed (see the MSB3021 warning above for which file and why -- usually Revit 2026 is open right now, locking it). The ribbon there is still running whatever build it loaded last, not this one, until Revit is closed and this is rebuilt." />
 
   </Target>
 
