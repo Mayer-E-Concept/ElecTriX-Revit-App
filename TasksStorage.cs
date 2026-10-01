@@ -294,6 +294,7 @@ namespace METools.Tasks
                 }
 
                 task.AssignedTo = currentUser;
+                task.AssignedBy = currentUser;
                 task.AssignedAtUtc = DateTime.UtcNow;
                 task.Status = "assigned";
                 resultClaimedBy = currentUser;
@@ -327,6 +328,7 @@ namespace METools.Tasks
                 }
 
                 task.AssignedTo = null;
+                task.AssignedBy = null;
                 task.AssignedAtUtc = null;
                 task.Status = "unassigned";
             }, out error);

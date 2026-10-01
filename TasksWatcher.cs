@@ -82,6 +82,33 @@ namespace METools.Tasks
                 {
                     try
                     {
+                        // Revit name <-> Windows login, for Nexus (see TaskAssignments.cs).
+                        if (!_userRecorded && !string.IsNullOrWhiteSpace(me))
+                        {
+                            _userRecorded = true;
+                            try { TaskAssignments.RecordUser(me); } catch { }
+                        }
+
+                        // Hand-overs first: someone wants to give this user a request...
+                        var handover = TaskAssignments.PendingFor(me).FirstOrDefault(a => !_shownIds.ContainsKey("as:" + a.Id));
+                        if (handover != null && _shownIds.TryAdd("as:" + handover.Id, 0))
+                        {
+                            var handoverTask = TasksStorage.LoadAll(handover.ProjectId).Find(t => t.Id == handover.TaskId);
+                            if (handoverTask != null && handoverTask.Status != "done")
+                            {
+                                dispatcher.Invoke(() => ShowAssignment(handover, false, handoverTask));
+                                return;
+                            }
+                        }
+                        // ...or answered one this user asked for (one per check, marked as seen).
+                        var outcome = TaskAssignments.OutcomesFor(me).FirstOrDefault(a => !_shownIds.ContainsKey("as:" + a.Id));
+                        if (outcome != null && _shownIds.TryAdd("as:" + outcome.Id, 0))
+                        {
+                            TaskAssignments.MarkSeen(new[] { outcome.Id });
+                            dispatcher.Invoke(() => ShowAssignment(outcome, true, null));
+                            return;
+                        }
+
                         var all = TasksStorage.LoadAllAcrossProjects(out _);
                         var now = DateTime.UtcNow;
 
@@ -106,6 +133,19 @@ namespace METools.Tasks
                     }
                     catch { }
                 });
+            }
+            catch { }
+        }
+
+        private static bool _userRecorded;
+
+        private static void ShowAssignment(AssignmentRequest a, bool isOutcome, ProjectTask task)
+        {
+            try
+            {
+                if (CommentsStorage.GetSoundEnabled())
+                    try { System.Media.SystemSounds.Asterisk.Play(); } catch { }
+                new AssignmentPopupWindow(a, isOutcome, task).Show();
             }
             catch { }
         }

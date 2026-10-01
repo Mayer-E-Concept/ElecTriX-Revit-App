@@ -89,6 +89,9 @@ namespace METools.Tasks
         // Requests tab's own flat list never consults this at all.
         private readonly HashSet<string> _expandedTaskIds = new HashSet<string>();
 
+        // Pending hand-overs by task id (see TaskAssignments.cs), reloaded with every list refresh.
+        private Dictionary<string, AssignmentRequest> _pendingByTask = new Dictionary<string, AssignmentRequest>();
+
         private string CurrentUsername => _revitApp?.Username ?? Environment.UserName;
 
         private const double DefaultHeight = 720;
@@ -806,6 +809,7 @@ namespace METools.Tasks
             _lastTasks = allTasks;
             _lastStats = stats;
             _lastMessage = message;
+            try { _pendingByTask = TaskAssignments.PendingByTask(); } catch { _pendingByTask = new Dictionary<string, AssignmentRequest>(); }
 
             _registryEntries = TasksStorage.LoadProjectRegistry();
             _projectNames = BuildDisplayNameLookup(_registryEntries);
@@ -934,14 +938,47 @@ namespace METools.Tasks
             var isMine = string.Equals(task.AssignedTo, CurrentUsername, StringComparison.OrdinalIgnoreCase);
             if (!string.IsNullOrWhiteSpace(task.AssignedTo))
             {
+                var by = !string.IsNullOrWhiteSpace(task.AssignedBy) && !string.Equals(task.AssignedBy, task.AssignedTo, StringComparison.OrdinalIgnoreCase)
+                    ? $" (by {task.AssignedBy})" : "";
                 sp.Children.Add(new TextBlock
                 {
-                    Text = task.Status == "done" ? $"Done ({task.AssignedTo})" : $"Assigned to {task.AssignedTo}",
+                    Text = task.Status == "done" ? $"Done ({task.AssignedTo})" : $"Assigned to {task.AssignedTo}{by}",
                     FontSize = 10.5,
                     FontWeight = FontWeights.Medium,
                     Foreground = isMine ? MeToolsTheme.BrActiveFg : MeToolsTheme.BrMuted,
                     Margin = new Thickness(0, 0, 0, 6),
                 });
+            }
+
+            // Handed over (from Nexus), waiting for the other person's answer.
+            _pendingByTask.TryGetValue(task.Id, out var pending);
+            var pendingForMe = pending != null && string.Equals(pending.To, CurrentUsername, StringComparison.OrdinalIgnoreCase);
+            if (pending != null && task.Status != "done")
+            {
+                sp.Children.Add(new TextBlock
+                {
+                    Text = pendingForMe ? $"⏳ {pending.By} wants to hand this to you" : $"⏳ Waiting for {pending.To} to accept (asked by {pending.By})",
+                    FontSize = 10.5, FontWeight = FontWeights.Medium, TextWrapping = TextWrapping.Wrap,
+                    Foreground = pendingForMe ? MeToolsTheme.BrAccent : MeToolsTheme.BrMuted,
+                    Margin = new Thickness(0, 0, 0, 6),
+                });
+                if (pendingForMe)
+                {
+                    var answerRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 8) };
+                    answerRow.Children.Add(ActionBtn("Accept", false, () =>
+                    {
+                        if (!TaskAssignments.Accept(pending, out var err)) MessageBox.Show(err, "Workboard");
+                        RequestRefresh();
+                    }));
+                    answerRow.Children.Add(new Border { Width = 8 });
+                    answerRow.Children.Add(ActionBtn("Decline…", true, () =>
+                    {
+                        var popup = new AssignmentPopupWindow(pending, false, task) { Answered = () => Dispatcher.Invoke(RequestRefresh) };
+                        popup.Show();
+                        popup.ShowDeclineReason();
+                    }));
+                    sp.Children.Add(answerRow);
+                }
             }
 
             if (collapsible && !isExpanded)

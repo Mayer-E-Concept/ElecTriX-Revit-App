@@ -44,12 +44,20 @@ namespace METools.Tasks
         public List<string> BlockedAttachments { get; set; } = new List<string>();
         public string Status { get; set; } = "unassigned"; // unassigned | assigned | done
         public string AssignedTo { get; set; }
+        // Who handed it over (Nexus writes this too) -- was missing here, so
+        // every claim/done from the Workboard used to erase it.
+        public string AssignedBy { get; set; }
         public DateTime? AssignedAtUtc { get; set; }
         public string SourceMessageId { get; set; } = "";
 
         // Revit-side-only fields -- see file header.
         public string ReferencedElementId { get; set; } = "";
         public string ReferencedSummary { get; set; } = "";
+
+        // Fields another app (Nexus, MailBridge) added that this version
+        // doesn't know yet: read in and written back unchanged instead of
+        // being dropped on every save -- same as MailBridge's MailTask.
+        [JsonExtensionData] public Dictionary<string, JsonElement> Extra { get; set; }
     }
 
     // Root object of the shared JSON file -- wrapping the list, not a bare
@@ -58,6 +66,7 @@ namespace METools.Tasks
     public class TasksFile
     {
         public List<ProjectTask> Tasks { get; set; } = new List<ProjectTask>();
+        [JsonExtensionData] public Dictionary<string, JsonElement> Extra { get; set; }
     }
 
     // One registry entry in METools_ProjectRegistry.json -- written here
